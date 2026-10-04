@@ -694,6 +694,8 @@
 	"plusMenu.askApprovalDesc": "各ツール呼び出しの実行前に確認",
 	"plusMenu.autoApprove": "自動承認",
 	"plusMenu.autoApproveDesc": "安全な操作は承認、リスクのあるものは確認",
+	"plusMenu.grokAutoReview": "自動レビュー",
+	"plusMenu.grokAutoReviewDesc": "安全な操作は実行し、リスクのある操作は確認せずに拒否",
 	"plusMenu.fullAccess": "フルアクセス",
 	"plusMenu.fullAccessDesc": "すべてのツール呼び出しを確認なしで実行",
 	"plusMenu.attachFiles": "ファイルを添付",

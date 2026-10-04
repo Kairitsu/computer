@@ -694,6 +694,8 @@
 	"plusMenu.askApprovalDesc": "Подтверждать каждый вызов инструмента перед выполнением",
 	"plusMenu.autoApprove": "Автоодобрение",
 	"plusMenu.autoApproveDesc": "Одобрять безопасные действия, спрашивать о рискованных",
+	"plusMenu.grokAutoReview": "Автопроверка",
+	"plusMenu.grokAutoReviewDesc": "Безопасные действия выполняются, рискованные отклоняются без запроса",
 	"plusMenu.fullAccess": "Полный доступ",
 	"plusMenu.fullAccessDesc": "Все вызовы выполняются без подтверждения",
 	"plusMenu.attachFiles": "Прикрепить файлы",

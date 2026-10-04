@@ -164,6 +164,9 @@
 	let approvalChipEl: HTMLButtonElement | undefined = $state();
 	let workspaceMenuOpen = $state(false);
 	let approvalMenuOpen = $state(false);
+	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
+	// Grok's auto mode is its auto-review: risky calls are refused rather than asked about.
+	const grokSelected = $derived(selectedChatModel?.agent_id === 'grok');
 	const approvalModes = $derived([
 		{
 			value: 'ask' as ToolApprovalMode,
@@ -172,8 +175,8 @@
 		},
 		{
 			value: 'auto' as ToolApprovalMode,
-			label: $t('plusMenu.autoApprove'),
-			desc: $t('plusMenu.autoApproveDesc')
+			label: $t(grokSelected ? 'plusMenu.grokAutoReview' : 'plusMenu.autoApprove'),
+			desc: $t(grokSelected ? 'plusMenu.grokAutoReviewDesc' : 'plusMenu.autoApproveDesc')
 		},
 		{
 			value: 'full' as ToolApprovalMode,
@@ -188,7 +191,6 @@
 	const workspaceLabel = $derived(
 		workspace ? getPathDisplayName(workspace, 'workspace') : $t('sidebar.defaultWorkspace')
 	);
-	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
 	const modelContextWindow = $derived(selectedChatModel?.context_window);
 	// A window the agent CLI does not offer is not sent to it, so the CLI default applies.
 	const usageContextWindow = $derived(

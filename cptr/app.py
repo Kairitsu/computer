@@ -106,6 +106,13 @@ async def lifespan(app: FastAPI):
             await cancel_all_async_subagents(reason="shutdown")
         except Exception:
             pass
+        # Stop the Grok processes chats keep between turns.
+        try:
+            from cptr.utils.agents.grok import close_all_grok_sessions
+
+            await close_all_grok_sessions()
+        except Exception:
+            pass
         # Clean up browser sessions and launched Chrome used by agent tools.
         try:
             from cptr.utils.browser.session import session_manager

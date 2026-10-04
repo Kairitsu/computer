@@ -1033,7 +1033,8 @@ async def delete_chat(request: Request, chat_id: str):
             pass
     else:
         await asyncio.to_thread(chat_file.unlink, True)  # missing_ok=True
-    for child in await Chat.get_internal_descendants(chat_id):
+    children = await Chat.get_internal_descendants(chat_id)
+    for child in children:
         child_workspace = (child.meta or {}).get("workspace")
         child_file = chat_directory(child_workspace) / f"{child.id}.json"
         if child_workspace:
@@ -1043,6 +1044,15 @@ async def delete_chat(request: Request, chat_id: str):
                 pass
         else:
             await asyncio.to_thread(child_file.unlink, True)
+
+    # Stop the Grok processes these chats kept between turns.
+    from cptr.utils.agents.grok import close_grok_session
+
+    for owner in (chat, *children):
+        for session in ((owner.meta or {}).get("agent_sessions") or {}).values():
+            if isinstance(session, dict) and session.get("agent") == "grok":
+                if isinstance(session.get("session_id"), str):
+                    await close_grok_session(session["session_id"])
 
     await Chat.delete(chat_id)
     from cptr.socket.main import emit_to_user

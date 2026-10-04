@@ -694,6 +694,8 @@
 	"plusMenu.askApprovalDesc": "Jeden Tool-Aufruf vor der Ausführung bestätigen",
 	"plusMenu.autoApprove": "Automatisch genehmigen",
 	"plusMenu.autoApproveDesc": "Sichere Aktionen genehmigen, bei riskanten nachfragen",
+	"plusMenu.grokAutoReview": "Automatische Prüfung",
+	"plusMenu.grokAutoReviewDesc": "Sichere Aktionen laufen, riskante werden ohne Nachfrage abgelehnt",
 	"plusMenu.fullAccess": "Vollzugriff",
 	"plusMenu.fullAccessDesc": "Alle Tool-Aufrufe ohne Bestätigung ausführen",
 	"plusMenu.attachFiles": "Dateien anhängen",

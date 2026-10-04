@@ -694,6 +694,8 @@
 	"plusMenu.askApprovalDesc": "Confirmer chaque appel d'outil avant son exécution",
 	"plusMenu.autoApprove": "Approbation automatique",
 	"plusMenu.autoApproveDesc": "Approuver les actions sûres, demander pour les risquées",
+	"plusMenu.grokAutoReview": "Revue automatique",
+	"plusMenu.grokAutoReviewDesc": "Les actions sûres s'exécutent ; les risquées sont refusées sans demander",
 	"plusMenu.fullAccess": "Accès complet",
 	"plusMenu.fullAccessDesc": "Tous les appels s'exécutent sans confirmation",
 	"plusMenu.attachFiles": "Joindre des fichiers",

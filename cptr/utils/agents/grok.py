@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import suppress
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+from cptr.env import GROK_IDLE_TIMEOUT_SECONDS, GROK_MAX_IDLE_PROCESSES
 from cptr.utils.agents.attachments import PreparedAgentAttachments
 from cptr.utils.agents.acp import (
     ACP_PERMISSION_METHOD,
@@ -35,6 +38,9 @@ XAI_EXIT_PLAN_MODE_METHODS = frozenset({"_x.ai/exit_plan_mode", "x.ai/exit_plan_
 XAI_EXTENSION_REQUESTS = XAI_ASK_USER_QUESTION_METHODS | XAI_EXIT_PLAN_MODE_METHODS
 # Carries Grok's per-model-call usage and auto-compaction progress.
 XAI_SESSION_NOTIFICATIONS = frozenset({"_x.ai/session_notification", "x.ai/session_notification"})
+XAI_COMPACT_METHOD = "_x.ai/compact_conversation"
+# Grok's default `[session] auto_compact_threshold_percent`.
+GROK_AUTO_COMPACT_PERCENT = 85
 
 PLAN_APPROVE_LABEL = "Approve"
 PLAN_KEEP_PLANNING_LABEL = "Keep planning"
@@ -370,6 +376,143 @@ async def _apply_session_settings(
     return meta["contextWindow"] if meta else options.get("default_context_window")
 
 
+# ── One live `grok agent` process per chat ──────────────────
+#
+# Grok tracks how full its context window is inside the process. A process that only
+# reloads the session (session/load) starts that count near zero, so Grok's turn-start
+# auto-compaction never fires. Keeping each chat's process between turns keeps the
+# count; idle processes are closed after GROK_IDLE_TIMEOUT_SECONDS and beyond the
+# GROK_MAX_IDLE_PROCESSES most recently used ones, since each holds its MCP servers.
+
+
+@dataclass
+class _LiveGrok:
+    client: AcpClient
+    # Launch inputs and the permission mode, which Grok only takes at session start.
+    key: tuple[Any, ...]
+    settings: tuple[Any, ...] | None = None
+    context_window: int | None = None
+    last_used: float = field(default_factory=time.monotonic)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def alive(self) -> bool:
+        proc = self.client.proc
+        return proc is not None and proc.returncode is None
+
+
+_live_sessions: dict[str, _LiveGrok] = {}
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _close_live(session_id: str, live: _LiveGrok) -> None:
+    if _live_sessions.get(session_id) is live:
+        _live_sessions.pop(session_id)
+    await live.client.close()
+
+
+async def close_grok_session(session_id: str) -> None:
+    """Stop the Grok process kept for one session, e.g. when its chat is deleted."""
+    live = _live_sessions.get(session_id)
+    if live:
+        await _close_live(session_id, live)
+
+
+async def close_all_grok_sessions() -> None:
+    for session_id, live in list(_live_sessions.items()):
+        await _close_live(session_id, live)
+
+
+async def _checkout(session_id: str | None, key: tuple[Any, ...]) -> _LiveGrok | None:
+    """The chat's running process, held for one turn, if it can serve this turn."""
+    live = _live_sessions.get(session_id) if session_id else None
+    if live is None:
+        return None
+    await live.lock.acquire()
+    if _live_sessions.get(session_id) is live and live.key == key and live.alive():
+        return live
+    # The approval mode or launch inputs changed, or the process died: start over.
+    live.lock.release()
+    await _close_live(session_id, live)
+    return None
+
+
+async def _trim_idle() -> None:
+    """Close processes idle too long, and the oldest beyond the idle limit."""
+    now = time.monotonic()
+    idle = sorted(
+        (
+            (session_id, live)
+            for session_id, live in _live_sessions.items()
+            if not live.lock.locked()
+        ),
+        key=lambda item: item[1].last_used,
+        reverse=True,
+    )
+    for index, (session_id, live) in enumerate(idle):
+        if (
+            index >= GROK_MAX_IDLE_PROCESSES
+            or now - live.last_used >= GROK_IDLE_TIMEOUT_SECONDS
+            or not live.alive()
+        ):
+            await _close_live(session_id, live)
+
+
+async def _reap_idle_sessions() -> None:
+    while _live_sessions:
+        await asyncio.sleep(60)
+        await _trim_idle()
+
+
+_reaper: asyncio.Task | None = None
+
+
+def _check_in(session_id: str, live: _LiveGrok) -> None:
+    """Keep the process for the chat's next turn."""
+    global _reaper
+    live.last_used = time.monotonic()
+    previous = _live_sessions.get(session_id)
+    if previous is not None and previous is not live:
+        _spawn(previous.client.close())
+    _live_sessions[session_id] = live
+    if live.lock.locked():
+        live.lock.release()
+    _spawn(_trim_idle())
+    if _reaper is None or _reaper.done():
+        _reaper = asyncio.create_task(_reap_idle_sessions())
+
+
+async def _discard_stale_events(client: AcpClient) -> None:
+    """Drop what Grok sent between turns; answer requests so nothing waits on them."""
+    while not client.events.empty():
+        message = client.events.get_nowait()
+        if "id" not in message or not message.get("method"):
+            continue
+        if message["method"] == ACP_PERMISSION_METHOD:
+            await client.respond(message["id"], {"outcome": {"outcome": "cancelled"}})
+        else:
+            await client.respond_error(message["id"], -32603, "No turn is running")
+
+
+async def _compact_if_full(
+    client: AcpClient, resume_state: dict[str, Any] | None, context_window: int | None
+) -> None:
+    """Compact a reloaded session that ended its last turn past Grok's threshold.
+
+    A reloaded session's context count starts near zero, so Grok would not compact
+    before this turn's first model call on its own.
+    """
+    tokens = _positive_int((resume_state or {}).get("context_tokens"))
+    if tokens and context_window and tokens * 100 >= context_window * GROK_AUTO_COMPACT_PERCENT:
+        with suppress(Exception):
+            await client.request(XAI_COMPACT_METHOD, {"sessionId": client.session_id})
+
+
 async def run_grok_agent(
     *,
     profile: dict[str, Any],
@@ -391,22 +534,50 @@ async def run_grok_agent(
     if resume_state and isinstance(resume_state.get("session_id"), str):
         session_id = resume_state["session_id"]
     approval_mode = _approval_mode(chat_params)
-
-    client = AcpClient(
-        command=str(profile["command"]),
-        args=["agent", "stdio"],
-        cwd=workspace,
-        env=env,
-        auth_method_id=_auth_method(env),
-        resume_session_id=session_id,
-        auto_approve_permissions=approval_mode == "full",
-        extension_requests=XAI_EXTENSION_REQUESTS | {ACP_PERMISSION_METHOD},
-        session_meta=_session_meta(approval_mode),
-        preexec_fn=preexec_for(identity) if identity and identity.is_pam else None,
+    command = str(profile["command"])
+    key = (
+        command,
+        workspace,
+        env.get("HOME"),
+        identity.username if identity else None,
+        approval_mode,
     )
+    settings = (model, chat_params.get("context_window"), chat_params.get("reasoning_effort"))
+
+    live = await _checkout(session_id, key)
+    if live is None:
+        live = _LiveGrok(
+            client=AcpClient(
+                command=command,
+                args=["agent", "stdio"],
+                cwd=workspace,
+                env=env,
+                auth_method_id=_auth_method(env),
+                resume_session_id=session_id,
+                auto_approve_permissions=approval_mode == "full",
+                extension_requests=XAI_EXTENSION_REQUESTS | {ACP_PERMISSION_METHOD},
+                session_meta=_session_meta(approval_mode),
+                preexec_fn=preexec_for(identity) if identity and identity.is_pam else None,
+            ),
+            key=key,
+        )
+        reused = False
+    else:
+        reused = True
+    client = live.client
+    kept = False
     try:
-        await client.start()
-        context_window = await _apply_session_settings(client, model, chat_params)
+        if reused:
+            await _discard_stale_events(client)
+        else:
+            await client.start()
+        if live.settings == settings:
+            context_window = live.context_window
+        else:
+            context_window = await _apply_session_settings(client, model, chat_params)
+            live.settings, live.context_window = settings, context_window
+        if session_id and not reused:
+            await _compact_if_full(client, resume_state, context_window)
         context_tokens: int | None = None
 
         prompt = turn_prompt_text(messages, system_prompt, resumed=bool(session_id))
@@ -448,13 +619,22 @@ async def run_grok_agent(
                 with suppress(asyncio.CancelledError):
                     await prompt_task
 
+        usage = _turn_usage(prompt_result, context_tokens, context_window)
+        # Checked in before AgentDone: the consumer stops reading at AgentDone.
+        if client.session_id:
+            _check_in(client.session_id, live)
+            kept = True
         yield AgentDone(
-            usage=_turn_usage(prompt_result, context_tokens, context_window),
+            usage=usage,
             resume_state={
                 "profile_id": profile["id"],
                 "session_id": client.session_id,
                 "workspace": workspace,
                 "model": model,
+                # For a later process that reloads the session; see _compact_if_full.
+                "context_tokens": context_tokens
+                or _positive_int((resume_state or {}).get("context_tokens")),
+                "context_window": context_window,
             },
         )
     except asyncio.CancelledError:
@@ -463,4 +643,9 @@ async def run_grok_agent(
     except Exception as exc:  # noqa: BLE001 - surfaced in chat.
         yield AgentError(str(exc))
     finally:
-        await client.close()
+        # A stopped or failed turn can leave Grok mid-turn or waiting on an answer, so
+        # the process is not reused; the next turn reloads the session.
+        if not kept:
+            if live.lock.locked():
+                live.lock.release()
+            await _close_live(client.session_id or "", live)

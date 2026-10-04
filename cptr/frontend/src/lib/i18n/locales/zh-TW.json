@@ -736,6 +736,8 @@
 	"plusMenu.askApprovalDesc": "每次工具呼叫前確認",
 	"plusMenu.autoApprove": "自動核准",
 	"plusMenu.autoApproveDesc": "核准安全操作，詢問風險操作",
+	"plusMenu.grokAutoReview": "自動審查",
+	"plusMenu.grokAutoReviewDesc": "安全操作直接執行，風險操作自動拒絕，不會詢問",
 	"plusMenu.fullAccess": "完整存取",
 	"plusMenu.fullAccessDesc": "所有工具呼叫無需確認即可執行",
 	"plusMenu.attachFiles": "附加檔案",

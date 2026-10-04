@@ -840,6 +840,8 @@
 	"plusMenu.askApprovalDesc": "Confirm each tool call before it runs",
 	"plusMenu.autoApprove": "Auto-approve",
 	"plusMenu.autoApproveDesc": "Approve safe actions, ask for risky ones",
+	"plusMenu.grokAutoReview": "Auto-review",
+	"plusMenu.grokAutoReviewDesc": "Safe actions run; risky ones are refused without asking",
 	"plusMenu.fullAccess": "Full access",
 	"plusMenu.fullAccessDesc": "All tool calls run without confirmation",
 	"plusMenu.attachFiles": "Attach files",

@@ -694,6 +694,8 @@
 	"plusMenu.askApprovalDesc": "각 도구 호출 실행 전 확인",
 	"plusMenu.autoApprove": "자동 승인",
 	"plusMenu.autoApproveDesc": "안전한 작업은 승인, 위험한 작업은 확인",
+	"plusMenu.grokAutoReview": "자동 검토",
+	"plusMenu.grokAutoReviewDesc": "안전한 작업은 실행하고, 위험한 작업은 묻지 않고 거부",
 	"plusMenu.fullAccess": "전체 접근",
 	"plusMenu.fullAccessDesc": "모든 도구 호출을 확인 없이 실행",
 	"plusMenu.attachFiles": "파일 첨부",
