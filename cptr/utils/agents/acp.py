@@ -42,6 +42,7 @@ class AcpClient:
         self.initialize_result: dict[str, Any] = {}
         self.setup_result: dict[str, Any] = {}
         self.model_config_id: str | None = None
+        self.replaying_history = False
 
     async def start(self) -> None:
         self.proc = await asyncio.create_subprocess_exec(
@@ -153,12 +154,19 @@ class AcpClient:
     async def _open_session(self) -> None:
         setup: dict[str, Any] | None = None
         if self.resume_session_id:
-            with suppress(Exception):
-                setup = await self.request(
-                    "session/load",
-                    {"sessionId": self.resume_session_id, "cwd": self.cwd, "mcpServers": []},
-                )
-                self.session_id = self.resume_session_id
+            # session/load replays the whole conversation as session/update notifications
+            # before it responds. The chat already has those turns, so drop the replay
+            # instead of streaming it into the next reply.
+            self.replaying_history = True
+            try:
+                with suppress(Exception):
+                    setup = await self.request(
+                        "session/load",
+                        {"sessionId": self.resume_session_id, "cwd": self.cwd, "mcpServers": []},
+                    )
+                    self.session_id = self.resume_session_id
+            finally:
+                self.replaying_history = False
         if setup is None:
             setup = await self.request("session/new", {"cwd": self.cwd, "mcpServers": []})
             session_id = setup.get("sessionId")
@@ -213,6 +221,8 @@ class AcpClient:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         if "id" in message and method == "session/request_permission":
             await self._reply_permission(message["id"], params)
+            return
+        if self.replaying_history and method == "session/update":
             return
         await self.events.put(message)
 
