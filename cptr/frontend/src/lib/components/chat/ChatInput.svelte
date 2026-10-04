@@ -91,7 +91,7 @@
 			callId: string,
 			answers: Record<string, string>,
 			timedOut: boolean
-		) => void;
+		) => void | Promise<void>;
 		onqueuesendnow?: (id: string) => void;
 		onqueueedit?: (id: string) => void;
 		onqueuedelete?: (id: string) => void;

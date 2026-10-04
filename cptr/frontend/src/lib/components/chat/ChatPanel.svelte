@@ -1301,17 +1301,23 @@
 		return false;
 	}
 
-	function handleAskUserAnswer(
+	async function handleAskUserAnswer(
 		messageId: string,
 		callId: string,
 		answers: Record<string, string>,
 		timedOut: boolean
-	) {
-		if (!chatId) return;
-		answerAskUser(chatId, messageId, callId, answers, timedOut).catch((err) => {
+	): Promise<void> {
+		const id = chatId;
+		if (!id) return;
+		try {
+			await answerAskUser(id, messageId, callId, answers, timedOut);
+		} catch (err) {
 			console.error('[chat] ask_user answer error', err);
-			loadChat(chatId!);
-		});
+			if (err instanceof Error && err.message) toast.error(err.message);
+			loadChat(id);
+			// Rethrow so the question card re-enables its submit button.
+			throw err;
+		}
 	}
 
 	function handleNavigate(messageId: string, direction: -1 | 1) {

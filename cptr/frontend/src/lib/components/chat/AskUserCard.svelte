@@ -11,7 +11,7 @@
 			callId: string,
 			answers: Record<string, string>,
 			timedOut: boolean
-		) => void;
+		) => void | Promise<void>;
 	}
 
 	let { item, pairedOutput, chatId, messageId, onanswer }: Props = $props();
@@ -23,16 +23,16 @@
 	const questions = $derived(Array.isArray(request.questions) ? request.questions : []);
 	const question = $derived(questions[questionIndex]);
 	const pending = $derived(item.status === 'pending');
+	function isAnswered(question: any, answers: Record<string, string> = selections) {
+		const choice = answers[question.id];
+		return !!choice && (choice !== '__other__' || !!otherAnswers[question.id]?.trim());
+	}
 	function hasAnswers(answers: Record<string, string>) {
 		return (
-			questions.length > 0 &&
-			questions.every((question: any) => {
-				const choice = answers[question.id];
-				return choice && (choice !== '__other__' || otherAnswers[question.id]?.trim());
-			})
+			questions.length > 0 && questions.every((question: any) => isAnswered(question, answers))
 		);
 	}
-	const canSubmit = $derived(hasAnswers(selections));
+	const currentAnswered = $derived(question ? isAnswered(question) : false);
 	const resolved = $derived.by(() => {
 		try {
 			return JSON.parse(pairedOutput?.output || '{}');
@@ -41,7 +41,7 @@
 		}
 	});
 
-	function submit(timedOut = false, selected = selections) {
+	async function submit(timedOut = false, selected = selections) {
 		if (!chatId || (!hasAnswers(selected) && !timedOut)) return;
 		const answers: Record<string, string> = {};
 		for (const question of questions) {
@@ -53,7 +53,12 @@
 					: choice;
 		}
 		submitting = true;
-		onanswer(messageId, item.call_id, answers, timedOut);
+		try {
+			await onanswer(messageId, item.call_id, answers, timedOut);
+		} catch {
+			// Let the user try again instead of leaving the card disabled.
+			submitting = false;
+		}
 	}
 
 	function selectAnswer(questionId: string, answer: string) {
@@ -66,8 +71,14 @@
 	function advance(selected = selections) {
 		if (questionIndex < questions.length - 1) {
 			questionIndex += 1;
-		} else if (hasAnswers(selected)) {
+			return;
+		}
+		// On the last question, submit or go back to the first question still unanswered.
+		const missing = questions.findIndex((question: any) => !isAnswered(question, selected));
+		if (missing < 0) {
 			submit(false, selected);
+		} else {
+			questionIndex = missing;
 		}
 	}
 </script>
@@ -211,7 +222,8 @@
 			{#if questionIndex < questions.length - 1}
 				<button
 					type="button"
-					class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition active:scale-[0.98] hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-white/90"
+					class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition active:scale-[0.98] hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-white/90"
+					disabled={pending && !currentAnswered}
 					onclick={() => (questionIndex += 1)}
 				>
 					{$t('chat.next')}
@@ -220,8 +232,8 @@
 				<button
 					type="button"
 					class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition active:scale-[0.98] hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-white/90"
-					disabled={!canSubmit || submitting}
-					onclick={() => submit()}
+					disabled={!currentAnswered || submitting}
+					onclick={() => advance()}
 				>
 					{$t('chat.submitAnswers')}
 				</button>
