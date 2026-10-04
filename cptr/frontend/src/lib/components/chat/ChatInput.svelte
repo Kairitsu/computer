@@ -21,8 +21,13 @@
 	import { searchFiles } from '$lib/apis/files';
 	import { getSkills } from '$lib/apis/skills';
 	import { uploadFile } from '$lib/apis/files';
-	import type { ChatTask, ContextUsage } from '$lib/apis/chat';
-	import ModelSelector from '../common/ModelSelector.svelte';
+	import type { ChatTask, ContextUsage, ReasoningEffort } from '$lib/apis/chat';
+	import ModelHubMenu from './ModelHubMenu.svelte';
+	import UsageIndicator from './UsageIndicator.svelte';
+	import Popover from '../common/Popover.svelte';
+	import { chatModels } from '$lib/stores/chat';
+	import { workspaceList } from '$lib/stores';
+	import { getPathDisplayName } from '$lib/utils/paths';
 	import SendButton from './SendButton.svelte';
 	import PlusMenu from './PlusMenu.svelte';
 	import DictateButton from './DictateButton.svelte';
@@ -70,6 +75,8 @@
 		toolApprovalMode?: ToolApprovalMode;
 		planMode?: boolean;
 		requestParams?: Record<string, unknown>;
+		reasoningEffort?: ReasoningEffort | null;
+		contextWindow?: number | null;
 		voiceModeEnabled?: boolean;
 		sending: boolean;
 		streaming?: boolean;
@@ -101,6 +108,8 @@
 		onqueuedelete?: (id: string) => void;
 		onsettingschange?: () => void;
 		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
+		/** New-chat landing only: pick the workspace the chat will belong to. */
+		onworkspacechange?: (path: string) => void;
 	}
 	let {
 		inputText = $bindable(),
@@ -108,6 +117,8 @@
 		toolApprovalMode = $bindable('auto'),
 		planMode = $bindable(false),
 		requestParams = $bindable({}),
+		reasoningEffort = $bindable(null),
+		contextWindow = $bindable(null),
 		voiceModeEnabled = $bindable(false),
 		sending,
 		streaming = false,
@@ -133,7 +144,8 @@
 		onqueueedit,
 		onqueuedelete,
 		onsettingschange,
-		ontoolapprovalchange
+		ontoolapprovalchange,
+		onworkspacechange
 	}: Props = $props();
 
 	let editorEl: HTMLDivElement | undefined = $state();
@@ -150,7 +162,50 @@
 	let voiceCaptureChunks: Blob[] = [];
 	let voiceCaptureMimeType = 'audio/webm';
 	let selectedSlashCommandIndex = $state(0);
-	let modelSelector: ModelSelector | undefined = $state();
+	let modelSelector: ModelHubMenu | undefined = $state();
+	let workspaceChipEl: HTMLButtonElement | undefined = $state();
+	let approvalChipEl: HTMLButtonElement | undefined = $state();
+	let workspaceMenuOpen = $state(false);
+	let approvalMenuOpen = $state(false);
+	const approvalModes = $derived([
+		{
+			value: 'ask' as ToolApprovalMode,
+			label: $t('plusMenu.askApproval'),
+			desc: $t('plusMenu.askApprovalDesc')
+		},
+		{
+			value: 'auto' as ToolApprovalMode,
+			label: $t('plusMenu.autoApprove'),
+			desc: $t('plusMenu.autoApproveDesc')
+		},
+		{
+			value: 'full' as ToolApprovalMode,
+			label: $t('plusMenu.fullAccess'),
+			desc: $t('plusMenu.fullAccessDesc')
+		}
+	]);
+	const approvalLabel = $derived(
+		approvalModes.find((mode) => mode.value === toolApprovalMode)?.label ??
+			$t('plusMenu.toolPermissions')
+	);
+	const workspaceLabel = $derived(
+		workspace ? getPathDisplayName(workspace, 'workspace') : $t('sidebar.defaultWorkspace')
+	);
+	const modelContextWindow = $derived(
+		$chatModels.find((model) => model.id === selectedModel)?.context_window
+	);
+
+	function selectApprovalMode(mode: ToolApprovalMode) {
+		approvalMenuOpen = false;
+		toolApprovalMode = mode;
+		if (ontoolapprovalchange) ontoolapprovalchange(mode);
+		else onsettingschange?.();
+	}
+
+	function selectWorkspace(path: string) {
+		workspaceMenuOpen = false;
+		onworkspacechange?.(path);
+	}
 	const voiceModeAvailable = $derived(
 		$ttsEnabled && $ttsConfigured && ($voiceModeSttMode === 'browser' || $sttConfigured)
 	);
@@ -1558,6 +1613,73 @@
 		</div>
 	{/if}
 
+	<!-- Composer chips: workspace (left), usage + model hub (right) -->
+	<div class="composer-chips mb-2 flex items-center gap-2 px-0.5">
+		<button
+			bind:this={workspaceChipEl}
+			type="button"
+			class="composer-chip min-w-0"
+			class:static-chip={!onworkspacechange}
+			disabled={!onworkspacechange}
+			title={workspace || workspaceLabel}
+			onclick={() => (workspaceMenuOpen = !workspaceMenuOpen)}
+		>
+			<Icon name={workspace ? 'folder' : 'home'} size={13} class="shrink-0" />
+			<span class="truncate">{workspaceLabel}</span>
+			{#if onworkspacechange}
+				<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
+			{/if}
+		</button>
+		<div class="ml-auto flex min-w-0 items-center gap-1.5">
+			<UsageIndicator
+				{contextUsage}
+				{contextWindow}
+				defaultContextWindow={modelContextWindow}
+				{hasChatContent}
+				{oncompact}
+			/>
+			<ModelHubMenu
+				bind:this={modelSelector}
+				bind:selectedModel
+				bind:reasoningEffort
+				bind:contextWindow
+				onchange={onsettingschange}
+				onclose={focusAfterModelSelectorClose}
+			/>
+		</div>
+	</div>
+
+	{#if workspaceMenuOpen && workspaceChipEl && onworkspacechange}
+		<Popover anchor={workspaceChipEl} width="15rem" onclose={() => (workspaceMenuOpen = false)}>
+			<button type="button" class="menu-option" onclick={() => selectWorkspace('')}>
+				<Icon name="home" size={13} class="shrink-0" />
+				<span class="flex-1 truncate text-left">{$t('sidebar.defaultWorkspace')}</span>
+				{#if !workspace}<Icon name="check" size={12} class="shrink-0 menu-check" />{/if}
+			</button>
+			{#if $workspaceList.length > 0}
+				<div class="app-divider h-px mx-1 my-0.5"></div>
+				<div class="max-h-56 overflow-y-auto">
+					{#each $workspaceList as ws (ws.path)}
+						<button
+							type="button"
+							class="menu-option"
+							title={ws.path}
+							onclick={() => selectWorkspace(ws.path)}
+						>
+							<Icon name="folder" size={13} class="shrink-0" />
+							<span class="flex-1 truncate text-left">{ws.name}</span>
+							{#if workspace === ws.path}<Icon
+									name="check"
+									size={12}
+									class="shrink-0 menu-check"
+								/>{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</Popover>
+	{/if}
+
 	<div class="app-surface rounded-3xl shadow-lg border transition px-1">
 		<!-- Uploaded Files Preview -->
 		{#if attachedUploads.length > 0}
@@ -1649,11 +1771,9 @@
 		>
 			<div class="ml-0.5 self-end flex items-center gap-1">
 				<PlusMenu
-					bind:toolApprovalMode
 					bind:planMode
 					bind:requestParams
 					onchange={onsettingschange}
-					{ontoolapprovalchange}
 					onfiles={(files) => {
 						if (files) processFiles(Array.from(files));
 					}}
@@ -1661,6 +1781,58 @@
 						processFiles([file]);
 					}}
 				/>
+				{#if onskillslist}
+					<button
+						type="button"
+						class="toolbar-icon"
+						aria-label={$t('chat.skills')}
+						use:tooltip={$t('chat.skills')}
+						onclick={() => onskillslist?.()}
+					>
+						<Icon name="tools" size={14} />
+					</button>
+				{/if}
+				<button
+					bind:this={approvalChipEl}
+					type="button"
+					class="approval-chip"
+					class:danger={toolApprovalMode === 'full'}
+					aria-haspopup="menu"
+					aria-expanded={approvalMenuOpen}
+					onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
+				>
+					<Icon
+						name={toolApprovalMode === 'full' ? 'warning-triangle' : 'shield'}
+						size={13}
+						class="shrink-0"
+					/>
+					<span class="truncate">{approvalLabel}</span>
+					<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
+				</button>
+				{#if approvalMenuOpen && approvalChipEl}
+					<Popover anchor={approvalChipEl} width="15rem" onclose={() => (approvalMenuOpen = false)}>
+						{#each approvalModes as mode}
+							<button
+								type="button"
+								class="menu-option items-start py-1.5"
+								onclick={() => selectApprovalMode(mode.value)}
+							>
+								<Icon
+									name={mode.value === 'full' ? 'warning-triangle' : 'shield'}
+									size={13}
+									class="shrink-0 mt-px {mode.value === 'full' ? 'text-red-500' : ''}"
+								/>
+								<span class="flex-1 min-w-0 text-left">
+									<span class="block">{mode.label}</span>
+									<span class="block text-[0.625rem] leading-snug opacity-70">{mode.desc}</span>
+								</span>
+								{#if toolApprovalMode === mode.value}
+									<Icon name="check" size={12} class="shrink-0 mt-px menu-check" />
+								{/if}
+							</button>
+						{/each}
+					</Popover>
+				{/if}
 				{#if planMode}
 					<button
 						type="button"
@@ -1699,12 +1871,6 @@
 				{/if}
 			</div>
 			<div class="self-end mr-1 flex items-center gap-2">
-				<ModelSelector
-					bind:this={modelSelector}
-					bind:selectedModel
-					onchange={onsettingschange}
-					onclose={focusAfterModelSelectorClose}
-				/>
 				<DictateButton
 					ontext={(text) => {
 						inputText += text;
@@ -1725,6 +1891,105 @@
 
 <style>
 	@reference "../../../app.css";
+
+	/* ── Composer chips (Grok-style) ───────────── */
+	.composer-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		height: 1.875rem;
+		max-width: 14rem;
+		padding: 0 0.75rem;
+		border-radius: 0.75rem;
+		border: 1px solid color-mix(in oklab, var(--app-fg) 10%, transparent);
+		background: var(--app-bg);
+		color: var(--app-fg-muted);
+		font-size: 0.75rem;
+		box-shadow: 0 1px 2px color-mix(in oklab, black 5%, transparent);
+		transition:
+			border-color 0.1s,
+			color 0.1s;
+	}
+
+	.composer-chip:hover:not(:disabled) {
+		color: var(--app-fg);
+		border-color: color-mix(in oklab, var(--app-fg) 20%, transparent);
+	}
+
+	.composer-chip.static-chip {
+		cursor: default;
+	}
+
+	.toolbar-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		border-radius: 999px;
+		color: var(--app-fg-subtle);
+		transition:
+			background 0.1s,
+			color 0.1s;
+	}
+
+	.toolbar-icon:hover {
+		background: var(--app-hover);
+		color: var(--app-fg);
+	}
+
+	.approval-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3125rem;
+		height: 1.5rem;
+		max-width: 9rem;
+		padding: 0 0.5rem;
+		border-radius: 999px;
+		font-size: 0.6875rem;
+		font-weight: 500;
+		color: var(--app-fg-subtle);
+		transition:
+			background 0.1s,
+			color 0.1s;
+	}
+
+	.approval-chip:hover {
+		background: var(--app-hover);
+		color: var(--app-fg);
+	}
+
+	.approval-chip.danger {
+		color: #dc2626;
+	}
+
+	:global(.dark) .approval-chip.danger {
+		color: #f87171;
+	}
+
+	.menu-option {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		min-height: 1.875rem;
+		padding: 0 0.5rem;
+		border-radius: 0.5rem;
+		font-size: 0.75rem;
+		color: var(--app-fg-muted);
+		transition:
+			background 0.075s,
+			color 0.075s;
+	}
+
+	.menu-option:hover {
+		background: var(--app-hover);
+		color: var(--app-fg);
+	}
+
+	.menu-option :global(.menu-check) {
+		color: var(--app-accent);
+	}
 
 	/* ── ProseMirror editor ───────────────────────── */
 

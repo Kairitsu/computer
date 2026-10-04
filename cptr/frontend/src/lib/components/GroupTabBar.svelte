@@ -100,7 +100,7 @@
 	function tabIconName(tab: Tab): string {
 		switch (tab.type) {
 			case 'home':
-				return 'spark';
+				return 'chat-plus';
 			case 'files':
 				return 'folder';
 			case 'terminal':
@@ -405,8 +405,8 @@
 		<div bind:this={tabsEl} class="flex items-center gap-0.5 shrink-0">
 			{#each displayTabs as tab (tab.id)}
 				{@const isActive = tab.id === group.activeTabId}
-				{@const chatStatus =
-					tab.type === 'chat' && tab.path ? $chatStatuses.get(tab.path) : undefined}
+				{@const isChatTab = tab.type === 'chat' || (tab.type === 'home' && !!tab.path)}
+				{@const chatStatus = isChatTab && tab.path ? $chatStatuses.get(tab.path) : undefined}
 				<button
 					class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all duration-100
 						{isActive
@@ -417,15 +417,19 @@
 					onclick={() => handleTabClick(tab)}
 					oncontextmenu={(e) => handleContextMenu(e, tab)}
 				>
-					{#if tab.type === 'chat' && (chatStatus?.active || $streamingChatTabs.has(tab.id))}
+					{#if isChatTab && (chatStatus?.active || $streamingChatTabs.has(tab.id))}
 						<Spinner size={14} />
 					{:else}
 						<Icon name={tabIconName(tab)} size={14} />
 					{/if}
 					<span class="max-w-30 overflow-hidden text-ellipsis">
-						{tab.type === 'files' ? ($activeWorkspace?.name ?? $t('bar.files')) : tab.label}
+						{tab.type === 'files'
+							? ($activeWorkspace?.name ?? $t('bar.files'))
+							: tab.type === 'home' && !tab.path
+								? $t('chat.newSession')
+								: tab.label}
 					</span>
-					{#if tab.type === 'chat' && !isActive && isChatUnread(chatStatus)}
+					{#if isChatTab && !isActive && isChatUnread(chatStatus)}
 						<span class="size-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true"></span>
 					{/if}
 					{#if tab.unsaved}<span class="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>{/if}

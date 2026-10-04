@@ -60,7 +60,7 @@
 {:else}
 	<button
 		class="{canSend
-			? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-white/90'
+			? 'send-ready hover:opacity-90'
 			: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 cursor-default'} transition rounded-full p-1 self-center"
 		onclick={onsend}
 		disabled={!canSend}
@@ -74,3 +74,10 @@
 		</svg>
 	</button>
 {/if}
+
+<style>
+	.send-ready {
+		background: var(--app-accent);
+		color: var(--app-accent-fg);
+	}
+</style>

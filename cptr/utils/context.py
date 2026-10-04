@@ -157,6 +157,16 @@ def resolve_compact_token_threshold(
     return model_threshold or default_threshold
 
 
+def chat_context_window(chat_params: object) -> int | None:
+    """Context window chosen in the composer for one chat, if any.
+
+    It replaces the model/global compaction threshold for that chat.
+    """
+    if not isinstance(chat_params, dict):
+        return None
+    return _parse_positive_int(chat_params.get("context_window"))
+
+
 async def load_compact_token_threshold(model: str | None = None) -> int:
     """Load the effective compaction threshold from persisted model config."""
     try:

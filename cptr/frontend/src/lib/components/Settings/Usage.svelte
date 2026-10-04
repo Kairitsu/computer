@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import QuotaSettings from './QuotaSettings.svelte';
 	import { getUsage, type UsageHeatmapEntry, type UsageResponse } from '$lib/apis/chat';
 	import { i18next } from '$lib/i18n';
 	import { chatModels } from '$lib/stores/chat';
@@ -268,6 +269,8 @@
 	<div class="mb-4">
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{tr('usage.title')}</h2>
 	</div>
+
+	<QuotaSettings />
 
 	{#if loading}
 		<div class="flex flex-1 items-center justify-center">

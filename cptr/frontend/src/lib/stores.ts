@@ -127,6 +127,13 @@ export interface HomeState {
 }
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type QuotaPeriod = 'day' | 'week' | 'month';
+export interface QuotaBudget {
+	period: QuotaPeriod;
+	/** Token budget for the period; null = no local budget. */
+	tokens: number | null;
+}
 
 export interface UserPreferences {
 	theme?: Theme;
@@ -134,6 +141,9 @@ export interface UserPreferences {
 	sidebarOpen: boolean;
 	sidebarWidth: number;
 	toolApprovalMode?: ToolApprovalMode;
+	reasoningEffort?: ReasoningEffort | null;
+	contextWindow?: number | null;
+	quotaBudget?: QuotaBudget;
 	locale: string;
 	workspaceOrder?: string[]; // ordered paths for sidebar drag-reorder
 	keybindings?: Record<string, string>; // user-customised keyboard shortcuts
@@ -296,7 +306,7 @@ export const homeState = writable<HomeState>({
 	groups: [
 		{
 			id: 'home',
-			tabs: [{ id: 'home', type: 'home', label: 'Home', permanent: true }],
+			tabs: [{ id: 'home', type: 'home', label: 'New Chat', permanent: true }],
 			activeTabId: 'home'
 		}
 	],
@@ -324,6 +334,20 @@ if (typeof window !== 'undefined') {
 export const sidebarWidth = writable(220);
 export const theme = writable<Theme>('dark');
 export const toolApprovalMode = writable<ToolApprovalMode>('auto');
+/** Composer defaults for new chats: last chosen reasoning effort / context window. */
+export const defaultReasoningEffort = writable<ReasoningEffort | null>(null);
+export const defaultContextWindow = writable<number | null>(null);
+export const quotaBudget = writable<QuotaBudget>({ period: 'week', tokens: null });
+
+/**
+ * Request for the Home view's chat slot: open a chat (chatId) or start a new one.
+ * The sidebar sets it and navigates to `/`; the Home page consumes and clears it.
+ */
+export const homeChatRequest = writable<{ chatId?: string; nonce: number } | null>(null);
+
+export function requestHomeChat(chatId?: string): void {
+	homeChatRequest.set({ chatId, nonce: Date.now() });
+}
 export const appVersion = writable('');
 export const lastSeenVersion = writable('');
 export const latestVersion = writable('');
@@ -452,6 +476,9 @@ function persistPreferences(): void {
 			sidebarOpen: get(sidebarOpen),
 			sidebarWidth: get(sidebarWidth),
 			toolApprovalMode: get(toolApprovalMode),
+			reasoningEffort: get(defaultReasoningEffort),
+			contextWindow: get(defaultContextWindow),
+			quotaBudget: get(quotaBudget),
 			locale: i18next.language,
 			workspaceOrder: get(workspaceOrder),
 			keybindings: get(keybindings),
@@ -490,6 +517,15 @@ function subscribeForPersistence() {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	toolApprovalMode.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	defaultReasoningEffort.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	defaultContextWindow.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	quotaBudget.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	workspaceOrder.subscribe(() => {
@@ -544,6 +580,29 @@ export async function loadPreferences(): Promise<void> {
 			toolApprovalMode.set(prefs.toolApprovalMode);
 		} else if (prefs.autoApproveTools !== undefined) {
 			toolApprovalMode.set((prefs.autoApproveTools as boolean) ? 'full' : 'ask');
+		}
+		if (
+			prefs.reasoningEffort === 'low' ||
+			prefs.reasoningEffort === 'medium' ||
+			prefs.reasoningEffort === 'high' ||
+			prefs.reasoningEffort === 'xhigh'
+		) {
+			defaultReasoningEffort.set(prefs.reasoningEffort);
+		}
+		if (typeof prefs.contextWindow === 'number' && prefs.contextWindow > 0) {
+			defaultContextWindow.set(prefs.contextWindow);
+		}
+		const savedBudget = prefs.quotaBudget as Partial<QuotaBudget> | undefined;
+		if (savedBudget && typeof savedBudget === 'object') {
+			quotaBudget.set({
+				period: ['day', 'week', 'month'].includes(savedBudget.period as string)
+					? (savedBudget.period as QuotaPeriod)
+					: 'week',
+				tokens:
+					typeof savedBudget.tokens === 'number' && savedBudget.tokens > 0
+						? savedBudget.tokens
+						: null
+			});
 		}
 		if (prefs.locale) changeLocale(prefs.locale as string);
 		if (Array.isArray(prefs.workspaceOrder)) workspaceOrder.set(prefs.workspaceOrder as string[]);
@@ -612,7 +671,7 @@ export async function loadPreferences(): Promise<void> {
 				groups = [
 					{
 						id: 'home',
-						tabs: [{ id: 'home', type: 'home', label: 'Home', permanent: true }],
+						tabs: [{ id: 'home', type: 'home', label: 'New Chat', permanent: true }],
 						activeTabId: 'home'
 					}
 				];
@@ -620,14 +679,29 @@ export async function loadPreferences(): Promise<void> {
 			if (!groups.some((group) => group.tabs.some((tab) => tab.type === 'home'))) {
 				groups[0] = {
 					...groups[0],
-					tabs: [{ id: 'home', type: 'home', label: 'Home', permanent: true }, ...groups[0].tabs]
+					tabs: [
+						{ id: 'home', type: 'home', label: 'New Chat', permanent: true },
+						...groups[0].tabs
+					]
 				};
 			}
+			// Start every session on a fresh chat in the Home slot.
+			const homeGroupId =
+				groups.find((group) => group.tabs.some((tab) => tab.type === 'home'))?.id ?? groups[0].id;
+			groups = groups.map((group) =>
+				group.id === homeGroupId
+					? {
+							...group,
+							activeTabId: 'home',
+							tabs: group.tabs.map((tab) =>
+								tab.type === 'home' ? { ...tab, path: undefined, label: 'New Chat' } : tab
+							)
+						}
+					: group
+			);
 			homeState.set({
 				groups,
-				activeGroupId: groups.some((group) => group.id === savedHomeState.activeGroupId)
-					? savedHomeState.activeGroupId
-					: groups[0].id,
+				activeGroupId: homeGroupId,
 				layout: normalizeLayout(
 					savedHomeState.layout,
 					groups,

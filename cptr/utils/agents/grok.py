@@ -185,6 +185,17 @@ def _auto_approve(chat_params: dict[str, Any]) -> bool:
     return bool(chat_params.get("auto_approve_tools"))
 
 
+GROK_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def _agent_args(chat_params: dict[str, Any]) -> list[str]:
+    """`grok agent [--reasoning-effort <effort>] stdio` for the composer's effort."""
+    effort = chat_params.get("reasoning_effort")
+    if effort in GROK_REASONING_EFFORTS:
+        return ["agent", "--reasoning-effort", effort, "stdio"]
+    return ["agent", "stdio"]
+
+
 async def run_grok_agent(
     *,
     profile: dict[str, Any],
@@ -208,7 +219,7 @@ async def run_grok_agent(
 
     client = AcpClient(
         command=str(profile["command"]),
-        args=["agent", "stdio"],
+        args=_agent_args(chat_params),
         cwd=workspace,
         env=env,
         auth_method_id=_auth_method(env),

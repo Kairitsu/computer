@@ -1,16 +1,25 @@
 import { setTextScale } from '$lib/utils/text-scale';
+import { THEME_PRESET_IDS } from '$lib/utils/themePresets';
 
 export type Theme = 'dark' | 'light' | 'system';
 
 export type ThemeColors = {
 	background?: string;
 	foreground?: string;
+	/** Buttons, toggles, selection and progress. */
+	accent?: string;
+	/** Sidebar surface. */
+	sidebar?: string;
 };
+
+const THEME_COLOR_KEYS = ['background', 'foreground', 'accent', 'sidebar'] as const;
 
 export type ThemeConfig = {
 	light?: ThemeColors;
 	dark?: ThemeColors;
 	uiFont?: string;
+	/** Preset the colors came from; cleared once a color is edited by hand. */
+	preset?: string;
 };
 
 export type AppearancePreferences = {
@@ -64,10 +73,10 @@ function sanitizeThemeColors(value: unknown): ThemeColors | null {
 	if (!value || typeof value !== 'object') return null;
 	const raw = value as Record<string, unknown>;
 	const next: ThemeColors = {};
-	const background = normalizeHexColor(raw.background);
-	const foreground = normalizeHexColor(raw.foreground);
-	if (background) next.background = background;
-	if (foreground) next.foreground = foreground;
+	for (const key of THEME_COLOR_KEYS) {
+		const color = normalizeHexColor(raw[key]);
+		if (color) next[key] = color;
+	}
 	return Object.keys(next).length ? next : null;
 }
 
@@ -87,6 +96,9 @@ export function sanitizeThemeConfig(value: unknown): ThemeConfig | null {
 	if (typeof raw.uiFont === 'string' && raw.uiFont.trim()) {
 		next.uiFont = raw.uiFont.trim().slice(0, 240);
 	}
+	if (typeof raw.preset === 'string' && THEME_PRESET_IDS.has(raw.preset) && (light || dark)) {
+		next.preset = raw.preset;
+	}
 	return Object.keys(next).length ? next : null;
 }
 
@@ -95,6 +107,8 @@ export function defaultThemeConfig(theme: Theme): Required<ThemeColors> & { uiFo
 	return {
 		background: resolved === 'dark' ? '#0a0a0a' : '#ffffff',
 		foreground: resolved === 'dark' ? '#d4d4d4' : '#525252',
+		accent: resolved === 'dark' ? '#fafafa' : '#0a0a0a',
+		sidebar: '',
 		uiFont: DEFAULT_UI_FONT
 	};
 }
@@ -104,11 +118,22 @@ export function resolveThemeConfig(
 	config: ThemeConfig | null
 ): Required<ThemeColors> & { uiFont: string } {
 	const resolved = resolveThemeMode(theme);
-	return {
+	const merged = {
 		...defaultThemeConfig(theme),
 		...(config?.[resolved] ?? {}),
 		uiFont: config?.uiFont ?? DEFAULT_UI_FONT
 	};
+	return { ...merged, sidebar: merged.sidebar || merged.background };
+}
+
+/** Black or white, whichever reads better on the given hex color. */
+export function readableTextOn(hex: string): string {
+	const value = normalizeHexColor(hex) ?? '#000000';
+	const [r, g, b] = [1, 3, 5].map((i) => {
+		const channel = parseInt(value.slice(i, i + 2), 16) / 255;
+		return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? '#0a0a0a' : '#ffffff';
 }
 
 function setVar(name: string, value: string) {
@@ -138,6 +163,9 @@ export function applyAppearance(
 	setVar('--app-fg', merged.foreground);
 	setVar('--app-border', `color-mix(in oklab, var(--app-fg) ${borderMix}%, transparent)`);
 	setVar('--app-divider', `color-mix(in oklab, var(--app-fg) ${dividerMix}%, transparent)`);
+	setVar('--app-accent', merged.accent);
+	setVar('--app-accent-fg', readableTextOn(merged.accent));
+	setVar('--app-sidebar-bg', merged.sidebar);
 	setVar('--app-ui-font', merged.uiFont);
 	setVar('--font-sans', merged.uiFont);
 

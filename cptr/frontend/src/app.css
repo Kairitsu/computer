@@ -34,6 +34,10 @@
 	--app-hover: color-mix(in oklab, var(--app-fg) 6%, transparent);
 	--app-active: color-mix(in oklab, var(--app-fg) 7%, transparent);
 	--app-ui-font: var(--font-sans);
+	--app-accent: #0a0a0a;
+	--app-accent-fg: #ffffff;
+	--app-accent-soft: color-mix(in oklab, var(--app-accent) 14%, transparent);
+	--app-sidebar-bg: var(--app-bg);
 }
 
 @layer base {
