@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Composer chip with the current context fullness and subscription quota.
-	 * Click for details: context tokens + compaction, SuperGrok or local budget.
+	 * Click for details: context tokens, SuperGrok or local budget.
 	 */
 	import type { ContextUsage } from '$lib/apis/chat';
 	import { formatTokens, quotaLoading, quotaSummary, refreshQuota } from '$lib/stores/quota';
@@ -15,17 +15,9 @@
 		contextWindow?: number | null;
 		/** Model default context window, shown before the first reply. */
 		defaultContextWindow?: number;
-		hasChatContent?: boolean;
-		oncompact?: () => void;
 	}
 
-	let {
-		contextUsage = null,
-		contextWindow = null,
-		defaultContextWindow,
-		hasChatContent = false,
-		oncompact
-	}: Props = $props();
+	let { contextUsage = null, contextWindow = null, defaultContextWindow }: Props = $props();
 
 	const RING = 2 * Math.PI * 8;
 
@@ -122,18 +114,6 @@
 					{/if}
 				</p>
 				<p class="usage-meta">{$t('usageIndicator.contextHint')}</p>
-				{#if oncompact && hasChatContent}
-					<button
-						type="button"
-						class="usage-action mt-1.5"
-						onclick={() => {
-							open = false;
-							oncompact?.();
-						}}
-					>
-						{$t('usageIndicator.compact')}
-					</button>
-				{/if}
 			</section>
 
 			<div class="app-divider h-px"></div>
@@ -317,16 +297,6 @@
 
 	.usage-bar span.danger {
 		background: #dc2626;
-	}
-
-	.usage-action {
-		height: 1.625rem;
-		padding: 0 0.625rem;
-		border-radius: 0.5rem;
-		font-size: 0.6875rem;
-		font-weight: 500;
-		background: var(--app-accent);
-		color: var(--app-accent-fg);
 	}
 
 	.usage-link {

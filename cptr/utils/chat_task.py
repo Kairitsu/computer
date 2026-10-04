@@ -65,6 +65,7 @@ from cptr.utils.chat_export import export_chat_to_file
 from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
 from cptr.utils.agents.events import (
     AgentAskUser,
+    AgentContextUsage,
     AgentDone,
     AgentError,
     AgentPermissionRequest,
@@ -2036,6 +2037,13 @@ async def run_chat_task(
                 except asyncio.CancelledError:
                     await agent_events.aclose()
                     raise
+            elif isinstance(event, AgentContextUsage):
+                await emit(
+                    context_usage=build_context_usage(
+                        event.tokens,
+                        threshold=event.window or chat_context_window(chat_params),
+                    )
+                )
             elif isinstance(event, AgentError):
                 raise RuntimeError(event.message)
             elif isinstance(event, AgentDone):

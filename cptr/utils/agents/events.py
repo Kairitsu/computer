@@ -62,6 +62,14 @@ class AgentPermissionRequest:
 
 
 @dataclass
+class AgentContextUsage:
+    """Tokens in the agent's context window right now, as the agent reports them."""
+
+    tokens: int
+    window: int | None = None
+
+
+@dataclass
 class AgentDone:
     usage: dict[str, Any] | None = None
     resume_state: dict[str, Any] | None = None
@@ -79,6 +87,7 @@ AgentEvent = (
     | AgentToolOutputDelta
     | AgentAskUser
     | AgentPermissionRequest
+    | AgentContextUsage
     | AgentDone
     | AgentError
 )

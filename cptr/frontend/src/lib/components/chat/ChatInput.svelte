@@ -90,7 +90,6 @@
 		queuedMessages?: { id: string; content: string }[];
 		hasChatContent?: boolean;
 		onsend: () => void;
-		oncompact?: () => void;
 		onfork?: () => void;
 		onplan?: () => void;
 		onstatus?: () => void;
@@ -132,7 +131,6 @@
 		queuedMessages = [],
 		hasChatContent = false,
 		onsend,
-		oncompact,
 		onfork,
 		onplan,
 		onstatus,
@@ -1100,8 +1098,6 @@
 	function getSlashCommandIds(query: string) {
 		const slashCommandQuery = `/${query}`.toLowerCase();
 		const ids: string[] = [];
-		if (hasChatContent && oncompact && '/compact'.startsWith(slashCommandQuery))
-			ids.push('compact');
 		if (onplan && '/plan'.startsWith(slashCommandQuery)) ids.push('plan');
 		if (hasChatContent && onfork && '/fork'.startsWith(slashCommandQuery)) ids.push('fork');
 		if (hasChatContent && onstatus && '/status'.startsWith(slashCommandQuery)) ids.push('status');
@@ -1139,9 +1135,6 @@
 		)
 	]);
 	const showSlashCommands = $derived(slashSuggestionIds.length > 0);
-	const contextPercent = $derived(Math.max(0, Math.round(contextUsage?.percent ?? 0)));
-	const contextCirclePercent = $derived(Math.min(contextPercent, 100));
-	const contextCircleOffset = $derived(50.27 * (1 - contextCirclePercent / 100));
 
 	$effect(() => {
 		if (selectedSlashCommandIndex >= slashSuggestionIds.length) selectedSlashCommandIndex = 0;
@@ -1226,13 +1219,7 @@
 	}
 
 	function runSlashCommand(commandId: string | undefined) {
-		if (commandId === 'compact' && (sending || streaming)) return;
 		if (commandId === 'fork' && (sending || streaming)) return;
-		if (commandId === 'compact' && oncompact) {
-			removeSlashCommandToken();
-			oncompact();
-			return;
-		}
 		if (commandId === 'fork' && onfork) {
 			removeSlashCommandToken();
 			onfork();
@@ -1351,55 +1338,6 @@
 				<div class="app-muted mb-0.5 px-2 pt-1 pb-0.5 text-[0.625rem] leading-none">
 					{$t('chat.commands')}
 				</div>
-			{/if}
-			{#if slashCommandIds.includes('compact')}
-				<button
-					type="button"
-					aria-label={`${$t('chat.commandCompact')}: ${$t('chat.commandCompactDesc')}`}
-					use:tooltip={{
-						content: $t('chat.commandCompactDesc'),
-						placement: 'top'
-					}}
-					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-						{selectedSlashCommand('compact') ? 'app-interactive-active' : ''} disabled:opacity-50"
-					disabled={sending || streaming}
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => {
-						runSlashCommand('compact');
-					}}
-					onmouseenter={() => selectSlashCommand('compact')}
-				>
-					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
-						<svg class="size-3.5 -rotate-90" viewBox="0 0 20 20" aria-hidden="true">
-							<circle
-								cx="10"
-								cy="10"
-								r="8"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								class="opacity-20"
-							/>
-							<circle
-								cx="10"
-								cy="10"
-								r="8"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-dasharray="50.27"
-								style={`stroke-dashoffset: ${contextCircleOffset};`}
-							/>
-						</svg>
-					</span>
-					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-						<span class="truncate">{$t('chat.commandCompact')}</span>
-						<span class="app-muted text-[0.625rem] truncate shrink-0">
-							{$t('chat.commandCompactPercent', { percent: contextPercent })}
-						</span>
-					</span>
-				</button>
 			{/if}
 			{#if slashCommandIds.includes('plan')}
 				<button
@@ -1641,8 +1579,6 @@
 				{contextUsage}
 				contextWindow={usageContextWindow}
 				defaultContextWindow={modelContextWindow}
-				{hasChatContent}
-				{oncompact}
 			/>
 			<ModelHubMenu
 				bind:this={modelSelector}

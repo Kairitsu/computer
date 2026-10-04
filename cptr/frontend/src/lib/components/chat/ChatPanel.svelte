@@ -6,7 +6,6 @@
 		resolveToolCall,
 		answerAskUser,
 		cancelTask,
-		compactChat as apiCompactChat,
 		updateCurrentMessage,
 		updateMessage,
 		createMessage,
@@ -817,10 +816,6 @@
 		let text = inputText.trim();
 		if (!text || !selectedModel) return;
 		if (sending) return;
-		if (hasChatContent && text === '/compact') {
-			await handleManualCompact();
-			return;
-		}
 		if (hasChatContent && text === '/fork') {
 			await handleForkChat();
 			return;
@@ -971,32 +966,6 @@
 			allMessages = allMessages.filter((m) => m.id !== tempId);
 			currentMessageId = parentId;
 			throw e;
-		} finally {
-			sending = false;
-			chatInputEl?.focus();
-		}
-	}
-
-	async function handleManualCompact() {
-		if (!chatId) {
-			toast.message($t('chat.compactNoChat'));
-			return;
-		}
-		if (sending || streaming) return;
-		sending = true;
-		inputText = '';
-		const toastId = toast.loading($t('chat.compacting'));
-		try {
-			const result = await apiCompactChat(chatId, selectedModel || null);
-			contextUsage = result.context_usage ?? contextUsage;
-			if (result.compacted) {
-				toast.success($t('chat.compactDone'), { id: toastId });
-			} else {
-				toast.message($t('chat.compactSkipped'), { id: toastId });
-			}
-			await loadChat(chatId);
-		} catch (err: any) {
-			toast.error(err?.message || $t('chat.compactFailed'), { id: toastId });
 		} finally {
 			sending = false;
 			chatInputEl?.focus();
@@ -1871,7 +1840,6 @@
 					onplanapprove={handlePlanApprove}
 					onplanrevise={handlePlanRevise}
 					onsend={send}
-					oncompact={handleManualCompact}
 					onfork={handleForkChat}
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}

@@ -1151,10 +1151,6 @@ class SendMessageRequest(BaseModel):
     params: dict = {}
 
 
-class CompactRequest(BaseModel):
-    model_id: Optional[str] = None
-
-
 @router.post("")
 async def send_message(request: Request, body: SendMessageRequest):
     """Send a message. Omit chat_id to create a new chat.
@@ -1303,73 +1299,6 @@ async def send_message(request: Request, body: SendMessageRequest):
     if parent_msg is None or parent_msg.role != "user":
         resp["user_message"] = _message_dict(user_msg)
     return resp
-
-
-# ── Manual context compaction ───────────────────────────────
-
-
-@router.post("/{chat_id}/compact")
-async def compact_chat(request: Request, chat_id: str, body: CompactRequest):
-    """Summarize older active-branch messages and store a compaction checkpoint."""
-    user_id = _get_user(request)
-    chat = await Chat.get_by_id(chat_id)
-    if not chat or chat.user_id != user_id:
-        raise HTTPException(404, "chat not found")
-    if await _chat_has_active_generation(chat_id):
-        raise HTTPException(409, "wait for the current response to finish before compacting")
-    model_id = body.model_id or await _infer_chat_model(chat_id)
-    if not model_id:
-        raise HTTPException(400, "choose a model before compacting")
-
-    message_id = await _get_context_leaf_message_id(chat)
-    if not message_id:
-        return {"ok": True, "compacted": False, "reason": "empty", "context_usage": None}
-    current_msg = await ChatMessage.get_by_id(message_id)
-    if not current_msg or not current_msg.parent_id:
-        usage = await _get_chat_context_usage(request, chat, model_id)
-        return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
-
-    from cptr.utils.model_targets import (
-        ApiModelTarget,
-        first_api_model_target,
-        resolve_model_target,
-    )
-
-    target = await resolve_model_target(model_id, request.app.state)
-    if not isinstance(target, ApiModelTarget):
-        target = await first_api_model_target(request.app.state)
-
-    from cptr.utils.chat_task import _load_message_history, _summary_checkpoint_message_id
-    from cptr.utils.summarize import summarize_messages
-
-    messages, existing_summary = await _load_message_history(chat_id, current_msg.parent_id)
-    compacted_messages = messages[:-1]
-    keep_zone = messages[-1:]
-    if not compacted_messages or not keep_zone:
-        usage = await _get_chat_context_usage(request, chat, model_id)
-        return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
-
-    summary = await summarize_messages(
-        compacted_messages,
-        existing_summary,
-        target.connection,
-        target.runtime_model,
-    )
-    checkpoint_message_id = _summary_checkpoint_message_id(keep_zone, message_id)
-    await ChatMessage.update(checkpoint_message_id, chat_summary=summary)
-
-    from cptr.utils.chat_export import export_chat_to_file
-
-    await export_chat_to_file(request, chat_id)
-    usage = await _get_chat_context_usage(request, chat, model_id)
-    return {
-        "ok": True,
-        "compacted": True,
-        "dropped_messages": len(messages),
-        "kept_messages": 1,
-        "summary_chars": len(summary),
-        "context_usage": usage,
-    }
 
 
 # ── Resolve a pending tool call ─────────────────────────────

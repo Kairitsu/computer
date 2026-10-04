@@ -18,6 +18,7 @@ from cptr.utils.agents.acp import (
 )
 from cptr.utils.agents.events import (
     AgentAskUser,
+    AgentContextUsage,
     AgentDone,
     AgentError,
     AgentEvent,
@@ -32,6 +33,8 @@ from cptr.utils.identity import env_for, preexec_for
 XAI_ASK_USER_QUESTION_METHODS = frozenset({"_x.ai/ask_user_question", "x.ai/ask_user_question"})
 XAI_EXIT_PLAN_MODE_METHODS = frozenset({"_x.ai/exit_plan_mode", "x.ai/exit_plan_mode"})
 XAI_EXTENSION_REQUESTS = XAI_ASK_USER_QUESTION_METHODS | XAI_EXIT_PLAN_MODE_METHODS
+# Carries Grok's per-model-call usage and auto-compaction progress.
+XAI_SESSION_NOTIFICATIONS = frozenset({"_x.ai/session_notification", "x.ai/session_notification"})
 
 PLAN_APPROVE_LABEL = "Approve"
 PLAN_KEEP_PLANNING_LABEL = "Keep planning"
@@ -179,16 +182,83 @@ def _auth_method(env: dict[str, str]) -> str:
     return "xai.api_key" if env.get("XAI_API_KEY", "").strip() else "cached_token"
 
 
-def _auto_approve(chat_params: dict[str, Any]) -> bool:
-    if chat_params.get("tool_approval_mode") == "full":
-        return True
-    return bool(chat_params.get("auto_approve_tools"))
+def _approval_mode(chat_params: dict[str, Any]) -> str:
+    mode = chat_params.get("tool_approval_mode")
+    if mode in {"ask", "auto", "full"}:
+        return mode
+    return "full" if chat_params.get("auto_approve_tools") else "auto"
+
+
+def _session_meta(approval_mode: str) -> dict[str, bool]:
+    """Grok's permission mode for the chat's approval mode.
+
+    Sent on every session/new and session/load, so `[ui] permission_mode` in Grok's
+    config cannot override it. `auto` is Grok's auto-review: routine calls run, and
+    calls its classifier will not allow are blocked and reported to the model.
+    """
+    if approval_mode == "full":
+        return {"yoloMode": True}
+    return {"yoloMode": False, "autoMode": approval_mode == "auto"}
 
 
 def _positive_int(value: Any) -> int | None:
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
     return None
+
+
+def _context_update(update: Any) -> tuple[int | None, int | None]:
+    """Context tokens and window from one Grok session notification.
+
+    `response_completed` reports each model call: its prompt (`input_tokens` excludes
+    the cached part) plus its reply is what the conversation holds after the call.
+    Auto-compaction reports the size it shrank the conversation to.
+    """
+    if not isinstance(update, dict):
+        return None, None
+    kind = update.get("sessionUpdate")
+    if kind == "response_completed":
+        usage = update.get("usage") if isinstance(update.get("usage"), dict) else {}
+        tokens = sum(
+            _positive_int(usage.get(key)) or 0
+            for key in (
+                "input_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+                "output_tokens",
+            )
+        )
+        return tokens or None, None
+    if kind == "auto_compact_started":
+        return None, _positive_int(update.get("context_window"))
+    if kind == "auto_compact_completed":
+        return _positive_int(update.get("tokens_after")), None
+    return None, None
+
+
+def _turn_usage(
+    prompt_result: Any, context_tokens: int | None, context_window: int | None
+) -> dict[str, Any] | None:
+    """Usage for the chat message: the turn's billed totals plus the context it ended with."""
+    meta = prompt_result.get("_meta") if isinstance(prompt_result, dict) else None
+    totals = meta.get("usage") if isinstance(meta, dict) else None
+    usage: dict[str, Any] = {}
+    if isinstance(totals, dict):
+        for source, target in (
+            ("inputTokens", "input_tokens"),
+            ("outputTokens", "output_tokens"),
+            ("totalTokens", "total_tokens"),
+            ("cachedReadTokens", "cache_read_input_tokens"),
+            ("reasoningTokens", "reasoning_tokens"),
+        ):
+            value = _positive_int(totals.get(source))
+            if value:
+                usage[target] = value
+    if context_tokens:
+        usage["context_tokens"] = context_tokens
+    if context_window:
+        usage["context_window"] = context_window
+    return usage or None
 
 
 def _model_state(setup: dict[str, Any], initialize_meta: Any) -> dict[str, Any]:
@@ -273,12 +343,13 @@ def grok_model_options(
 
 async def _apply_session_settings(
     client: AcpClient, model: str, chat_params: dict[str, Any]
-) -> None:
+) -> int | None:
     """Carry the composer's model, context window and reasoning effort into the session.
 
     Only values Grok offers for the model are sent, so a leftover choice made for another
     model falls back to Grok's own default. `grok agent --reasoning-effort` does not reach
     ACP sessions, which is why the effort goes through session/set_config_option.
+    Returns the context window the session runs with, when Grok lists it.
     """
     setup = client.setup_result
     initialize_meta = client.initialize_result.get("_meta")
@@ -296,6 +367,7 @@ async def _apply_session_settings(
     effort = chat_params.get("reasoning_effort")
     if any(option["value"] == effort for option in options.get("reasoning_efforts", [])):
         await client.set_config_option("reasoning_effort", effort)
+    return meta["contextWindow"] if meta else options.get("default_context_window")
 
 
 async def run_grok_agent(
@@ -318,6 +390,7 @@ async def run_grok_agent(
     session_id = None
     if resume_state and isinstance(resume_state.get("session_id"), str):
         session_id = resume_state["session_id"]
+    approval_mode = _approval_mode(chat_params)
 
     client = AcpClient(
         command=str(profile["command"]),
@@ -326,13 +399,15 @@ async def run_grok_agent(
         env=env,
         auth_method_id=_auth_method(env),
         resume_session_id=session_id,
-        auto_approve_permissions=_auto_approve(chat_params),
+        auto_approve_permissions=approval_mode == "full",
         extension_requests=XAI_EXTENSION_REQUESTS | {ACP_PERMISSION_METHOD},
+        session_meta=_session_meta(approval_mode),
         preexec_fn=preexec_for(identity) if identity and identity.is_pam else None,
     )
     try:
         await client.start()
-        await _apply_session_settings(client, model, chat_params)
+        context_window = await _apply_session_settings(client, model, chat_params)
+        context_tokens: int | None = None
 
         prompt = turn_prompt_text(messages, system_prompt, resumed=bool(session_id))
 
@@ -351,13 +426,22 @@ async def run_grok_agent(
                         yield ask_event
                     continue
                 params = event.get("params") if isinstance(event.get("params"), dict) else {}
+                if event.get("method") in XAI_SESSION_NOTIFICATIONS:
+                    # Subagents run in their own sessions; only this one fills the chat's window.
+                    if params.get("sessionId") == client.session_id:
+                        tokens, window = _context_update(params.get("update"))
+                        context_window = window or context_window
+                        if tokens:
+                            context_tokens = tokens
+                            yield AgentContextUsage(tokens=tokens, window=context_window)
+                    continue
                 text = acp_text_from_update(params)
                 if text:
                     yield AgentTextDelta(text)
                 tool = acp_tool_from_update(params)
                 if tool:
                     yield AgentToolUpdate(**tool)
-            await prompt_task
+            prompt_result = await prompt_task
         finally:
             if not prompt_task.done():
                 prompt_task.cancel()
@@ -365,12 +449,13 @@ async def run_grok_agent(
                     await prompt_task
 
         yield AgentDone(
+            usage=_turn_usage(prompt_result, context_tokens, context_window),
             resume_state={
                 "profile_id": profile["id"],
                 "session_id": client.session_id,
                 "workspace": workspace,
                 "model": model,
-            }
+            },
         )
     except asyncio.CancelledError:
         await client.cancel()

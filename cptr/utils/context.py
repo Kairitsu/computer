@@ -97,6 +97,10 @@ def usage_context_tokens(usage: dict | None) -> int:
     usage = normalize_usage(usage)
     if not usage:
         return 0
+    # Agent CLIs report what their window holds; their input totals span every call of a turn.
+    context_tokens = _parse_nonnegative_int(usage.get("context_tokens"))
+    if context_tokens:
+        return context_tokens
     if usage.get("input_tokens"):
         return usage["input_tokens"] + usage.get("output_tokens", 0)
     return usage.get("total_tokens", 0)

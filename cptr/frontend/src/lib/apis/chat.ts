@@ -95,16 +95,6 @@ export interface QuotaResponse {
 	};
 }
 
-export interface CompactChatResult {
-	ok: boolean;
-	compacted: boolean;
-	reason?: string;
-	dropped_messages?: number;
-	kept_messages?: number;
-	summary_chars?: number;
-	context_usage?: ContextUsage | null;
-}
-
 export interface UsageHeatmapEntry {
 	date: string;
 	tokens: number;
@@ -240,12 +230,6 @@ export const answerAskUser = (
 
 export const cancelTask = (chatId: string, messageId: string) =>
 	fetchJSON(`/api/chats/${chatId}/messages/${messageId}/cancel`, { method: 'POST' });
-
-export const compactChat = (chatId: string, modelId?: string | null) =>
-	fetchJSON<CompactChatResult>(
-		`/api/chats/${chatId}/compact`,
-		jsonBody({ model_id: modelId || null })
-	);
 
 export const updateCurrentMessage = (chatId: string, messageId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}/current`, jsonBody({ message_id: messageId }));

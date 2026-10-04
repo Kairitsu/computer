@@ -26,6 +26,7 @@ class AcpClient:
         resume_session_id: str | None = None,
         auto_approve_permissions: bool = False,
         extension_requests: frozenset[str] = frozenset(),
+        session_meta: dict[str, Any] | None = None,
         preexec_fn=None,
     ) -> None:
         self.command = command
@@ -36,6 +37,8 @@ class AcpClient:
         self.client_capabilities = client_capabilities or {}
         self.resume_session_id = resume_session_id
         self.auto_approve_permissions = auto_approve_permissions
+        # Sent as `_meta` on session/new and session/load (e.g. Grok's permission mode).
+        self.session_meta = session_meta
         # Agent-to-client requests the adapter answers itself via respond().
         self.extension_requests = extension_requests
         self.preexec_fn = preexec_fn
@@ -179,6 +182,7 @@ class AcpClient:
 
     async def _open_session(self) -> None:
         setup: dict[str, Any] | None = None
+        meta = {"_meta": self.session_meta} if self.session_meta else {}
         if self.resume_session_id:
             # session/load replays the whole conversation as session/update notifications
             # before it responds. The chat already has those turns, so drop the replay
@@ -188,13 +192,18 @@ class AcpClient:
                 with suppress(Exception):
                     setup = await self.request(
                         "session/load",
-                        {"sessionId": self.resume_session_id, "cwd": self.cwd, "mcpServers": []},
+                        {
+                            "sessionId": self.resume_session_id,
+                            "cwd": self.cwd,
+                            "mcpServers": [],
+                            **meta,
+                        },
                     )
                     self.session_id = self.resume_session_id
             finally:
                 self.replaying_history = False
         if setup is None:
-            setup = await self.request("session/new", {"cwd": self.cwd, "mcpServers": []})
+            setup = await self.request("session/new", {"cwd": self.cwd, "mcpServers": [], **meta})
             session_id = setup.get("sessionId")
             self.session_id = session_id if isinstance(session_id, str) else None
         if not self.session_id:
@@ -263,9 +272,11 @@ class AcpClient:
     async def _reply_permission(self, request_id: Any, params: dict[str, Any]) -> None:
         option_id = None
         if self.auto_approve_permissions:
+            # Allow just this call: "always" options persist grants in the agent (Grok's is
+            # "don't ask again for bash commands") that outlive the chat's approval mode.
             option_id = _select_permission_option(
-                params, "allow_always"
-            ) or _select_permission_option(params, "allow_once")
+                params, "allow_once"
+            ) or _select_permission_option(params, "allow_always")
         outcome = (
             {"outcome": {"outcome": "selected", "optionId": option_id}}
             if option_id
