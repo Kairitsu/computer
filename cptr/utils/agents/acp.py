@@ -420,6 +420,29 @@ def acp_models_from_setup(setup: dict[str, Any]) -> list[str]:
     return result
 
 
-async def acp_event_stream(client: AcpClient) -> AsyncIterator[dict[str, Any]]:
+async def acp_event_stream(
+    client: AcpClient, prompt_task: asyncio.Task
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield session updates until the turn's session/prompt request finishes.
+
+    Waits on the event queue and the prompt request together, so the turn still ends
+    when the last update is read before the prompt response arrives.
+    """
+    while not prompt_task.done():
+        next_event = asyncio.ensure_future(client.events.get())
+        try:
+            await asyncio.wait({next_event, prompt_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if not next_event.done():
+                next_event.cancel()
+                with suppress(asyncio.CancelledError):
+                    await next_event
+        if next_event.cancelled():
+            break
+        yield next_event.result()
+    # Agents can send a few updates right after the prompt response.
     while True:
-        yield await client.events.get()
+        try:
+            yield await asyncio.wait_for(client.events.get(), timeout=0.25)
+        except asyncio.TimeoutError:
+            break
