@@ -48,6 +48,20 @@ class AgentAskUser:
 
 
 @dataclass
+class AgentPermissionRequest:
+    """The agent is blocked until the user allows or denies one of its tool calls.
+
+    The consumer sets ``approved`` before pulling the next event; ``None`` means
+    nobody answered.
+    """
+
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+    approved: bool | None = None
+
+
+@dataclass
 class AgentDone:
     usage: dict[str, Any] | None = None
     resume_state: dict[str, Any] | None = None
@@ -64,6 +78,7 @@ AgentEvent = (
     | AgentToolUpdate
     | AgentToolOutputDelta
     | AgentAskUser
+    | AgentPermissionRequest
     | AgentDone
     | AgentError
 )

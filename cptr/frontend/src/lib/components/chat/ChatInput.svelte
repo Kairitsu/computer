@@ -29,6 +29,7 @@
 	import QueuedMessageItem from './QueuedMessageItem.svelte';
 	import Tasks from './Tasks.svelte';
 	import AskUserCard from './AskUserCard.svelte';
+	import PlanApprovalCard from './PlanApprovalCard.svelte';
 	import Icon from '../Icon.svelte';
 	import type { ToolApprovalMode } from '$lib/apis/chat';
 	import {
@@ -77,6 +78,9 @@
 		contextUsage?: ContextUsage | null;
 		tasks?: ChatTask[];
 		askUser?: any;
+		planApproval?: boolean;
+		onplanapprove?: () => void;
+		onplanrevise?: () => void;
 		queuedMessages?: { id: string; content: string }[];
 		hasChatContent?: boolean;
 		onsend: () => void;
@@ -112,6 +116,9 @@
 		contextUsage = null,
 		tasks = [],
 		askUser = null,
+		planApproval = false,
+		onplanapprove,
+		onplanrevise,
 		queuedMessages = [],
 		hasChatContent = false,
 		onsend,
@@ -1242,6 +1249,12 @@
 				messageId={askUser.messageId}
 				onanswer={onaskuseranswer}
 			/>
+		</div>
+	{/if}
+
+	{#if planApproval && onplanapprove && onplanrevise}
+		<div class="mx-1">
+			<PlanApprovalCard onapprove={onplanapprove} onrevise={onplanrevise} />
 		</div>
 	{/if}
 

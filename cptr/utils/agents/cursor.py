@@ -9,8 +9,10 @@ from typing import Any, AsyncIterator
 
 from cptr.utils.agents.attachments import PreparedAgentAttachments
 from cptr.utils.agents.acp import (
+    ACP_PERMISSION_METHOD,
     AcpClient,
     acp_event_stream,
+    acp_permission_events,
     acp_text_from_update,
     acp_tool_from_update,
 )
@@ -69,6 +71,7 @@ async def run_cursor_agent(
         client_capabilities=CURSOR_CAPABILITIES,
         resume_session_id=session_id,
         auto_approve_permissions=_auto_approve(chat_params),
+        extension_requests=frozenset({ACP_PERMISSION_METHOD}),
         preexec_fn=preexec_for(identity) if identity and identity.is_pam else None,
     )
     try:
@@ -84,6 +87,10 @@ async def run_cursor_agent(
         prompt_task = asyncio.create_task(client.prompt(prompt, images=images))
         try:
             async for event in acp_event_stream(client, prompt_task):
+                if "id" in event and event.get("method") == ACP_PERMISSION_METHOD:
+                    async for permission_event in acp_permission_events(client, event):
+                        yield permission_event
+                    continue
                 params = event.get("params") if isinstance(event.get("params"), dict) else {}
                 text = acp_text_from_update(params)
                 if text:

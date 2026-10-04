@@ -312,8 +312,7 @@ def _opencode_tool_status(value: Any) -> str:
         return "completed"
     if normalized == "error":
         return "failed"
-    if normalized == "pending":
-        return "pending"
+    # Not started yet; "pending" would show Allow/Deny that nothing is waiting on.
     return "in_progress"
 
 

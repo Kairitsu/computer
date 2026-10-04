@@ -8,6 +8,10 @@ import os
 from contextlib import suppress
 from typing import Any, AsyncIterator
 
+from cptr.utils.agents.events import AgentEvent, AgentPermissionRequest
+
+ACP_PERMISSION_METHOD = "session/request_permission"
+
 
 class AcpClient:
     def __init__(
@@ -230,7 +234,11 @@ class AcpClient:
 
         method = message.get("method")
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
-        if "id" in message and method == "session/request_permission":
+        if (
+            "id" in message
+            and method == ACP_PERMISSION_METHOD
+            and (self.auto_approve_permissions or method not in self.extension_requests)
+        ):
             await self._reply_permission(message["id"], params)
             return
         if "id" in message and method and method not in self.extension_requests:
@@ -329,6 +337,42 @@ def _select_permission_option(params: dict[str, Any], kind: str) -> str | None:
     return None
 
 
+def acp_permission_outcome(params: dict[str, Any], approved: bool | None) -> dict[str, Any]:
+    option_id = None
+    if approved is True:
+        option_id = _select_permission_option(params, "allow_once") or _select_permission_option(
+            params, "allow_always"
+        )
+    elif approved is False:
+        option_id = _select_permission_option(params, "reject_once") or _select_permission_option(
+            params, "reject_always"
+        )
+    if option_id:
+        return {"outcome": {"outcome": "selected", "optionId": option_id}}
+    return {"outcome": {"outcome": "cancelled"}}
+
+
+async def acp_permission_events(
+    client: AcpClient, message: dict[str, Any]
+) -> AsyncIterator[AgentEvent]:
+    """Ask the user about one session/request_permission, then answer the agent."""
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    tool_call = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
+    call_id = tool_call.get("toolCallId")
+    if not isinstance(call_id, str) or not call_id.strip():
+        call_id = f"permission-{message.get('id')}"
+    tool = acp_tool_from_update(
+        {"update": {**tool_call, "sessionUpdate": "tool_call", "toolCallId": call_id}}
+    )
+    request = AgentPermissionRequest(
+        call_id=call_id.strip(),
+        name=tool["name"] if tool else "agent_tool",
+        arguments=tool["arguments"] if tool else {"title": "Agent tool"},
+    )
+    yield request
+    await client.respond(message.get("id"), acp_permission_outcome(params, request.approved))
+
+
 def acp_text_from_update(params: dict[str, Any]) -> str | None:
     update = params.get("update")
     if not isinstance(update, dict):
@@ -381,8 +425,8 @@ def _tool_status(value: Any) -> str:
         return "completed"
     if normalized in {"failed", "error"}:
         return "failed"
-    if normalized in {"pending"}:
-        return "pending"
+    # ACP "pending" just means not started yet. A pending item shows Allow/Deny in the
+    # chat, which only a session/request_permission the user can answer should do.
     return "in_progress"
 
 

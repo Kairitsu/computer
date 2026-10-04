@@ -122,6 +122,8 @@
 		}
 		return null;
 	});
+	// Plan reply the user chose to revise; hides its approval card until the next reply.
+	let planRevisingId = $state<string | null>(null);
 	let currentMessageId = $state<string | null>(null);
 	let contextUsage = $state<ContextUsage | null>(null);
 	let chatTasks = $state<ChatTask[]>([]);
@@ -343,6 +345,13 @@
 
 	const streaming = $derived(allMessages.some((m) => m.role === 'assistant' && !m.done));
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
+	// In plan mode, a finished reply is a plan waiting for approval.
+	const planApprovalMessageId = $derived.by(() => {
+		if (!planMode || streaming || sending || pendingAskUser) return null;
+		const last = activePath[activePath.length - 1]?.msg;
+		if (!last || last.role !== 'assistant' || !last.done || last.meta?.error) return null;
+		return last.content?.trim() ? last.id : null;
+	});
 	const hasChatContent = $derived(
 		activePath.some(({ msg }) => msg.role === 'user' && msg.content.trim())
 	);
@@ -1121,6 +1130,20 @@
 	function handlePlanCommand() {
 		planMode = !planMode;
 		persistChatSettings();
+	}
+
+	async function handlePlanApprove() {
+		// Leave plan mode and send the approval; anything typed so far rides along.
+		const draft = inputText.trim();
+		const approval = $t('chat.planApproveMessage');
+		planMode = false;
+		inputText = draft ? `${approval}\n\n${draft}` : approval;
+		await send();
+	}
+
+	function handlePlanRevise() {
+		planRevisingId = planApprovalMessageId;
+		chatInputEl?.focus();
 	}
 
 	function handleToolApprovalModeChange(mode: ToolApprovalMode) {
@@ -1949,6 +1972,9 @@
 					tasks={chatTasks}
 					askUser={pendingAskUser}
 					onaskuseranswer={handleAskUserAnswer}
+					planApproval={!!planApprovalMessageId && planApprovalMessageId !== planRevisingId}
+					onplanapprove={handlePlanApprove}
+					onplanrevise={handlePlanRevise}
 					onsend={send}
 					oncompact={handleManualCompact}
 					onfork={handleForkChat}

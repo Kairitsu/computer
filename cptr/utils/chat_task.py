@@ -66,6 +66,7 @@ from cptr.utils.agents.events import (
     AgentAskUser,
     AgentDone,
     AgentError,
+    AgentPermissionRequest,
     AgentReasoningDelta,
     AgentTextDelta,
     AgentToolOutputDelta,
@@ -366,8 +367,10 @@ _tasks: dict[str, asyncio.Task] = {}  # message_id → asyncio.Task
 _task_state: dict[str, dict] = {}  # message_id → {content, output}
 _task_chat: dict[str, str] = {}  # message_id → chat_id
 _pending_input_locks: dict[str, asyncio.Lock] = {}  # chat_id → Lock
-# (message_id, call_id) → (answer future, question event) for agent turns blocked on ask_user
-_agent_ask_waiters: dict[tuple[str, str], tuple[asyncio.Future, AgentAskUser]] = {}
+# (message_id, call_id) → (answer future, request) for agent turns blocked on the user
+_agent_ask_waiters: dict[
+    tuple[str, str], tuple[asyncio.Future, AgentAskUser | AgentPermissionRequest]
+] = {}
 
 
 def get_pending_input_lock(chat_id: str) -> asyncio.Lock:
@@ -458,12 +461,24 @@ def resolve_agent_ask_user(
     Returns False when no running turn is waiting on it.
     """
     entry = _agent_ask_waiters.get((message_id, call_id))
-    if entry is None or entry[0].done():
+    if entry is None or entry[0].done() or not isinstance(entry[1], AgentAskUser):
         return False
     waiter, ask = entry
     if timed_out and not ask.auto_resolve:
         raise ValueError("this question needs an answer from the user")
     waiter.set_result(_agent_ask_user_result(ask, None if timed_out else answers))
+    return True
+
+
+def resolve_agent_permission(message_id: str, call_id: str, approved: bool) -> bool:
+    """Hand an allow/deny to a running agent turn blocked on this tool call.
+
+    Returns False when no running turn is waiting on it.
+    """
+    entry = _agent_ask_waiters.get((message_id, call_id))
+    if entry is None or entry[0].done() or not isinstance(entry[1], AgentPermissionRequest):
+        return False
+    entry[0].set_result(approved)
     return True
 
 
@@ -1667,7 +1682,9 @@ async def run_chat_task(
         if regeneration_prompt:
             messages.append({"role": "user", "content": regeneration_prompt})
         if chat_params.get("plan_mode", False):
-            messages.append({"role": "user", "content": PLAN_MODE_PROMPT})
+            # A resumed agent session only receives the latest user message, so append the
+            # instruction to it rather than adding a message that would replace it.
+            _append_prompt_suffix(messages, f"\n\n{PLAN_MODE_PROMPT}")
         system = await _apply_voice_mode_system_prompt(system, chat_params)
 
         resume_state = None
@@ -1764,6 +1781,50 @@ async def run_chat_task(
                 "agent ask_user answered", content=content, output=output_items, done=False
             )
             return {qid: entry["answers"][0] for qid, entry in result["answers"].items()}
+
+        async def _ask_agent_permission(request: AgentPermissionRequest) -> bool:
+            """Show Allow/Deny on the agent's tool call and wait for the user's choice."""
+            existing = next(
+                (
+                    item
+                    for item in output_items
+                    if item.get("type") == "function_call"
+                    and item.get("call_id") == request.call_id
+                ),
+                {},
+            )
+            call_item = {
+                **existing,
+                "type": "function_call",
+                "id": existing.get("id") or f"agent-{request.call_id}",
+                "call_id": request.call_id,
+                "name": existing.get("name") or _safe_tool_name(request.name),
+                "native_agent": True,
+                "arguments": existing.get("arguments") or request.arguments,
+                "status": "pending",
+            }
+            key = (message_id, request.call_id)
+            waiter = asyncio.get_running_loop().create_future()
+            _agent_ask_waiters[key] = (waiter, request)
+            try:
+                _upsert_output_item(output_items, call_item)
+                _sync_state()
+                await _save_message(
+                    "agent permission", content=content, output=output_items, done=False
+                )
+                await emit(output=call_item)
+                approved = bool(await waiter)
+            finally:
+                _agent_ask_waiters.pop(key, None)
+            call_item["approved"] = approved
+            call_item["status"] = "in_progress" if approved else "rejected"
+            _upsert_output_item(output_items, call_item)
+            await emit(output=call_item)
+            _sync_state()
+            await _save_message(
+                "agent permission answered", content=content, output=output_items, done=False
+            )
+            return approved
 
         agent_events = runner(
             profile=agent_target.config,
@@ -1938,6 +1999,16 @@ async def run_chat_task(
                     event.answers = await _ask_agent_user(event)
                 except asyncio.CancelledError:
                     # Stopped while waiting: shut the agent down now rather than at GC.
+                    await agent_events.aclose()
+                    raise
+            elif isinstance(event, AgentPermissionRequest):
+                await _finish_reasoning_item()
+                flushed_item = _flush_text()
+                if flushed_item:
+                    await emit(output=flushed_item)
+                try:
+                    event.approved = await _ask_agent_permission(event)
+                except asyncio.CancelledError:
                     await agent_events.aclose()
                     raise
             elif isinstance(event, AgentError):

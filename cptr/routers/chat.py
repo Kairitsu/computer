@@ -1388,6 +1388,24 @@ async def resolve_pending_tool_call(
     if body.action == "approve" and call.get("name") == "ask_user":
         raise HTTPException(400, "ask_user requires answer or reject")
 
+    if call.get("native_agent") and call.get("name") != "ask_user":
+        # A coding agent's permission request: its process is mid-turn waiting for
+        # the choice, so hand it over instead of queueing the call for a new turn.
+        from cptr.utils.chat_task import is_running, resolve_agent_permission
+
+        if resolve_agent_permission(message_id, body.call_id, body.action == "approve"):
+            return {"ok": True}
+        if not is_running(message_id):
+            # The agent that asked is gone (e.g. server restart); retire the request.
+            from cptr.socket.main import emit_to_user
+
+            call["status"] = "failed"
+            await ChatMessage.update(message_id, output=output, done=True)
+            await emit_to_user(
+                user_id, {"chat_id": chat_id, "message_id": message_id, "output": call}
+            )
+        raise HTTPException(409, "the agent is no longer waiting for this approval")
+
     model_id = msg.model or ""
     workspace = chat.meta.get("workspace", "") if chat.meta else ""
     from cptr.socket.main import emit_to_user
