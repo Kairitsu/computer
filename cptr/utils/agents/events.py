@@ -34,6 +34,20 @@ class AgentToolOutputDelta:
 
 
 @dataclass
+class AgentAskUser:
+    """The agent is blocked until the user answers ``questions``.
+
+    The consumer sets ``answers`` (question id → answer) before pulling the next
+    event; ``None`` means nobody answered.
+    """
+
+    call_id: str
+    questions: list[dict[str, Any]]
+    auto_resolve: bool = True
+    answers: dict[str, str] | None = None
+
+
+@dataclass
 class AgentDone:
     usage: dict[str, Any] | None = None
     resume_state: dict[str, Any] | None = None
@@ -49,6 +63,7 @@ AgentEvent = (
     | AgentReasoningDelta
     | AgentToolUpdate
     | AgentToolOutputDelta
+    | AgentAskUser
     | AgentDone
     | AgentError
 )

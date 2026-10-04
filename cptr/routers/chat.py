@@ -1282,9 +1282,28 @@ async def resolve_ask_user(
     if timed_out and now_ms() < int(call.get("expires_at") or 0):
         raise AskUserNotPendingError("ask_user request has not timed out")
 
-    from cptr.utils.chat_task import ask_user_answers, start_task
+    from cptr.utils.chat_task import (
+        ask_user_answers,
+        is_running,
+        resolve_agent_ask_user,
+        start_task,
+    )
     from cptr.utils.model_targets import resolve_model_target
     from cptr.socket.main import emit_to_user
+
+    if call.get("native_agent"):
+        # A coding agent's own question: its process is still mid-turn waiting for
+        # the answer, so hand it over instead of starting a new turn.
+        if resolve_agent_ask_user(message_id, call_id, answers, timed_out):
+            return
+        if not is_running(message_id):
+            # The agent that asked is gone (e.g. server restart); retire the card.
+            call["status"] = "failed"
+            await ChatMessage.update(message_id, output=output, done=True)
+            await emit_to_user(
+                chat.user_id, {"chat_id": chat_id, "message_id": message_id, "output": call}
+            )
+        raise AskUserNotPendingError("the agent is no longer waiting for this answer")
 
     result = ask_user_answers(call.get("arguments") or {}, None if timed_out else answers)
     if timed_out:

@@ -21,6 +21,7 @@ class AcpClient:
         client_capabilities: dict[str, Any] | None = None,
         resume_session_id: str | None = None,
         auto_approve_permissions: bool = False,
+        extension_requests: frozenset[str] = frozenset(),
         preexec_fn=None,
     ) -> None:
         self.command = command
@@ -31,6 +32,8 @@ class AcpClient:
         self.client_capabilities = client_capabilities or {}
         self.resume_session_id = resume_session_id
         self.auto_approve_permissions = auto_approve_permissions
+        # Agent-to-client requests the adapter answers itself via respond().
+        self.extension_requests = extension_requests
         self.preexec_fn = preexec_fn
         self.proc: asyncio.subprocess.Process | None = None
         self.reader_task: asyncio.Task | None = None
@@ -107,6 +110,14 @@ class AcpClient:
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         await self._send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    async def respond(self, request_id: Any, result: dict[str, Any]) -> None:
+        await self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+    async def respond_error(self, request_id: Any, code: int, message: str) -> None:
+        await self._send(
+            {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+        )
 
     async def prompt(self, text: str, images: list[dict[str, str]] | None = None) -> dict[str, Any]:
         if not self.session_id:
@@ -221,6 +232,10 @@ class AcpClient:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         if "id" in message and method == "session/request_permission":
             await self._reply_permission(message["id"], params)
+            return
+        if "id" in message and method and method not in self.extension_requests:
+            # The agent blocks until every request it sends gets a response.
+            await self.respond_error(message["id"], -32601, f"Method not found: {method}")
             return
         if self.replaying_history and method == "session/update":
             return
