@@ -14,12 +14,6 @@
 		goto('/');
 		if (typeof window !== 'undefined' && window.innerWidth < 768) sidebarOpen.set(false);
 	}
-
-	function openAutomations(e: MouseEvent) {
-		e.preventDefault();
-		goto('/scheduled');
-		if (typeof window !== 'undefined' && window.innerWidth < 768) sidebarOpen.set(false);
-	}
 </script>
 
 {#if $chatEnabled}
@@ -51,21 +45,6 @@
 		/>
 	</button>
 </div>
-
-{#if $chatEnabled}
-	<div class="px-1.5 shrink-0">
-		<a
-			href="/scheduled"
-			class="nav-item flex items-center gap-2 w-full h-8 px-2 rounded-lg text-[0.8125rem] text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors duration-100 no-underline"
-			onclick={openAutomations}
-		>
-			<Icon name="clock" size={15} />
-			<span class="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap"
-				>{$t('automations.title')}</span
-			>
-		</a>
-	</div>
-{/if}
 
 <style>
 	.nav-item:hover {

@@ -1,7 +1,9 @@
 <script lang="ts">
 	/**
 	 * Composer model hub: one chip for model + reasoning effort + context window,
-	 * modelled on Grok App's combined model/effort menu.
+	 * modelled on Grok App's combined model/effort menu. When the model's agent CLI
+	 * lists its efforts / context windows (Grok), the hub offers exactly those, with the
+	 * CLI's defaults.
 	 */
 	import { tick } from 'svelte';
 	import type { ReasoningEffort } from '$lib/apis/chat';
@@ -30,6 +32,7 @@
 	type Page = 'main' | 'models' | 'effort' | 'context';
 
 	const EFFORTS: (ReasoningEffort | null)[] = [null, 'low', 'medium', 'high', 'xhigh'];
+	const EFFORT_LEVELS: Record<string, number> = { low: 1, medium: 2, high: 3, xhigh: 4 };
 	const CONTEXT_WINDOWS = [32_000, 64_000, 128_000, 200_000, 256_000, 500_000, 1_000_000];
 
 	let btnEl: HTMLButtonElement | undefined = $state();
@@ -42,12 +45,27 @@
 
 	const model = $derived($chatModels.find((m) => m.id === selectedModel));
 	const supportsEffort = $derived(model?.supports_reasoning_effort === true);
-	const effortLabel = $derived(effortName(reasoningEffort));
+	const cliEfforts = $derived(model?.reasoning_efforts?.length ? model.reasoning_efforts : null);
+	const cliContextWindows = $derived(model?.context_windows?.length ? model.context_windows : null);
+	// What the CLI will run with: the composer's choice when it offers it, else its default.
+	const effectiveEffort = $derived(
+		cliEfforts && !cliEfforts.some((option) => option.value === reasoningEffort)
+			? (model?.default_reasoning_effort ?? null)
+			: reasoningEffort
+	);
+	const effectiveContextWindow = $derived(
+		cliContextWindows && !(contextWindow && cliContextWindows.includes(contextWindow))
+			? (model?.context_window ?? null)
+			: contextWindow
+	);
+	const effortLabel = $derived(effortName(effectiveEffort));
 	const defaultContextLabel = $derived(
 		model?.context_window ? formatTokens(model.context_window) : $t('effort.default')
 	);
 	const contextLabel = $derived(
-		contextWindow ? formatTokens(contextWindow) : `${$t('effort.default')} · ${defaultContextLabel}`
+		effectiveContextWindow
+			? formatTokens(effectiveContextWindow)
+			: `${$t('effort.default')} · ${defaultContextLabel}`
 	);
 	const filteredModels = $derived(
 		search.trim()
@@ -61,6 +79,9 @@
 	);
 
 	function effortName(effort: ReasoningEffort | null | undefined) {
+		if (effort && !(effort in EFFORT_LEVELS)) {
+			return cliEfforts?.find((option) => option.value === effort)?.label ?? effort;
+		}
 		return $t(`effort.${effort ?? 'default'}`);
 	}
 
@@ -100,7 +121,15 @@
 	function selectModel(id: string) {
 		selectedModel = id;
 		const next = $chatModels.find((m) => m.id === id);
-		if (!next?.supports_reasoning_effort) reasoningEffort = null;
+		const efforts = next?.reasoning_efforts;
+		if (
+			!next?.supports_reasoning_effort ||
+			(efforts?.length && !efforts.some((option) => option.value === reasoningEffort))
+		) {
+			reasoningEffort = null;
+		}
+		const windows = next?.context_windows;
+		if (contextWindow && windows?.length && !windows.includes(contextWindow)) contextWindow = null;
 		onchange?.();
 		page = 'main';
 	}
@@ -158,7 +187,7 @@
 >
 	<Icon name="flash" size={13} class="shrink-0" />
 	<span class="truncate max-w-[11rem]">{triggerLabel}</span>
-	{#if supportsEffort && reasoningEffort}
+	{#if supportsEffort && effectiveEffort}
 		<span class="shrink-0">{effortLabel}</span>
 	{/if}
 	{#if $chatModels.length > 0}
@@ -244,6 +273,45 @@
 							</div>
 						{/each}
 					</div>
+				{:else if page === 'effort' && cliEfforts}
+					{#each cliEfforts as option (option.value)}
+						<button
+							type="button"
+							class="hub-option hub-option-tall"
+							class:active={effectiveEffort === option.value}
+							onclick={() => selectEffort(option.value)}
+						>
+							<span class="flex-1 min-w-0 text-left">
+								<span class="block"
+									>{effortName(
+										option.value
+									)}{#if option.value === model?.default_reasoning_effort}<span
+											class="ml-1 text-gray-400"
+										>
+											· {$t('effort.default')}</span
+										>{/if}</span
+								>
+								{#if option.description}
+									<span class="block text-[0.625rem] leading-snug opacity-70"
+										>{option.description}</span
+									>
+								{/if}
+							</span>
+							{#if EFFORT_LEVELS[option.value]}
+								<span class="effort-bars" aria-hidden="true">
+									{#each [1, 2, 3, 4] as level}
+										<span class:on={level <= EFFORT_LEVELS[option.value]}></span>
+									{/each}
+								</span>
+							{/if}
+							{#if effectiveEffort === option.value}
+								<Icon name="check" size={12} class="shrink-0 hub-check" />
+							{/if}
+						</button>
+					{/each}
+					<p class="px-2 pt-1 pb-0.5 text-[0.625rem] leading-snug text-gray-400">
+						{$t('modelHub.cliEffortHint')}
+					</p>
 				{:else if page === 'effort'}
 					{#each EFFORTS as effort}
 						<button
@@ -267,6 +335,29 @@
 					{/each}
 					<p class="px-2 pt-1 pb-0.5 text-[0.625rem] leading-snug text-gray-400">
 						{$t('modelHub.effortHint')}
+					</p>
+				{:else if cliContextWindows}
+					{#each cliContextWindows as value}
+						<button
+							type="button"
+							class="hub-option"
+							class:active={effectiveContextWindow === value}
+							onclick={() => selectContext(value)}
+						>
+							<span class="flex-1 text-left tabular-nums"
+								>{formatTokens(value)}{#if value === model?.context_window}<span
+										class="ml-1 text-gray-400"
+									>
+										· {$t('effort.default')}</span
+									>{/if}</span
+							>
+							{#if effectiveContextWindow === value}
+								<Icon name="check" size={12} class="shrink-0 hub-check" />
+							{/if}
+						</button>
+					{/each}
+					<p class="px-2 pt-1 pb-0.5 text-[0.625rem] leading-snug text-gray-400">
+						{$t('modelHub.cliContextHint')}
 					</p>
 				{:else}
 					<button
@@ -395,6 +486,17 @@
 	.hub-row:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.hub-option-tall {
+		align-items: flex-start;
+		padding-top: 0.375rem;
+		padding-bottom: 0.375rem;
+	}
+
+	.hub-option-tall :global(.hub-check),
+	.hub-option-tall .effort-bars {
+		margin-top: 0.125rem;
 	}
 
 	.hub-option.active {

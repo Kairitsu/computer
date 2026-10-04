@@ -637,6 +637,8 @@
 	"modelHub.contextCustomPlaceholder": "Custom, e.g. 300K",
 	"modelHub.contextSave": "Save",
 	"modelHub.contextHint": "Usage is measured against this window; older turns are summarized when it fills up.",
+	"modelHub.cliEffortHint": "Options and default come from the model's CLI; with no choice the CLI's own default applies.",
+	"modelHub.cliContextHint": "Context windows the model's CLI offers; the CLI compacts older turns as the window fills.",
 	"effort.default": "Default",
 	"effort.low": "Low",
 	"effort.medium": "Medium",

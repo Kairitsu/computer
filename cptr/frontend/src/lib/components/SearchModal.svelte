@@ -4,7 +4,8 @@
 		currentWorkspace,
 		showSearch,
 		openFileTab,
-		setFileBrowserCwd
+		setFileBrowserCwd,
+		requestHomeChat
 	} from '$lib/stores';
 	import { getPathDisplayName } from '$lib/utils/paths';
 	import { fileIconName } from '$lib/utils/fileIcon';
@@ -206,18 +207,12 @@
 				}
 			}
 		} else {
-			// No workspace: full search across all workspaces
+			// No workspace: every chat (Home chats included) + files in the open workspaces
 			fileMatches = [];
 			fileSearchLoading = false;
 			fileSearchError = null;
 			fileSearchNextOffset = null;
 			const wsPaths = $workspaceList.map((w) => w.path);
-			if (wsPaths.length === 0) {
-				chatResults = [];
-				fileResults = [];
-				loading = false;
-				return;
-			}
 			try {
 				const data = await unifiedSearch(q, wsPaths);
 				if (requestId === searchRequestId) {
@@ -272,6 +267,7 @@
 	}
 
 	function getWorkspaceDisplayName(workspacePath: string): string {
+		if (!workspacePath) return $t('sidebar.defaultWorkspace');
 		const workspace = $workspaceList.find((item) => item.path === workspacePath);
 		if (workspace) return workspace.name;
 		return getPathDisplayName(workspacePath, workspacePath);
@@ -279,6 +275,12 @@
 
 	function selectChat(chat: ChatSearchResult) {
 		onclose();
+		if (!chat.workspace) {
+			// Home chats belong to no workspace; open them in Home like the sidebar does.
+			requestHomeChat(chat.id);
+			goto('/');
+			return;
+		}
 		goto(`/?workspace=${encodeURIComponent(chat.workspace)}&chatId=${encodeURIComponent(chat.id)}`);
 	}
 

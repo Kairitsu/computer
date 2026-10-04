@@ -327,18 +327,21 @@ async def get_models(request: Request):
     from cptr.utils.agents.detection import get_available_agent_model_entries
 
     for entry in await get_available_agent_model_entries(request.app.state):
-        models.append(
-            {
-                **entry,
-                "supports_reasoning_effort": entry.get("agent_id") in REASONING_EFFORT_AGENTS,
-            }
+        # Agents that list their efforts (Grok) support exactly those; the rest by agent.
+        supports_effort = (
+            bool(entry["reasoning_efforts"])
+            if "reasoning_efforts" in entry
+            else entry.get("agent_id") in REASONING_EFFORT_AGENTS
         )
+        models.append({**entry, "supports_reasoning_effort": supports_effort})
 
     for model in models:
-        model["context_window"] = resolve_compact_token_threshold(
-            model["id"],
-            chat_models_config=chat_models_config,
-            global_threshold=global_threshold,
+        model["context_window"] = model.get("default_context_window") or (
+            resolve_compact_token_threshold(
+                model["id"],
+                chat_models_config=chat_models_config,
+                global_threshold=global_threshold,
+            )
         )
 
     default_model = await Config.get("chat.default_model")
@@ -824,6 +827,22 @@ async def _get_context_leaf_message_id(chat) -> str | None:
     return messages[-1].id if messages else None
 
 
+def _agent_context_window(app_state, model_id: str | None, params: object) -> int | None:
+    """Window an agent CLI that lists its context windows (Grok) runs the chat with.
+
+    A chosen window the CLI does not offer is not sent to it, so the CLI default applies.
+    """
+    from cptr.utils.agents.detection import cached_agent_model_options
+    from cptr.utils.context import chat_context_window
+
+    options = cached_agent_model_options(app_state, model_id or "")
+    windows = options.get("context_windows") or []
+    if not windows:
+        return None
+    chosen = chat_context_window(params)
+    return chosen if chosen in windows else options.get("default_context_window")
+
+
 async def _get_chat_context_usage(
     request: Request, chat, model_id: str | None = None
 ) -> dict | None:
@@ -844,9 +863,12 @@ async def _get_chat_context_usage(
     messages, existing_summary = await _load_message_history(chat.id, message_id)
     workspace = (chat.meta or {}).get("workspace", "")
     model = model_id or await _infer_chat_model(chat.id)
-    compact_token_threshold = chat_context_window(
-        (chat.meta or {}).get("params")
-    ) or await load_compact_token_threshold(model)
+    params = (chat.meta or {}).get("params")
+    compact_token_threshold = (
+        _agent_context_window(request.app.state, model, params)
+        or chat_context_window(params)
+        or await load_compact_token_threshold(model)
+    )
     system = await _load_system_prompt(request, workspace, model or "", user_id=chat.user_id)
     if existing_summary:
         system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"

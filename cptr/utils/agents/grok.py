@@ -185,15 +185,117 @@ def _auto_approve(chat_params: dict[str, Any]) -> bool:
     return bool(chat_params.get("auto_approve_tools"))
 
 
-GROK_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
-def _agent_args(chat_params: dict[str, Any]) -> list[str]:
-    """`grok agent [--reasoning-effort <effort>] stdio` for the composer's effort."""
+def _model_state(setup: dict[str, Any], initialize_meta: Any) -> dict[str, Any]:
+    """`models` from session setup, else the copy Grok puts in its initialize `_meta`."""
+    models = setup.get("models")
+    if not isinstance(models, dict) and isinstance(initialize_meta, dict):
+        models = initialize_meta.get("modelState")
+    return models if isinstance(models, dict) else {}
+
+
+def _session_reasoning_effort(setup: dict[str, Any]) -> str | None:
+    for option in setup.get("configOptions") or []:
+        if isinstance(option, dict) and option.get("id") == "reasoning_effort":
+            value = option.get("currentValue")
+            return value if isinstance(value, str) and value else None
+    return None
+
+
+def grok_model_options(
+    setup: dict[str, Any], initialize_meta: Any = None
+) -> dict[str, dict[str, Any]]:
+    """Reasoning efforts and context windows Grok offers per model, with Grok's defaults.
+
+    The default effort is the session's (`[models].default_reasoning_effort` in Grok's
+    config) when the model offers it, else the model's own default. The default context
+    window is the model's catalog window.
+    """
+    session_effort = _session_reasoning_effort(setup)
+    result: dict[str, dict[str, Any]] = {}
+    for item in _model_state(setup, initialize_meta).get("availableModels") or []:
+        model_id = item.get("modelId") if isinstance(item, dict) else None
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        meta = item.get("_meta") if isinstance(item.get("_meta"), dict) else {}
+
+        efforts: list[dict[str, str]] = []
+        recommended = None
+        if meta.get("supportsReasoningEffort") is True:
+            for raw in meta.get("reasoningEfforts") or []:
+                value = raw.get("value") if isinstance(raw, dict) else None
+                if not isinstance(value, str) or not value:
+                    continue
+                label = raw.get("label")
+                description = raw.get("description")
+                efforts.append(
+                    {
+                        "value": value,
+                        "label": label if isinstance(label, str) and label else value,
+                        "description": description if isinstance(description, str) else "",
+                    }
+                )
+                if raw.get("default") is True:
+                    recommended = value
+        values = [effort["value"] for effort in efforts]
+        default_effort = next(
+            (
+                value
+                for value in (session_effort, meta.get("reasoningEffort"), recommended)
+                if value in values
+            ),
+            values[0] if values else None,
+        )
+
+        windows = [
+            window
+            for window in (_positive_int(raw) for raw in meta.get("contextWindows") or [])
+            if window
+        ]
+        default_window = _positive_int(meta.get("totalContextTokens"))
+        if default_window and default_window not in windows:
+            windows.insert(0, default_window)
+        default_window = default_window or (windows[0] if windows else None)
+
+        result[model_id.strip()] = {
+            "reasoning_efforts": efforts,
+            "default_reasoning_effort": default_effort,
+            "context_windows": windows,
+            "default_context_window": default_window,
+        }
+    return result
+
+
+async def _apply_session_settings(
+    client: AcpClient, model: str, chat_params: dict[str, Any]
+) -> None:
+    """Carry the composer's model, context window and reasoning effort into the session.
+
+    Only values Grok offers for the model are sent, so a leftover choice made for another
+    model falls back to Grok's own default. `grok agent --reasoning-effort` does not reach
+    ACP sessions, which is why the effort goes through session/set_config_option.
+    """
+    setup = client.setup_result
+    initialize_meta = client.initialize_result.get("_meta")
+    target = model
+    if model == "default":
+        current = _model_state(setup, initialize_meta).get("currentModelId")
+        target = current if isinstance(current, str) else ""
+    options = grok_model_options(setup, initialize_meta).get(target, {})
+
+    window = _positive_int(chat_params.get("context_window"))
+    meta = {"contextWindow": window} if window in options.get("context_windows", []) else None
+    if target and (model != "default" or meta):
+        await client.set_model(target, meta=meta)
+
     effort = chat_params.get("reasoning_effort")
-    if effort in GROK_REASONING_EFFORTS:
-        return ["agent", "--reasoning-effort", effort, "stdio"]
-    return ["agent", "stdio"]
+    if any(option["value"] == effort for option in options.get("reasoning_efforts", [])):
+        await client.set_config_option("reasoning_effort", effort)
 
 
 async def run_grok_agent(
@@ -219,7 +321,7 @@ async def run_grok_agent(
 
     client = AcpClient(
         command=str(profile["command"]),
-        args=_agent_args(chat_params),
+        args=["agent", "stdio"],
         cwd=workspace,
         env=env,
         auth_method_id=_auth_method(env),
@@ -230,8 +332,7 @@ async def run_grok_agent(
     )
     try:
         await client.start()
-        if model != "default":
-            await client.set_model(model)
+        await _apply_session_settings(client, model, chat_params)
 
         prompt = turn_prompt_text(messages, system_prompt, resumed=bool(session_id))
 

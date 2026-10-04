@@ -4,6 +4,7 @@
 import { writable, get } from 'svelte/store';
 import { toast } from 'svelte-sonner';
 import { fetchJSON } from '$lib/apis';
+import type { ReasoningEffort } from '$lib/apis/chat';
 import { socketStore } from '$lib/stores/socket.svelte';
 import { activeHomeTab, activeTab, currentWorkspace } from '$lib/stores';
 import { getPathDisplayName, isSupportedWorkspacePath } from '$lib/utils/paths';
@@ -292,6 +293,12 @@ export interface ChatModel {
 	supports_reasoning_effort?: boolean;
 	/** Default context window (compaction threshold) in tokens. */
 	context_window?: number;
+	/** Reasoning efforts the agent CLI offers for this model, in the CLI's order. */
+	reasoning_efforts?: { value: ReasoningEffort; label: string; description?: string }[];
+	/** Effort the agent CLI runs with when the composer picks none. */
+	default_reasoning_effort?: ReasoningEffort | null;
+	/** Context windows the agent CLI offers for this model; none means any window. */
+	context_windows?: number[];
 }
 
 export const chatModels = writable<ChatModel[]>([]);

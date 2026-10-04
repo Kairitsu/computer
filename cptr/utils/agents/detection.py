@@ -20,6 +20,7 @@ from cptr.utils.agents.models import (
     get_raw_agent_profiles,
     model_id_for_profile,
     normalize_agent_profiles,
+    parse_agent_model_id,
 )
 from cptr.utils.agents.opencode import opencode_server_url_candidates
 
@@ -45,6 +46,8 @@ class AgentDetection:
     version: str | None = None
     message: str | None = None
     models: list[str] | None = None
+    # Per-model reasoning efforts / context windows the agent CLI offers, keyed by model.
+    model_options: dict[str, dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -228,7 +231,7 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
         return AgentDetection("ready", command, about.get("version"), None, models)
 
     if profile.get("agent") == "grok":
-        models = await _probe_grok_models(command, profile)
+        models, model_options = await _probe_grok_models(command, profile)
         if not models:
             return AgentDetection(
                 "auth_unknown",
@@ -237,7 +240,7 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
                 "Could not discover Grok models. Check Grok login or XAI_API_KEY.",
                 [],
             )
-        return AgentDetection("ready", command, version, None, models)
+        return AgentDetection("ready", command, version, None, models, model_options)
 
     if profile.get("agent") == "opencode":
         models = await _probe_opencode_models(command, profile)
@@ -471,8 +474,11 @@ async def _probe_cursor_models(command: str, profile: dict[str, Any]) -> list[st
         await client.close()
 
 
-async def _probe_grok_models(command: str, profile: dict[str, Any]) -> list[str] | None:
+async def _probe_grok_models(
+    command: str, profile: dict[str, Any]
+) -> tuple[list[str] | None, dict[str, dict[str, Any]]]:
     from cptr.utils.agents.acp import AcpClient, acp_models_from_setup
+    from cptr.utils.agents.grok import grok_model_options
 
     env = os.environ.copy()
     if profile.get("home"):
@@ -488,9 +494,10 @@ async def _probe_grok_models(command: str, profile: dict[str, Any]) -> list[str]
     )
     try:
         await asyncio.wait_for(client.start(), timeout=10)
-        return acp_models_from_setup(client.setup_result) or None
+        options = grok_model_options(client.setup_result, client.initialize_result.get("_meta"))
+        return acp_models_from_setup(client.setup_result) or None, options
     except Exception:
-        return None
+        return None, {}
     finally:
         await client.close()
 
@@ -686,13 +693,14 @@ def invalidate_agent_detection_cache(app_state) -> None:
         delattr(app_state, "AGENTS")
 
 
-async def get_available_agent_model_entries(app_state=None) -> list[dict[str, str]]:
+async def get_available_agent_model_entries(app_state=None) -> list[dict[str, Any]]:
     status = await get_agent_status(app_state)
-    entries: list[dict[str, str]] = []
+    entries: list[dict[str, Any]] = []
     for profile in status["profiles"]:
         if not profile["available"]:
             continue
         config = profile["config"]
+        model_options = profile["detected"].get("model_options") or {}
         for model in config.get("models") or []:
             model_id = model_id_for_profile(config, model)
             entries.append(
@@ -703,6 +711,20 @@ async def get_available_agent_model_entries(app_state=None) -> list[dict[str, st
                     "connection_id": f"agent:{config['id']}",
                     "agent_id": config["agent"],
                     "profile_id": config["id"],
+                    **model_options.get(model, {}),
                 }
             )
     return entries
+
+
+def cached_agent_model_options(app_state, model_id: str) -> dict[str, Any]:
+    """Options the agent CLI offers for one model, from the last detection (never probes)."""
+    parsed = parse_agent_model_id(model_id or "")
+    cache = getattr(app_state, "AGENTS", None) if app_state is not None else None
+    if not parsed or not isinstance(cache, dict):
+        return {}
+    profile_id, model = parsed
+    for profile in cache["payload"]["profiles"]:
+        if profile["id"] == profile_id:
+            return (profile["detected"].get("model_options") or {}).get(model, {})
+    return {}

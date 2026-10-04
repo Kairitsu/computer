@@ -30,7 +30,6 @@
 	import { getPathDisplayName } from '$lib/utils/paths';
 	import SendButton from './SendButton.svelte';
 	import PlusMenu from './PlusMenu.svelte';
-	import DictateButton from './DictateButton.svelte';
 	import QueuedMessageItem from './QueuedMessageItem.svelte';
 	import Tasks from './Tasks.svelte';
 	import AskUserCard from './AskUserCard.svelte';
@@ -191,8 +190,15 @@
 	const workspaceLabel = $derived(
 		workspace ? getPathDisplayName(workspace, 'workspace') : $t('sidebar.defaultWorkspace')
 	);
-	const modelContextWindow = $derived(
-		$chatModels.find((model) => model.id === selectedModel)?.context_window
+	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
+	const modelContextWindow = $derived(selectedChatModel?.context_window);
+	// A window the agent CLI does not offer is not sent to it, so the CLI default applies.
+	const usageContextWindow = $derived(
+		contextWindow &&
+			selectedChatModel?.context_windows?.length &&
+			!selectedChatModel.context_windows.includes(contextWindow)
+			? null
+			: contextWindow
 	);
 
 	function selectApprovalMode(mode: ToolApprovalMode) {
@@ -1633,7 +1639,7 @@
 		<div class="ml-auto flex min-w-0 items-center gap-1.5">
 			<UsageIndicator
 				{contextUsage}
-				{contextWindow}
+				contextWindow={usageContextWindow}
 				defaultContextWindow={modelContextWindow}
 				{hasChatContent}
 				{oncompact}
@@ -1781,17 +1787,6 @@
 						processFiles([file]);
 					}}
 				/>
-				{#if onskillslist}
-					<button
-						type="button"
-						class="toolbar-icon"
-						aria-label={$t('chat.skills')}
-						use:tooltip={$t('chat.skills')}
-						onclick={() => onskillslist?.()}
-					>
-						<Icon name="tools" size={14} />
-					</button>
-				{/if}
 				<button
 					bind:this={approvalChipEl}
 					type="button"
@@ -1871,11 +1866,6 @@
 				{/if}
 			</div>
 			<div class="self-end mr-1 flex items-center gap-2">
-				<DictateButton
-					ontext={(text) => {
-						inputText += text;
-					}}
-				/>
 				<SendButton
 					{canSend}
 					{streaming}
@@ -1918,24 +1908,6 @@
 
 	.composer-chip.static-chip {
 		cursor: default;
-	}
-
-	.toolbar-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.5rem;
-		height: 1.5rem;
-		border-radius: 999px;
-		color: var(--app-fg-subtle);
-		transition:
-			background 0.1s,
-			color 0.1s;
-	}
-
-	.toolbar-icon:hover {
-		background: var(--app-hover);
-		color: var(--app-fg);
 	}
 
 	.approval-chip {

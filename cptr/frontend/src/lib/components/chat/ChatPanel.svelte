@@ -681,6 +681,15 @@
 		// spinner persists even when the chat tab is not active.
 	});
 
+	// The model list can arrive after mount (agent CLIs are probed first); pick the
+	// default then instead of leaving the composer without a model.
+	$effect(() => {
+		const models = $chatModels;
+		if (!models.length || models.some((model) => model.id === selectedModel)) return;
+		const dm = $defaultModel;
+		selectedModel = dm && models.some((model) => model.id === dm) ? dm : models[0].id;
+	});
+
 	$effect(() => {
 		if (!$ttsEnabled || !$ttsConfigured) {
 			voiceModeEnabled = false;

@@ -147,10 +147,11 @@ class AcpClient:
             with suppress(Exception):
                 await self.notify("session/cancel", {"sessionId": self.session_id})
 
-    async def set_model(self, model: str) -> None:
+    async def set_model(self, model: str, meta: dict[str, Any] | None = None) -> None:
+        """Switch the session model; `meta` rides along on session/set_model."""
         if not self.session_id:
             return
-        if self.model_config_id:
+        if self.model_config_id and not meta:
             with suppress(Exception):
                 await self.request(
                     "session/set_config_option",
@@ -161,9 +162,19 @@ class AcpClient:
                     },
                 )
                 return
+        params: dict[str, Any] = {"sessionId": self.session_id, "modelId": model}
+        if meta:
+            params["_meta"] = meta
+        with suppress(Exception):
+            await self.request("session/set_model", params)
+
+    async def set_config_option(self, config_id: str, value: str) -> None:
+        if not self.session_id:
+            return
         with suppress(Exception):
             await self.request(
-                "session/set_model", {"sessionId": self.session_id, "modelId": model}
+                "session/set_config_option",
+                {"sessionId": self.session_id, "configId": config_id, "value": value},
             )
 
     async def _open_session(self) -> None:
