@@ -49,6 +49,7 @@
 		approveActiveToolCallShortcut,
 		rejectActiveToolCallShortcut
 	} from '$lib/stores/chat';
+	import { startQuotaPolling } from '$lib/stores/quota';
 	import { refreshAudioState } from '$lib/stores/audio';
 	import SetupWizard from '$lib/components/SetupWizard.svelte';
 
@@ -386,6 +387,7 @@
 		if (authState === 'authenticated') {
 			socketStore.connect();
 			bindGlobalChatListener();
+			startQuotaPolling();
 		} else {
 			socketStore.disconnect();
 		}

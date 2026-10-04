@@ -120,7 +120,7 @@
 		z-index: 50;
 		display: flex;
 		flex-direction: column;
-		background: var(--app-bg);
+		background: var(--app-sidebar-bg, var(--app-bg));
 		color: var(--app-fg);
 		border-right: 1px solid var(--app-border);
 		padding-top: env(safe-area-inset-top, 0);

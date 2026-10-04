@@ -1,9 +1,6 @@
 <script lang="ts">
 	import {
 		getChat,
-		getChats,
-		deleteChat as apiDeleteChat,
-		updateChatTitle,
 		forkChat as apiForkChat,
 		sendMessage as apiSendMessage,
 		resolveToolCall,
@@ -18,7 +15,7 @@
 		updateChatSettings,
 		type ChatMessageRow,
 		type ChatSendParams,
-		type ChatInfo,
+		type ReasoningEffort,
 		type ToolApprovalMode,
 		type ContextUsage,
 		type ChatTask
@@ -38,6 +35,8 @@
 	import { get } from 'svelte/store';
 	import {
 		currentWorkspace,
+		defaultContextWindow,
+		defaultReasoningEffort,
 		openChatTab,
 		streamingBehavior,
 		toolApprovalMode as defaultToolApprovalMode,
@@ -58,7 +57,6 @@
 	import ChatInput from './ChatInput.svelte';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
-	import ChatHistory from './ChatHistory.svelte';
 	import StatusModal from './StatusModal.svelte';
 	import SkillsModal from './SkillsModal.svelte';
 	import { listCommandSessions, type CommandSession } from '$lib/apis/terminal';
@@ -82,6 +80,8 @@
 		active?: boolean;
 		ontabupdate?: (tabId: string, chatId: string, label: string) => void;
 		onopenchat?: (chatId?: string) => void;
+		/** New-chat landing only: choose which workspace the chat is created in. */
+		onworkspacechange?: (path: string) => void;
 	}
 	let {
 		workspace = '',
@@ -89,7 +89,8 @@
 		tabId,
 		active = true,
 		ontabupdate,
-		onopenchat
+		onopenchat,
+		onworkspacechange
 	}: Props = $props();
 
 	let inputText = $state('');
@@ -98,6 +99,8 @@
 	let toolApprovalMode = $state<ToolApprovalMode>('auto');
 	let planMode = $state(false);
 	let requestParams = $state<Record<string, unknown>>({});
+	let reasoningEffort = $state<ReasoningEffort | null>(null);
+	let contextWindow = $state<number | null>(null);
 	let voiceModeEnabled = $state(false);
 	let allMessages = $state<ChatMessageRow[]>([]);
 	const pendingAskUser = $derived.by(() => {
@@ -132,7 +135,6 @@
 	let skillsModalList = $state<SkillInfo[]>([]);
 	let commandSessions = $state<CommandSession[]>([]);
 	let initialCommandSessionId = $state<string | null>(null);
-	let previousChats = $state<ChatInfo[]>([]);
 	let messagesEl: HTMLDivElement;
 	let chatInputEl: ChatInput;
 	let statusButtonEl: HTMLButtonElement | undefined = $state();
@@ -466,89 +468,7 @@
 		}
 	}
 
-	const CHATS_PAGE_SIZE = 10;
-	let chatPage = $state(1);
-	let totalChats = $state(0);
-	let chatSortBy = $state<'title' | 'updated_at'>('updated_at');
-	let chatSortDir = $state<'asc' | 'desc'>('desc');
-	const totalPages = $derived(Math.max(1, Math.ceil(totalChats / CHATS_PAGE_SIZE)));
-
-	async function loadPreviousChats(page = 1) {
-		try {
-			const offset = (page - 1) * CHATS_PAGE_SIZE;
-			const data = await getChats(workspace, CHATS_PAGE_SIZE, offset, chatSortBy, chatSortDir);
-			previousChats =
-				chatSortBy === 'updated_at'
-					? [...(data.chats || [])].sort(
-							(a, b) =>
-								Number(!b.is_active && (b.last_read_at === null || b.updated_at > b.last_read_at)) -
-									Number(
-										!a.is_active && (a.last_read_at === null || a.updated_at > a.last_read_at)
-									) ||
-								(chatSortDir === 'desc' ? b.updated_at - a.updated_at : a.updated_at - b.updated_at)
-						)
-					: data.chats || [];
-			totalChats = data.total;
-			chatPage = page;
-		} catch {
-			previousChats = [];
-			totalChats = 0;
-		}
-	}
-
-	function handlePageChange(page: number) {
-		loadPreviousChats(page);
-	}
-
-	function handleSort(field: 'title' | 'updated_at') {
-		if (chatSortBy === field) {
-			chatSortDir = chatSortDir === 'asc' ? 'desc' : 'asc';
-		} else {
-			chatSortBy = field;
-			chatSortDir = field === 'title' ? 'asc' : 'desc';
-		}
-		loadPreviousChats(1);
-	}
-
-	async function openChat(id: string) {
-		await loadChat(id);
-		const chat = previousChats.find((c) => c.id === id);
-		if (tabId) updateTab(tabId, id, chat?.title || $t('chat.fallbackTitle'));
-	}
-
-	async function deleteChat(id: string) {
-		await apiDeleteChat(id);
-		previousChats = previousChats.filter((c) => c.id !== id);
-	}
-
-	async function renameChat(id: string) {
-		const chat = previousChats.find((c) => c.id === id);
-		const title = window.prompt($t('files.rename'), chat?.title)?.trim();
-		if (!title || title === chat?.title) return;
-		try {
-			await updateChatTitle(id, title);
-			previousChats = previousChats.map((c) => (c.id === id ? { ...c, title } : c));
-			if (chatId === id) {
-				chatTitle = title;
-				if (tabId) updateTab(tabId, id, title);
-			}
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : $t('files.rename'));
-		}
-	}
-
-	function copyChatPath(id: string) {
-		if (!workspace) return;
-		const chat = previousChats.find((c) => c.id === id);
-		if (!chat) return;
-		navigator.clipboard.writeText(
-			`${workspace.replace(/\/$/, '')}/.cptr/chats/${chat.folder ? `${chat.folder}/` : ''}${chat.id}.json`
-		);
-	}
-
 	// ── Socket listener ─────────────────────────────────────────
-
-	let landingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function handleSocketEvent(data: {
 		type?: string;
@@ -568,56 +488,6 @@
 		updated_at?: number;
 		last_read_at?: number;
 	}) {
-		// On the landing page, update the chat list in place from socket events
-		if (isLanding) {
-			const knownChat = previousChats.some((c) => c.id === data.chat_id);
-			if (!knownChat) {
-				// New chat created elsewhere — debounce-reload the list
-				if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
-				landingRefreshTimer = setTimeout(() => {
-					landingRefreshTimer = null;
-					loadPreviousChats(chatPage);
-				}, 300);
-			} else {
-				const nextChats = previousChats.map((c) =>
-					c.id === data.chat_id
-						? {
-								...c,
-								...(data.title ? { title: data.title } : {}),
-								...(data.done ? { is_active: false } : {}),
-								...(typeof data.active === 'boolean' ? { is_active: data.active } : {}),
-								...(typeof data.updated_at === 'number' ? { updated_at: data.updated_at } : {}),
-								...(typeof data.last_read_at === 'number'
-									? { last_read_at: data.last_read_at }
-									: {})
-							}
-						: c
-				);
-				previousChats =
-					chatSortBy === 'updated_at'
-						? nextChats.sort(
-								(a, b) =>
-									Number(
-										!b.is_active && (b.last_read_at === null || b.updated_at > b.last_read_at)
-									) -
-										Number(
-											!a.is_active && (a.last_read_at === null || a.updated_at > a.last_read_at)
-										) ||
-									(chatSortDir === 'desc'
-										? b.updated_at - a.updated_at
-										: a.updated_at - b.updated_at)
-							)
-						: nextChats;
-				if (typeof data.last_read_at === 'number') {
-					if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
-					landingRefreshTimer = setTimeout(() => {
-						landingRefreshTimer = null;
-						loadPreviousChats(chatPage);
-					}, 100);
-				}
-			}
-		}
-
 		if (data.chat_id !== chatId) return;
 
 		if (data.type === 'chat:tasks') {
@@ -731,11 +601,16 @@
 		toolApprovalMode = get(defaultToolApprovalMode);
 		planMode = false;
 		requestParams = {};
+		reasoningEffort = get(defaultReasoningEffort);
+		contextWindow = get(defaultContextWindow);
 		voiceModeEnabled = false;
 	}
 
 	function loadChatSettings(meta: Record<string, any> | null) {
 		resetChatSettings();
+		// Existing chats keep what they were sent with; missing = provider default.
+		reasoningEffort = null;
+		contextWindow = null;
 		const params = meta?.params;
 		if (!params || typeof params !== 'object') return;
 		if (
@@ -750,6 +625,12 @@
 			requestParams = params.request_params;
 		}
 		voiceModeEnabled = params.voice_mode === true;
+		if (['low', 'medium', 'high', 'xhigh'].includes(params.reasoning_effort)) {
+			reasoningEffort = params.reasoning_effort;
+		}
+		if (typeof params.context_window === 'number' && params.context_window > 0) {
+			contextWindow = params.context_window;
+		}
 		const models = get(chatModels);
 		if (
 			typeof meta?.last_model === 'string' &&
@@ -764,14 +645,17 @@
 		await updateChatSettings(chatId, selectedModel, getChatSendParams()).catch(() => {});
 	}
 
+	function handleSettingsChange() {
+		// The latest choice becomes the default for the next new chat.
+		defaultReasoningEffort.set(reasoningEffort);
+		defaultContextWindow.set(contextWindow);
+		persistChatSettings();
+	}
+
 	onMount(() => {
 		resetChatSettings();
 
-		if (chatId) {
-			loadChat(chatId);
-		} else {
-			loadPreviousChats();
-		}
+		if (chatId) loadChat(chatId);
 		refreshCommandSessions();
 		commandSessionsTimer = setInterval(refreshCommandSessions, 5000);
 		window.addEventListener('computer:inspectCommandSession', handleInspectCommandSession);
@@ -791,7 +675,6 @@
 		if (commandSessionsTimer) clearInterval(commandSessionsTimer);
 		commandSessionsTimer = null;
 		window.removeEventListener('computer:inspectCommandSession', handleInspectCommandSession);
-		if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
 		if (taskClearTimer) clearTimeout(taskClearTimer);
 		// Don't clear streamingChatTabs here -- the global listener in
 		// chat.ts handles cleanup when the "done" event arrives, so the
@@ -915,6 +798,8 @@
 			plan_mode: planMode,
 			request_params: requestParams
 		};
+		if (reasoningEffort) params.reasoning_effort = reasoningEffort;
+		if (contextWindow) params.context_window = contextWindow;
 		if (voiceModeEnabled) params.voice_mode = true;
 		return params;
 	}
@@ -1789,6 +1674,13 @@
 				{displayChatTitle}
 			</div>
 			<div class="flex shrink-0 items-center gap-0.5">
+				<span
+					class="mr-1 flex items-center gap-1 text-[0.6875rem] text-gray-400 dark:text-gray-500"
+					aria-live="polite"
+				>
+					<span class="status-dot" class:running={streaming || sending}></span>
+					{streaming || sending ? $t('chat.statusRunning') : $t('chat.statusIdle')}
+				</span>
 				<button
 					type="button"
 					class="relative flex size-6 shrink-0 items-center justify-center rounded-lg transition-colors duration-75 {statusButtonClass}"
@@ -1815,17 +1707,18 @@
 	{/if}
 
 	{#if isLanding}
-		<!-- Landing: input + recent chats -->
+		<!-- Landing: Grok-style new chat -->
 		<div class="flex-1 overflow-y-auto flex flex-col">
-			<div
-				class="max-w-xl w-full mx-auto px-4 flex flex-col my-auto pt-6 {previousChats.length === 0
-					? 'pb-20'
-					: 'pb-6'}"
-			>
-				<!-- Greeting -->
-				<div class="mb-8 text-center">
-					<h1 class="text-lg font-normal text-gray-800 dark:text-gray-200 tracking-tight">
-						{$t('chat.greeting')}
+			<div class="max-w-3xl w-full mx-auto px-4 flex flex-col my-auto pt-6 pb-16">
+				<div class="mb-10 flex flex-col items-center gap-3 text-center">
+					<div class="flex items-center gap-2">
+						<img src="/favicon.png" alt="" class="size-8" />
+						<span class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white"
+							>Computer</span
+						>
+					</div>
+					<h1 class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
+						{$t('chat.landingTitle')}
 					</h1>
 				</div>
 
@@ -1836,35 +1729,25 @@
 					bind:toolApprovalMode
 					bind:planMode
 					bind:requestParams
+					bind:reasoningEffort
+					bind:contextWindow
 					bind:voiceModeEnabled
 					{sending}
 					{workspace}
-					placeholder={$t('chat.placeholder', { name: workspaceDisplayName })}
+					placeholder={$t('chat.landingPlaceholder')}
 					tasks={chatTasks}
 					askUser={pendingAskUser}
 					onaskuseranswer={handleAskUserAnswer}
 					onsend={send}
 					onplan={handlePlanCommand}
-					onsettingschange={persistChatSettings}
+					onskillslist={handleSkillsListCommand}
+					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
+					{onworkspacechange}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}
 					onqueuedelete={handleQueueDelete}
-				/>
-				<ChatHistory
-					chats={previousChats}
-					onopen={openChat}
-					ondelete={deleteChat}
-					onrename={renameChat}
-					oncopy={workspace ? copyChatPath : undefined}
-					page={chatPage}
-					{totalPages}
-					perPage={CHATS_PAGE_SIZE}
-					onpagechange={handlePageChange}
-					sortBy={chatSortBy}
-					sortDir={chatSortDir}
-					onsort={handleSort}
 				/>
 			</div>
 		</div>
@@ -1963,10 +1846,13 @@
 					bind:toolApprovalMode
 					bind:planMode
 					bind:requestParams
+					bind:reasoningEffort
+					bind:contextWindow
 					bind:voiceModeEnabled
 					{sending}
 					{streaming}
 					{workspace}
+					placeholder={$t('chat.landingPlaceholder')}
 					{contextUsage}
 					{hasChatContent}
 					tasks={chatTasks}
@@ -1979,7 +1865,7 @@
 					oncompact={handleManualCompact}
 					onfork={handleForkChat}
 					onplan={handlePlanCommand}
-					onsettingschange={persistChatSettings}
+					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
 					onstatus={handleStatusCommand}
 					onskillslist={handleSkillsListCommand}
@@ -2018,3 +1904,23 @@
 		}}
 	/>
 {/if}
+
+<style>
+	.status-dot {
+		width: 0.375rem;
+		height: 0.375rem;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--app-fg) 35%, transparent);
+	}
+
+	.status-dot.running {
+		background: #10b981;
+		animation: statusPulse 1.2s ease-in-out infinite;
+	}
+
+	@keyframes statusPulse {
+		50% {
+			opacity: 0.4;
+		}
+	}
+</style>

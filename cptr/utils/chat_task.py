@@ -17,6 +17,7 @@ from cptr.events import EVENTS, publish_event
 from cptr.env import CHAT_MAX_ITERATIONS, CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS
 from cptr.utils.context import (
     build_context_usage,
+    chat_context_window,
     estimate_messages_tokens,
     estimate_tokens,
     normalize_usage,
@@ -780,6 +781,30 @@ VOICE_MODE_SYSTEM_PROMPT = (
     "Prefer one or two short paragraphs. Ask at most one focused follow-up question when needed. "
     "Avoid long lists, code blocks, tables, and verbose explanations unless the user explicitly asks."
 )
+
+
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def _apply_reasoning_effort(
+    request_params: dict, effort: object, *, provider: str, api_type: str
+) -> dict | None:
+    """Merge the composer's reasoning effort into the upstream request body.
+
+    The composer control wins over the same key in custom request params because
+    it is the setting the user can see. Anthropic is skipped: its stream does not
+    replay thinking blocks.
+    """
+    if effort in REASONING_EFFORTS and provider != "anthropic":
+        if api_type == "responses":
+            reasoning = request_params.get("reasoning")
+            request_params["reasoning"] = {
+                **(reasoning if isinstance(reasoning, dict) else {}),
+                "effort": effort,
+            }
+        else:
+            request_params["reasoning_effort"] = effort
+    return request_params or None
 
 
 async def _apply_voice_mode_system_prompt(system: str, chat_params: dict) -> str:
@@ -2350,8 +2375,17 @@ async def run_chat_task(
         compact_token_threshold = resolve_compact_token_threshold(
             configured_model, chat_models_config=chat_models_config
         )
-        compact_token_threshold = compact_token_threshold or resolve_compact_token_threshold()
-        request_params = {**global_rp, **model_rp, **chat_request_params} or None
+        compact_token_threshold = (
+            chat_context_window(chat_params)
+            or compact_token_threshold
+            or resolve_compact_token_threshold()
+        )
+        request_params = _apply_reasoning_effort(
+            {**global_rp, **model_rp, **chat_request_params},
+            chat_params.get("reasoning_effort"),
+            provider=provider,
+            api_type=api_type,
+        )
 
         for _iteration in range(CHAT_MAX_ITERATIONS):
             # ── Context compaction: summarize older messages if too large ──

@@ -27,6 +27,9 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 
 COOKIE_NAME = "cptr_session"
 
+# Coding agents that accept a per-turn reasoning effort (see utils/agents).
+REASONING_EFFORT_AGENTS = frozenset({"codex", "grok"})
+
 
 def _get_user(request: Request) -> str:
     """Extract user_id from cookie, raise 401 if not authenticated."""
@@ -294,13 +297,18 @@ async def get_models(request: Request):
     Otherwise, call the provider's /models endpoint to discover available models.
     """
     _get_user(request)
+    from cptr.utils.context import resolve_compact_token_threshold
+
     connections = [c for c in await _get_connections() if c.get("enabled", True)]
+    chat_models_config = await Config.get("chat.models") or {}
+    global_threshold = resolve_compact_token_threshold()
     models = []
 
     for conn in connections:
         model_ids = await _get_connection_models(conn, request.app.state)
 
         prefix = (conn.get("prefix_id") or "").strip()
+        provider = conn.get("provider", "")
 
         for model_id in model_ids or []:
             prefixed_id = f"{prefix}/{model_id}" if prefix else model_id
@@ -308,24 +316,67 @@ async def get_models(request: Request):
                 {
                     "id": prefixed_id,
                     "name": model_id,
-                    "provider": conn.get("provider", ""),
+                    "provider": provider,
                     "connection_id": conn["id"],
+                    # The Anthropic stream does not replay thinking blocks, so
+                    # reasoning effort is only offered on OpenAI-style APIs.
+                    "supports_reasoning_effort": provider != "anthropic",
                 }
             )
 
     from cptr.utils.agents.detection import get_available_agent_model_entries
 
-    models.extend(await get_available_agent_model_entries(request.app.state))
+    for entry in await get_available_agent_model_entries(request.app.state):
+        models.append(
+            {
+                **entry,
+                "supports_reasoning_effort": entry.get("agent_id") in REASONING_EFFORT_AGENTS,
+            }
+        )
+
+    for model in models:
+        model["context_window"] = resolve_compact_token_threshold(
+            model["id"],
+            chat_models_config=chat_models_config,
+            global_threshold=global_threshold,
+        )
 
     default_model = await Config.get("chat.default_model")
 
     # Filter out inactive models
-    chat_models_config = await Config.get("chat.models") or {}
     inactive = {k for k, v in chat_models_config.items() if v.get("is_active") is False}
     if inactive:
         models = [m for m in models if m["id"] not in inactive]
 
     return {"models": models, "default": default_model}
+
+
+def _created_seconds(created_at: object) -> int:
+    """Normalize a message timestamp stored as s, ms, or ns to whole seconds."""
+    try:
+        value = int(created_at or 0)
+    except (TypeError, ValueError):
+        return 0
+    divisor = 1_000_000_000 if value > 10_000_000_000_000 else 1000 if value > 10_000_000_000 else 1
+    return int(value / divisor)
+
+
+def _message_tokens(usage: object) -> int:
+    """Total tokens recorded on one message's provider usage payload."""
+    if not isinstance(usage, dict):
+        return 0
+    try:
+        return max(
+            0,
+            int(
+                usage.get("total_tokens")
+                or (usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+                + (usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                or 0
+            ),
+        )
+    except (TypeError, ValueError):
+        return 0
 
 
 @router.get("/usage")
@@ -363,30 +414,10 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
     lifetime_tokens = 0
 
     for message in messages:
-        created_at = int(message.created_at or 0)
-        created_seconds = created_at / (
-            1_000_000_000
-            if created_at > 10_000_000_000_000
-            else 1000
-            if created_at > 10_000_000_000
-            else 1
-        )
-        created_seconds = int(created_seconds)
+        created_seconds = _created_seconds(message.created_at)
         day_date = datetime.fromtimestamp(created_seconds, tz=timezone.utc).date()
         model_id = message.model or None
-        usage = message.usage if isinstance(message.usage, dict) else {}
-        try:
-            tokens = max(
-                0,
-                int(
-                    usage.get("total_tokens")
-                    or (usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-                    + (usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-                    or 0
-                ),
-            )
-        except (TypeError, ValueError):
-            tokens = 0
+        tokens = _message_tokens(message.usage)
         if tokens:
             lifetime_tokens += tokens
 
@@ -580,6 +611,83 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
     }
 
 
+QuotaPeriod = Literal["day", "week", "month"]
+
+
+def _quota_period_bounds(period: QuotaPeriod, now: datetime) -> tuple[datetime, datetime]:
+    """UTC start of the current budget period and the moment it resets."""
+    today = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+    if period == "day":
+        return today, today + timedelta(days=1)
+    if period == "week":
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=7)
+    start = today.replace(day=1)
+    next_month = (start + timedelta(days=32)).replace(day=1)
+    return start, next_month
+
+
+@router.get("/quota")
+async def get_quota(
+    request: Request,
+    period: QuotaPeriod = Query("week", description="Local budget period"),
+    refresh: bool = Query(False, description="Bypass the SuperGrok quota cache"),
+):
+    """Subscription quota for the composer and sidebar.
+
+    `supergrok` is the Grok CLI login's SuperGrok credit snapshot (None when not
+    signed in). `local` is this user's token usage in the current budget period;
+    the budget itself is a client preference.
+    """
+    user_id = _get_user(request)
+    from sqlalchemy import and_, or_
+
+    from cptr.utils.supergrok import get_supergrok_quota
+
+    start, resets_at = _quota_period_bounds(period, datetime.now(timezone.utc))
+    start_seconds = int(start.timestamp())
+
+    async with await get_db() as db:
+        chat_result = await db.execute(select(Chat.id, Chat.meta).where(Chat.user_id == user_id))
+        chat_ids = [
+            chat_id
+            for chat_id, meta in chat_result.all()
+            if not is_internal_chat(meta if isinstance(meta, dict) else None)
+        ]
+        rows = []
+        if chat_ids:
+            # created_at is usually ms; legacy rows may be seconds.
+            message_result = await db.execute(
+                select(ChatMessage.created_at, ChatMessage.usage).where(
+                    ChatMessage.chat_id.in_(chat_ids),
+                    or_(
+                        ChatMessage.created_at >= start_seconds * 1000,
+                        and_(
+                            ChatMessage.created_at >= start_seconds,
+                            ChatMessage.created_at <= 10_000_000_000,
+                        ),
+                    ),
+                )
+            )
+            rows = message_result.all()
+
+    tokens_used = sum(
+        _message_tokens(usage)
+        for created_at, usage in rows
+        if _created_seconds(created_at) >= start_seconds
+    )
+
+    return {
+        "supergrok": await get_supergrok_quota(force=refresh),
+        "local": {
+            "period": period,
+            "tokens_used": tokens_used,
+            "period_start": start_seconds,
+            "resets_at": int(resets_at.timestamp()),
+        },
+    }
+
+
 async def _fetch_provider_models(conn: dict) -> list[str] | None:
     """Discover models from a provider's /models endpoint."""
     import httpx
@@ -726,6 +834,7 @@ async def _get_chat_context_usage(
     from cptr.utils.chat_task import _load_message_history, _load_system_prompt
     from cptr.utils.context import (
         build_context_usage,
+        chat_context_window,
         estimate_context_usage,
         estimate_messages_tokens,
         load_compact_token_threshold,
@@ -735,7 +844,9 @@ async def _get_chat_context_usage(
     messages, existing_summary = await _load_message_history(chat.id, message_id)
     workspace = (chat.meta or {}).get("workspace", "")
     model = model_id or await _infer_chat_model(chat.id)
-    compact_token_threshold = await load_compact_token_threshold(model)
+    compact_token_threshold = chat_context_window(
+        (chat.meta or {}).get("params")
+    ) or await load_compact_token_threshold(model)
     system = await _load_system_prompt(request, workspace, model or "", user_id=chat.user_id)
     if existing_summary:
         system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"

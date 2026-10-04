@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ToolApprovalMode } from '$lib/apis/chat';
-	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
 	import Icon from '../Icon.svelte';
 	import ToggleSwitch from '../common/ToggleSwitch.svelte';
@@ -9,40 +7,26 @@
 	interface Props {
 		onfiles: (files: FileList) => void;
 		oncapture?: (file: File) => void;
-		toolApprovalMode?: ToolApprovalMode;
 		planMode?: boolean;
 		requestParams?: Record<string, unknown>;
 		onchange?: () => void;
-		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
 	}
 	let {
 		onfiles,
 		oncapture,
-		toolApprovalMode = $bindable('auto'),
 		planMode = $bindable(false),
 		requestParams = $bindable({}),
-		onchange,
-		ontoolapprovalchange
+		onchange
 	}: Props = $props();
 
 	let open = $state(false);
-	let tab = $state<'' | 'tools' | 'request_params'>('');
+	let tab = $state<'' | 'request_params'>('');
 	let btnEl: HTMLButtonElement | undefined = $state();
 	let menuEl: HTMLDivElement | undefined = $state();
 	let inputEl: HTMLInputElement | undefined = $state();
 	let cameraInputEl: HTMLInputElement | undefined = $state();
 	let pos = $state<{ x: number; bottom: number }>({ x: -9999, bottom: -9999 });
 	let ready = $state(false);
-
-	const modes: { value: ToolApprovalMode; label: string; desc: string }[] = $derived([
-		{ value: 'ask', label: $t('plusMenu.askApproval'), desc: $t('plusMenu.askApprovalDesc') },
-		{ value: 'auto', label: $t('plusMenu.autoApprove'), desc: $t('plusMenu.autoApproveDesc') },
-		{ value: 'full', label: $t('plusMenu.fullAccess'), desc: $t('plusMenu.fullAccessDesc') }
-	]);
-
-	const currentModeLabel = $derived(
-		modes.find((m) => m.value === toolApprovalMode)?.label ?? $t('plusMenu.toolPermissions')
-	);
 
 	// ── Request params state ────────────────────────
 	let paramRows = $state<Array<{ key: string; value: string }>>(
@@ -106,12 +90,6 @@
 		if (x < 8) x = 8;
 		pos = { x, bottom: vh - rect.top + 4 };
 		ready = true;
-	}
-
-	function selectMode(mode: ToolApprovalMode) {
-		toolApprovalMode = mode;
-		if (ontoolapprovalchange) ontoolapprovalchange(mode);
-		else onchange?.();
 	}
 
 	function triggerUpload() {
@@ -338,20 +316,6 @@
 
 				<button
 					class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors duration-75"
-					onclick={() => (tab = 'tools')}
-				>
-					<Icon name="shield" size={14} />
-					<span class="flex-1 text-left truncate">{$t('plusMenu.toolPermissions')}</span>
-					<span class="text-[0.625rem] text-gray-400 dark:text-gray-500 truncate max-w-16"
-						>{currentModeLabel}</span
-					>
-					<Icon name="chevron-right" size={12} class="shrink-0 text-gray-400 dark:text-gray-500" />
-				</button>
-
-				<div class="app-divider h-px mx-1 my-0.5"></div>
-
-				<button
-					class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors duration-75"
 					onclick={() => (tab = 'request_params')}
 				>
 					<svg
@@ -374,45 +338,6 @@
 					{/if}
 					<Icon name="chevron-right" size={12} class="shrink-0 text-gray-400 dark:text-gray-500" />
 				</button>
-			</div>
-		{:else if tab === 'tools'}
-			<!-- Tool permissions submenu -->
-			<div class="plus-menu-slide-in-right">
-				<button
-					class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors duration-75"
-					onclick={() => (tab = '')}
-				>
-					<Icon name="chevron-left" size={12} />
-					<span class="flex-1 text-left font-medium">{$t('plusMenu.toolPermissions')}</span>
-				</button>
-
-				<div class="app-divider h-px mx-1 my-0.5"></div>
-
-				{#each modes as mode}
-					<button
-						class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs transition-colors duration-75
-							{toolApprovalMode === mode.value
-							? 'text-gray-900 dark:text-white bg-gray-50 dark:bg-white/5'
-							: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
-						onclick={() => selectMode(mode.value)}
-						use:tooltip={{ content: mode.desc, placement: 'right' }}
-					>
-						<span class="flex-1 text-left truncate">{mode.label}</span>
-						{#if toolApprovalMode === mode.value}
-							<svg
-								class="w-3 h-3 shrink-0 text-gray-400 dark:text-gray-500"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2.5"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							>
-								<polyline points="20 6 9 17 4 12" />
-							</svg>
-						{/if}
-					</button>
-				{/each}
 			</div>
 		{:else if tab === 'request_params'}
 			<!-- Request params submenu -->

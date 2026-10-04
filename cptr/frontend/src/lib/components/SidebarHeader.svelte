@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { sidebarOpen } from '$lib/stores';
+	import { requestHomeChat, sidebarOpen } from '$lib/stores';
 	import { t } from '$lib/i18n';
 	import { tooltip } from '$lib/tooltip';
 	import Icon from './Icon.svelte';
 
 	function goHome(e: MouseEvent) {
 		e.preventDefault();
+		requestHomeChat();
 		goto('/');
 		if (typeof window !== 'undefined' && window.innerWidth < 768) sidebarOpen.set(false);
 	}

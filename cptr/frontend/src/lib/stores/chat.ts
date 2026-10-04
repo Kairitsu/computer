@@ -208,7 +208,9 @@ export function bindGlobalChatListener() {
 			const isViewingThisChat =
 				!document.hidden &&
 				((!isHome && currentTab?.type === 'chat' && currentTab.path === data.chat_id) ||
-					(isHome && currentHomeTab?.type === 'chat' && currentHomeTab.path === data.chat_id));
+					(isHome &&
+						(currentHomeTab?.type === 'chat' || currentHomeTab?.type === 'home') &&
+						currentHomeTab.path === data.chat_id));
 
 			if (isViewingThisChat) return;
 
@@ -285,6 +287,11 @@ export interface ChatModel {
 	name: string;
 	provider: string;
 	connection_id: string;
+	agent_id?: string;
+	/** Whether the composer's reasoning effort reaches this model. */
+	supports_reasoning_effort?: boolean;
+	/** Default context window (compaction threshold) in tokens. */
+	context_window?: number;
 }
 
 export const chatModels = writable<ChatModel[]>([]);

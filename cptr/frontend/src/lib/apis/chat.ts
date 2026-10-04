@@ -61,11 +61,38 @@ export interface SendMessageResult {
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface ChatSendParams {
 	tool_approval_mode?: ToolApprovalMode;
 	plan_mode?: boolean;
 	request_params?: Record<string, unknown>;
 	voice_mode?: boolean;
+	/** Composer reasoning effort; omitted = provider default. */
+	reasoning_effort?: ReasoningEffort;
+	/** Context window (tokens) that drives usage and auto-compaction for this chat. */
+	context_window?: number;
+}
+
+export interface SuperGrokQuota {
+	used_percent: number;
+	remaining_percent: number;
+	period_start: number | null;
+	resets_at: number | null;
+	products: { id: number; label: string; used_percent: number }[];
+	source: string;
+	fetched_at: number;
+}
+
+export interface QuotaResponse {
+	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
+	supergrok: SuperGrokQuota | { error: string; fetched_at: number } | null;
+	local: {
+		period: 'day' | 'week' | 'month';
+		tokens_used: number;
+		period_start: number;
+		resets_at: number;
+	};
 }
 
 export interface CompactChatResult {
@@ -132,6 +159,9 @@ export const getChat = (chatId: string, modelId?: string) => {
 };
 
 export const getUsage = () => fetchJSON<UsageResponse>('/api/chats/usage');
+
+export const getQuota = (period: 'day' | 'week' | 'month' = 'week', refresh = false) =>
+	fetchJSON<QuotaResponse>(`/api/chats/quota?period=${period}${refresh ? '&refresh=true' : ''}`);
 
 export const deleteChat = (chatId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}`, { method: 'DELETE' });
@@ -206,8 +236,7 @@ export const answerAskUser = (
 	callId: string,
 	answers: Record<string, string>,
 	timedOut = false
-) =>
-	resolveToolCall(chatId, messageId, callId, 'answer', { answers, timedOut });
+) => resolveToolCall(chatId, messageId, callId, 'answer', { answers, timedOut });
 
 export const cancelTask = (chatId: string, messageId: string) =>
 	fetchJSON(`/api/chats/${chatId}/messages/${messageId}/cancel`, { method: 'POST' });
