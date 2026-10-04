@@ -79,8 +79,10 @@
 		</div>
 		{#if pending}
 			<div class="text-[0.6875rem] text-gray-500 dark:text-gray-400">
-				{$t('chat.questionProgress', { current: questionIndex + 1, total: questions.length })} ·
-				{$t('chat.pausedWhileVisible')}
+				{$t('chat.questionProgress', { current: questionIndex + 1, total: questions.length })}
+				{#if item.expires_at}
+					· {$t('chat.pausedWhileVisible')}
+				{/if}
 			</div>
 		{:else if item.timed_out || resolved.timed_out}
 			<div class="text-[0.6875rem] text-gray-500 dark:text-gray-400">
@@ -94,10 +96,16 @@
 			{#key question.id}
 				<div class="space-y-2.5">
 					<div>
-						<div class="text-sm font-medium tracking-[-0.01em] text-gray-900 dark:text-gray-100">
-							{question.header}
-						</div>
-						<div class="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+						{#if question.header}
+							<div
+								class="mb-1 text-sm font-medium tracking-[-0.01em] text-gray-900 dark:text-gray-100"
+							>
+								{question.header}
+							</div>
+						{/if}
+						<div
+							class="max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-600 dark:text-gray-300"
+						>
 							{question.question}
 						</div>
 					</div>

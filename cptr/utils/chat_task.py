@@ -63,6 +63,7 @@ from cptr.utils.tools import (
 from cptr.utils.chat_export import export_chat_to_file
 from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
 from cptr.utils.agents.events import (
+    AgentAskUser,
     AgentDone,
     AgentError,
     AgentReasoningDelta,
@@ -169,8 +170,15 @@ def ask_user_answers(
     arguments: dict[str, Any], answers: dict[str, str] | None = None
 ) -> dict[str, Any]:
     request = validate_ask_user_request(arguments)
+    return _collect_ask_user_answers(request["questions"], answers)
+
+
+def _collect_ask_user_answers(
+    questions: list[dict[str, Any]], answers: dict[str, str] | None
+) -> dict[str, Any]:
+    """Pair answers with question ids; no answers means the recommended (first) options."""
     result: dict[str, Any] = {}
-    for question in request["questions"]:
+    for question in questions:
         answer = question["options"][0]["label"] if answers is None else answers.get(question["id"])
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError(f"missing answer for {question['id']}")
@@ -358,6 +366,8 @@ _tasks: dict[str, asyncio.Task] = {}  # message_id → asyncio.Task
 _task_state: dict[str, dict] = {}  # message_id → {content, output}
 _task_chat: dict[str, str] = {}  # message_id → chat_id
 _pending_input_locks: dict[str, asyncio.Lock] = {}  # chat_id → Lock
+# (message_id, call_id) → (answer future, question event) for agent turns blocked on ask_user
+_agent_ask_waiters: dict[tuple[str, str], tuple[asyncio.Future, AgentAskUser]] = {}
 
 
 def get_pending_input_lock(chat_id: str) -> asyncio.Lock:
@@ -438,6 +448,49 @@ def is_running(message_id: str) -> bool:
 def get_live_state(message_id: str) -> dict | None:
     """Get live in-memory state for a running task."""
     return _task_state.get(message_id)
+
+
+def resolve_agent_ask_user(
+    message_id: str, call_id: str, answers: dict[str, str] | None, timed_out: bool
+) -> bool:
+    """Hand answers to a running agent turn blocked on this question.
+
+    Returns False when no running turn is waiting on it.
+    """
+    entry = _agent_ask_waiters.get((message_id, call_id))
+    if entry is None or entry[0].done():
+        return False
+    waiter, ask = entry
+    if timed_out and not ask.auto_resolve:
+        raise ValueError("this question needs an answer from the user")
+    waiter.set_result(_agent_ask_user_result(ask, None if timed_out else answers))
+    return True
+
+
+def _agent_ask_user_result(ask: AgentAskUser, answers: dict[str, str] | None) -> dict[str, Any]:
+    result = _collect_ask_user_answers(ask.questions, answers)
+    if answers is None:
+        result["timed_out"] = True
+    return result
+
+
+async def _wait_for_agent_answer(
+    waiter: asyncio.Future, ask: AgentAskUser, user_id: str, chat_id: str
+) -> dict[str, Any]:
+    """Wait for the user; like ask_user, fall back to the recommended options after the
+    chat has been out of view for the auto-resolution window."""
+    if not ask.auto_resolve:
+        return await waiter
+    from cptr.socket.main import is_chat_visible
+
+    remaining = DEFAULT_AUTO_RESOLUTION_MS / 1000
+    while remaining > 0:
+        try:
+            return await asyncio.wait_for(asyncio.shield(waiter), timeout=1)
+        except asyncio.TimeoutError:
+            if not is_chat_visible(user_id, chat_id):
+                remaining -= 1
+    return _agent_ask_user_result(ask, None)
 
 
 def get_active_chat_ids() -> set[str]:
@@ -1658,7 +1711,61 @@ async def run_chat_task(
             await emit(output=item)
             _sync_state()
 
-        async for event in runner(
+        async def _ask_agent_user(ask: AgentAskUser) -> dict[str, str]:
+            """Show the agent's question in the ask_user card and wait for the answers."""
+            # The agent usually announced the question as a tool call; turn that into the card.
+            existing = next(
+                (
+                    item
+                    for item in output_items
+                    if item.get("type") == "function_call" and item.get("call_id") == ask.call_id
+                ),
+                {},
+            )
+            arguments: dict[str, Any] = {"questions": ask.questions}
+            call_item = {
+                "type": "function_call",
+                "id": existing.get("id") or f"agent-{ask.call_id}",
+                "call_id": ask.call_id,
+                "name": ASK_USER_NAME,
+                "native_agent": True,
+                "arguments": arguments,
+                "status": "pending",
+            }
+            if ask.auto_resolve:
+                arguments["autoResolutionMs"] = DEFAULT_AUTO_RESOLUTION_MS
+                call_item["expires_at"] = now_ms() + DEFAULT_AUTO_RESOLUTION_MS
+            key = (message_id, ask.call_id)
+            waiter = asyncio.get_running_loop().create_future()
+            _agent_ask_waiters[key] = (waiter, ask)
+            try:
+                _upsert_output_item(output_items, call_item)
+                _sync_state()
+                await _save_message(
+                    "agent ask_user", content=content, output=output_items, done=False
+                )
+                await emit(output=call_item)
+                result = await _wait_for_agent_answer(waiter, ask, user_id, chat_id)
+            finally:
+                _agent_ask_waiters.pop(key, None)
+            call_item["status"] = "completed"
+            call_item["timed_out"] = bool(result.get("timed_out"))
+            result_item = {
+                "type": "function_call_output",
+                "call_id": ask.call_id,
+                "native_agent": True,
+                "output": json.dumps(result),
+            }
+            _upsert_output_item(output_items, result_item)
+            await emit(output=call_item)
+            await emit(output=result_item)
+            _sync_state()
+            await _save_message(
+                "agent ask_user answered", content=content, output=output_items, done=False
+            )
+            return {qid: entry["answers"][0] for qid, entry in result["answers"].items()}
+
+        agent_events = runner(
             profile=agent_target.config,
             model=agent_target.model,
             workspace=agent_workspace,
@@ -1668,7 +1775,8 @@ async def run_chat_task(
             resume_state=resume_state,
             attachments=agent_attachments,
             identity=identity,
-        ):
+        )
+        async for event in agent_events:
             if isinstance(event, AgentTextDelta):
                 await _finish_reasoning_item()
                 content += event.text
@@ -1716,6 +1824,9 @@ async def run_chat_task(
                     ),
                     {},
                 )
+                if existing.get("name") == ASK_USER_NAME:
+                    # The question card owns this call; the agent's own updates would clobber it.
+                    continue
                 call_item = {
                     "type": "function_call",
                     "id": existing.get("id") or f"agent-{event.call_id}",
@@ -1818,6 +1929,17 @@ async def run_chat_task(
                 _upsert_output_item(output_items, output_item)
                 await emit(output=output_item)
                 _sync_state()
+            elif isinstance(event, AgentAskUser):
+                await _finish_reasoning_item()
+                flushed_item = _flush_text()
+                if flushed_item:
+                    await emit(output=flushed_item)
+                try:
+                    event.answers = await _ask_agent_user(event)
+                except asyncio.CancelledError:
+                    # Stopped while waiting: shut the agent down now rather than at GC.
+                    await agent_events.aclose()
+                    raise
             elif isinstance(event, AgentError):
                 raise RuntimeError(event.message)
             elif isinstance(event, AgentDone):

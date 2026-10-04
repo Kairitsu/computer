@@ -233,7 +233,9 @@
 					{#each askUserQuestions as question}
 						{@const answer = askUserAnswers[question.id]?.answers?.join(', ')}
 						<div>
-							<div class="text-gray-600 dark:text-gray-300">{question.question}</div>
+							<div class="whitespace-pre-wrap break-words text-gray-600 dark:text-gray-300">
+								{question.question}
+							</div>
 							<div class="text-gray-400 dark:text-gray-500">
 								{answer || $t('chat.noAnswerRecorded')}{answer === question.options?.[0]?.label
 									? ` (${$t('chat.recommended')})`
