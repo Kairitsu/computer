@@ -11,5 +11,4 @@ build/
 cptr/frontend/node_modules/
 cptr/frontend/.svelte-kit/
 cptr/frontend/build/
-CONTRIBUTOR_LICENSE_AGREEMENT
 .DS_Store
