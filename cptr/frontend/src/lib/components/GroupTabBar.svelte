@@ -8,8 +8,6 @@
 		setActiveGroup,
 		reorderTabs,
 		openUntitledFileTab,
-		openTerminalTab,
-		openBrowserTab,
 		openInSplit,
 		closeGroup,
 		moveTabToGroup,
@@ -41,8 +39,6 @@
 		onHomeReorder?: (oldIndex: number, newIndex: number) => void;
 		onHomeMove?: (tabId: string, fromGroupId: string) => void;
 		onHomeNewChat?: () => void;
-		onHomeNewTerminal?: () => void;
-		onHomeNewBrowser?: () => void;
 		onHomeSplit?: (direction: 'horizontal' | 'vertical') => void;
 		onHomeCloseGroup?: () => void;
 		homeSplitDirection?: 'horizontal' | 'vertical';
@@ -61,8 +57,6 @@
 		onHomeReorder,
 		onHomeMove,
 		onHomeNewChat,
-		onHomeNewTerminal,
-		onHomeNewBrowser,
 		onHomeSplit,
 		onHomeCloseGroup,
 		homeSplitDirection = 'horizontal',
@@ -101,16 +95,10 @@
 				return 'chat-plus';
 			case 'files':
 				return 'folder';
-			case 'terminal':
-				return 'terminal';
 			case 'file':
 				return 'page';
 			case 'chat':
 				return 'chat-bubble';
-			case 'preview':
-				return 'monitor';
-			case 'browser':
-				return 'browser';
 			default:
 				return 'page';
 		}
@@ -201,69 +189,34 @@
 		else moveTabToGroup(payload.tabId, payload.groupId, group.id);
 	}
 
-	const plusMenuItems = $derived(
-		home
+	const plusMenuItems = $derived([
+		{
+			label: $t('bar.newFile'),
+			icon: 'page',
+			shortcut: formatChord($keybindings.newFile),
+			onclick: () => {
+				openUntitledFileTab(group.id);
+			}
+		},
+		...($chatEnabled
 			? [
-					...($chatEnabled
-						? [
-								{
-									label: $t('bar.newChat'),
-									icon: 'chat-bubble',
-									shortcut: formatChord($keybindings.newChat),
-									onclick: () => onHomeNewChat?.()
-								}
-							]
-						: []),
 					{
-						label: $t('bar.newTerminal'),
-						icon: 'terminal',
-						shortcut: formatChord($keybindings.newTerminal),
-						onclick: () => onHomeNewTerminal?.()
-					},
-					{
-						label: $t('bar.newBrowser'),
-						icon: 'browser',
-						shortcut: formatChord($keybindings.newBrowser),
-						onclick: () => onHomeNewBrowser?.()
+						label: $t('bar.newChat'),
+						icon: 'chat-bubble',
+						shortcut: formatChord($keybindings.newChat),
+						onclick: () => {
+							openChatTab(undefined, group.id);
+						}
 					}
 				]
-			: [
-					{
-						label: $t('bar.newFile'),
-						icon: 'page',
-						shortcut: formatChord($keybindings.newFile),
-						onclick: () => {
-							openUntitledFileTab(group.id);
-						}
-					},
-					...($chatEnabled
-						? [
-								{
-									label: $t('bar.newChat'),
-									icon: 'chat-bubble',
-									shortcut: formatChord($keybindings.newChat),
-									onclick: () => {
-										openChatTab(undefined, group.id);
-									}
-								}
-							]
-						: []),
-					{
-						label: $t('bar.newTerminal'),
-						icon: 'terminal',
-						shortcut: formatChord($keybindings.newTerminal),
-						onclick: () => {
-							openTerminalTab(group.id);
-						}
-					},
-					{
-						label: $t('bar.newBrowser'),
-						icon: 'browser',
-						shortcut: formatChord($keybindings.newBrowser),
-						onclick: () => openBrowserTab(group.id)
-					}
-				]
-	);
+			: [])
+	]);
+
+	// Home only makes chats, so its "+" opens one directly instead of a menu.
+	function handlePlusClick() {
+		if (home) onHomeNewChat?.();
+		else showPlusMenu = !showPlusMenu;
+	}
 
 	const contextMenuItems = $derived.by(() => {
 		if (!contextMenu) return [];
@@ -441,15 +394,17 @@
 		</div>
 
 		<!-- Plus button -->
-		<button
-			bind:this={plusBtnEl}
-			class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100 shrink-0"
-			onclick={() => (showPlusMenu = !showPlusMenu)}
-			aria-label={$t('bar.new')}
-			use:tooltip={$t('bar.new')}
-		>
-			<Icon name="plus" size={14} />
-		</button>
+		{#if !home || $chatEnabled}
+			<button
+				bind:this={plusBtnEl}
+				class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100 shrink-0"
+				onclick={handlePlusClick}
+				aria-label={home ? $t('bar.newChat') : $t('bar.new')}
+				use:tooltip={home ? $t('bar.newChat') : $t('bar.new')}
+			>
+				<Icon name="plus" size={14} />
+			</button>
+		{/if}
 	</div>
 
 	<!-- Right-side controls -->

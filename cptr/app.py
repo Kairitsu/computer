@@ -11,16 +11,13 @@ from cptr.routers import (
     admin_router,
     auth_router,
     automations_router,
-    browser_router,
     chat_router,
     events_router,
     files_router,
     grok_router,
     git_router,
-    notifications_router,
     search_router,
     state_router,
-    terminal_router,
     workspace_router,
 )
 from cptr.utils.config import check_access, load_config
@@ -79,17 +76,6 @@ async def lifespan(app: FastAPI):
             from cptr.utils.agents.grok import close_all_grok_sessions
 
             await close_all_grok_sessions()
-        except Exception:
-            pass
-        # Clean up browser tab sessions and the Chrome they launched.
-        try:
-            from cptr.utils.browser.launcher import shutdown_browser
-            from cptr.utils.browser.proxy import manager as browser_proxy_manager
-            from cptr.utils.browser.viewer import manager as chrome_viewer_manager
-
-            await chrome_viewer_manager.close_all()
-            await browser_proxy_manager.close_all()
-            await shutdown_browser()
         except Exception:
             pass
 
@@ -245,16 +231,13 @@ async def get_config():
 app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(automations_router)
-app.include_router(browser_router)
 app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)
 app.include_router(grok_router)
 app.include_router(git_router)
-app.include_router(notifications_router)
 app.include_router(search_router)
 app.include_router(state_router)
-app.include_router(terminal_router)
 app.include_router(workspace_router)
 
 
@@ -364,12 +347,6 @@ async def pwa_manifest():
                 "name": "New Note",
                 "short_name": "Note",
                 "url": "/?intent=newNote",
-                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
-            },
-            {
-                "name": "New Terminal",
-                "short_name": "Terminal",
-                "url": "/?intent=newTerminal",
                 "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
             },
             {

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from cptr.models import User, Auth, Config
-from cptr.utils.config import AuthResult, check_access, hash_password, now_ms
+from cptr.models import Config
+from cptr.utils.config import AuthResult, check_access
 from cptr.utils.agents.detection import get_agent_status, invalidate_agent_detection_cache
 from cptr.utils.agents.models import save_agent_profiles
 
@@ -25,92 +24,6 @@ def require_admin(request: Request) -> AuthResult:
     if not auth or auth.role != "admin":
         raise HTTPException(403, "admin required")
     return auth
-
-
-# ── Users ────────────────────────────────────────────────────
-
-
-@router.get("/users")
-async def list_users(request: Request):
-    """List all users with their roles."""
-    require_admin(request)
-    return {"users": await User.list_all()}
-
-
-@router.post("/users")
-async def create_user(request: Request, body: CreateUserRequest):
-    """Create a new user (admin only)."""
-    require_admin(request)
-
-    if not body.username or not body.username.strip():
-        return JSONResponse({"error": "username required"}, 400)
-    if not body.password or len(body.password.strip()) < 6:
-        return JSONResponse({"error": "min 6 characters"}, 400)
-    if body.role not in ("admin", "user", "pending"):
-        return JSONResponse({"error": "role must be admin, user, or pending"}, 400)
-
-    username = body.username.strip()
-    if await Auth.username_exists(username):
-        return JSONResponse({"error": "username taken"}, 409)
-
-    user_id = await User.create(
-        username=username,
-        password_hash=hash_password(body.password.strip()),
-        role=body.role,
-        created_at=now_ms(),
-    )
-    return {"ok": True, "user_id": user_id}
-
-
-@router.delete("/users/{user_id}")
-async def delete_user(request: Request, user_id: str):
-    """Delete a user. Cannot delete yourself."""
-    auth = require_admin(request)
-    if auth.user_id == user_id:
-        return JSONResponse({"error": "cannot delete yourself"}, 400)
-    await User.delete_user(user_id)
-    return {"ok": True}
-
-
-@router.put("/users/{user_id}/role")
-async def update_role(request: Request, user_id: str, body: RoleRequest):
-    """Update a user's role."""
-    require_admin(request)
-    if body.role not in ("admin", "user", "pending"):
-        return JSONResponse({"error": "role must be admin, user, or pending"}, 400)
-    if not await User.update_role(user_id, body.role):
-        return JSONResponse({"error": "user not found"}, 404)
-    return {"ok": True}
-
-
-@router.put("/users/{user_id}/profile")
-async def update_user_profile(request: Request, user_id: str, body: UpdateUserProfileRequest):
-    """Update a user's display name (admin only)."""
-    require_admin(request)
-    await User.update_display_name(user_id, body.display_name)
-    return {"ok": True, "display_name": body.display_name}
-
-
-@router.put("/users/{user_id}/password")
-async def reset_user_password(request: Request, user_id: str, body: ResetPasswordRequest):
-    """Reset a user's password (admin only)."""
-    require_admin(request)
-    if not body.password or len(body.password.strip()) < 6:
-        return JSONResponse({"error": "min 6 characters"}, 400)
-    if not await Auth.update_password(user_id, hash_password(body.password.strip())):
-        return JSONResponse({"error": "user not found"}, 404)
-    return {"ok": True}
-
-
-@router.put("/users/{user_id}/username")
-async def update_username(request: Request, user_id: str, body: UpdateUsernameRequest):
-    """Update a user's username (admin only)."""
-    require_admin(request)
-    if not body.username or not body.username.strip():
-        return JSONResponse({"error": "username required"}, 400)
-    if not await Auth.update_username(user_id, body.username.strip()):
-        return JSONResponse({"error": "username taken or user not found"}, 400)
-    return {"ok": True}
 
 
 # ── Config ───────────────────────────────────────────────────
@@ -170,28 +83,6 @@ async def refresh_agents(request: Request):
 
 
 # ── Request Models ───────────────────────────────────────────
-
-
-class CreateUserRequest(BaseModel):
-    username: str
-    password: str
-    role: str = "user"
-
-
-class RoleRequest(BaseModel):
-    role: str
-
-
-class UpdateUserProfileRequest(BaseModel):
-    display_name: Optional[str] = None
-
-
-class ResetPasswordRequest(BaseModel):
-    password: str
-
-
-class UpdateUsernameRequest(BaseModel):
-    username: str
 
 
 class ConfigUpdateRequest(BaseModel):

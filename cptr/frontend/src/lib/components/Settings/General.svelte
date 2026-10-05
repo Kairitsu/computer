@@ -11,6 +11,8 @@
 	import { t, locale, changeLocale, supportedLocales } from '$lib/i18n';
 	import { session } from '$lib/session';
 	import { toast } from 'svelte-sonner';
+	import { notificationsEnabled, notificationSound } from '$lib/stores/chat';
+	import { getAdminConfig, updateConfig } from '$lib/apis/admin';
 	import {
 		getGrokProcessSettings,
 		updateGrokProcessSettings,
@@ -47,12 +49,55 @@
 	// Server-wide limits for the Grok processes chats keep between turns; admins set them.
 	let processSettings = $state<GrokProcessSettings | null>(null);
 
+	// Workspace setting, server-wide; admins set it.
+	let autoGitignoreDotCptr = $state<boolean | null>(null);
+	let savingWorkspace = $state(false);
+
 	$effect(() => {
 		if ($session?.role !== 'admin' || processSettings) return;
 		getGrokProcessSettings()
 			.then((settings) => (processSettings = settings))
 			.catch(() => {});
 	});
+
+	$effect(() => {
+		if ($session?.role !== 'admin' || autoGitignoreDotCptr !== null) return;
+		getAdminConfig()
+			.then(
+				(config) => (autoGitignoreDotCptr = config['workspace.auto_gitignore_dot_cptr'] !== false)
+			)
+			.catch(() => toast.error($t('admin.failedToLoadConfig')));
+	});
+
+	async function saveAutoGitignore(value: boolean) {
+		const previous = autoGitignoreDotCptr;
+		autoGitignoreDotCptr = value;
+		savingWorkspace = true;
+		try {
+			await updateConfig({ 'workspace.auto_gitignore_dot_cptr': value });
+			toast.success($t('settings.saved'));
+		} catch {
+			autoGitignoreDotCptr = previous;
+			toast.error($t('admin.failedToSave'));
+		} finally {
+			savingWorkspace = false;
+		}
+	}
+
+	async function toggleNotifications() {
+		if (!$notificationsEnabled) {
+			if ('Notification' in window) {
+				const permission = await Notification.requestPermission();
+				if (permission === 'granted') {
+					notificationsEnabled.set(true);
+				} else {
+					toast.error($t('general.notificationPermissionDenied'));
+				}
+			}
+		} else {
+			notificationsEnabled.set(false);
+		}
+	}
 
 	async function saveProcessSetting(key: keyof GrokProcessSettings, input: HTMLInputElement) {
 		if (!processSettings) return;
@@ -166,6 +211,28 @@
 			{/each}
 		</select>
 
+		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+			{$t('general.notifications')}
+		</h3>
+		<div class="flex flex-col gap-2.5">
+			<label class="flex items-center justify-between cursor-pointer">
+				<span class="text-xs text-gray-600 dark:text-gray-400">
+					{$t('general.browserNotifications')}
+				</span>
+				<ToggleSwitch value={$notificationsEnabled} onchange={() => toggleNotifications()} />
+			</label>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 -mt-1">
+				{$t('general.browserNotificationsDesc')}
+			</p>
+
+			<label class="flex items-center justify-between cursor-pointer">
+				<span class="text-xs text-gray-600 dark:text-gray-400">
+					{$t('general.notificationSound')}
+				</span>
+				<ToggleSwitch value={$notificationSound} onchange={(v) => notificationSound.set(v)} />
+			</label>
+		</div>
+
 		{#if $session?.role === 'admin'}
 			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.updates')}</h3>
 			<label class="flex items-center justify-between cursor-pointer">
@@ -219,6 +286,23 @@
 			</div>
 			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 				{$t('general.grokProcessesDesc')}
+			</p>
+		{/if}
+
+		{#if $session?.role === 'admin' && autoGitignoreDotCptr !== null}
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('admin.workspace')}</h3>
+			<label class="flex items-center justify-between cursor-pointer">
+				<span class="text-xs text-gray-600 dark:text-gray-400"
+					>{$t('admin.workspaceAutoGitignoreDotCptr')}</span
+				>
+				<ToggleSwitch
+					value={autoGitignoreDotCptr}
+					onchange={saveAutoGitignore}
+					disabled={savingWorkspace}
+				/>
+			</label>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+				{$t('admin.workspaceAutoGitignoreDotCptrHint')}
 			</p>
 		{/if}
 

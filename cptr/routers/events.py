@@ -1,4 +1,4 @@
-"""Unified system events WebSocket: fs watching + port scanning.
+"""System events WebSocket: filesystem watching.
 
 Replaces the old watch.py with a single multiplexed event stream.
 """
@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import platform
 import sys
 import threading
@@ -20,7 +19,6 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 from watchdog.observers.polling import PollingObserver
 
-from cptr.utils.terminal import manager
 from cptr.utils.config import check_access
 
 logger = logging.getLogger(__name__)
@@ -218,328 +216,6 @@ async def _fs_watcher_loop(ws: WebSocket, initial_path: str, path_holder: dict) 
         await _unsubscribe_from_path(current_path, queue)
 
 
-# ── Port scanning ─────────────────────────────────────────────────
-
-# System processes to ignore
-_IGNORED_PROCESSES = {
-    "sshd",
-    "cupsd",
-    "mDNSResponder",
-    "rapportd",
-    "systemd-resolve",
-    "avahi-daemon",
-    "dnsmasq",
-    "launchd",
-    "systemd",
-    "ntpd",
-    "bluetoothd",
-    "AirPlayXPCHelper",
-    "ControlCenter",
-}
-
-# Ports that are almost certainly system services
-_SYSTEM_PORTS = {22, 53, 80, 443, 631, 5353}
-
-
-async def _get_ppid(pid: int) -> int:
-    """Get parent PID. Cross-platform."""
-    try:
-        if sys.platform == "win32":
-            proc = await asyncio.create_subprocess_exec(
-                "wmic", "process", "where", f"ProcessId={pid}",
-                "get", "ParentProcessId", "/value",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-            for line in stdout.decode(errors="replace").splitlines():
-                if line.startswith("ParentProcessId="):
-                    return int(line.split("=", 1)[1])
-            return 0
-        elif sys.platform == "linux":
-            def _read_ppid():
-                with open(f"/proc/{pid}/stat") as f:
-                    return int(f.read().split()[3])
-            return await asyncio.to_thread(_read_ppid)
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                "ps", "-o", "ppid=", "-p", str(pid),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2)
-            return int(stdout.decode(errors="replace").strip())
-    except Exception:
-        return 0
-
-
-async def _find_session_for_pid(pid: int) -> Optional[str]:
-    """Walk up the process tree to find which terminal session spawned this PID."""
-    current = pid
-    visited: set[int] = set()
-    while current > 1 and current not in visited:
-        visited.add(current)
-        for session in manager._sessions.values():
-            # Unix: match by child PID
-            if session._pid == current:
-                return session.session_id
-            # Windows: winpty process has a .pid attribute
-            if session._process is not None:
-                try:
-                    if getattr(session._process, "pid", None) == current:
-                        return session.session_id
-                except Exception:
-                    pass
-        current = await _get_ppid(current)
-    return None
-
-
-async def _get_process_name(pid: int) -> str:
-    """Get process name from PID."""
-    try:
-        if sys.platform == "win32":
-            proc = await asyncio.create_subprocess_exec(
-                "tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-            line = stdout.decode(errors="replace").strip()
-            if line and line.startswith('"'):
-                return line.split('"')[1]
-            return "unknown"
-        elif sys.platform == "linux":
-            def _read_comm():
-                with open(f"/proc/{pid}/comm") as f:
-                    return f.read().strip()
-            return await asyncio.to_thread(_read_comm)
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                "ps", "-o", "comm=", "-p", str(pid),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2)
-            name = stdout.decode(errors="replace").strip()
-            # macOS returns full path, extract basename
-            return os.path.basename(name) if name else "unknown"
-    except Exception:
-        return "unknown"
-
-
-async def _scan_ports_darwin() -> list[dict]:
-    """Scan listening ports on macOS using lsof."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "lsof", "-iTCP", "-sTCP:LISTEN", "-nP", "-F", "pcn",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        if proc.returncode != 0:
-            return []
-
-        ports = []
-        current_pid = 0
-        current_process = ""
-        for line in stdout.decode(errors="replace").splitlines():
-            if line.startswith("p"):
-                current_pid = int(line[1:])
-            elif line.startswith("c"):
-                current_process = line[1:]
-            elif line.startswith("n"):
-                # Format: n*:PORT or nhost:PORT
-                addr = line[1:]
-                if ":" in addr:
-                    port_str = addr.rsplit(":", 1)[1]
-                    try:
-                        port = int(port_str)
-                        ports.append(
-                            {
-                                "port": port,
-                                "pid": current_pid,
-                                "process": current_process,
-                            }
-                        )
-                    except ValueError:
-                        pass
-        return ports
-    except Exception as e:
-        logger.warning(f"Port scan failed: {e}")
-        return []
-
-
-async def _scan_ports_linux() -> list[dict]:
-    """Scan listening ports on Linux using /proc/net/tcp."""
-    ports = []
-    try:
-        def _read_proc_net():
-            with open("/proc/net/tcp") as f:
-                return f.readlines()[1:]  # skip header
-
-        lines = await asyncio.to_thread(_read_proc_net)
-        for line in lines:
-            parts = line.split()
-            if parts[3] == "0A":  # LISTEN state
-                local = parts[1]
-                port = int(local.split(":")[1], 16)
-                inode = int(parts[9])
-                # Find PID for this inode
-                pid = await _inode_to_pid(inode)
-                process = await _get_process_name(pid) if pid else "unknown"
-                ports.append({"port": port, "pid": pid or 0, "process": process})
-    except Exception as e:
-        logger.warning(f"Port scan failed: {e}")
-    return ports
-
-
-async def _inode_to_pid(inode: int) -> Optional[int]:
-    """Map a socket inode to a PID on Linux."""
-    def _scan():
-        try:
-            for entry in os.listdir("/proc"):
-                if not entry.isdigit():
-                    continue
-                try:
-                    fd_dir = f"/proc/{entry}/fd"
-                    for fd in os.listdir(fd_dir):
-                        try:
-                            link = os.readlink(f"{fd_dir}/{fd}")
-                            if f"socket:[{inode}]" in link:
-                                return int(entry)
-                        except (OSError, ValueError):
-                            continue
-                except (OSError, PermissionError):
-                    continue
-        except Exception:
-            pass
-        return None
-    return await asyncio.to_thread(_scan)
-
-
-async def _scan_ports_windows() -> list[dict]:
-    """Scan listening ports on Windows using netstat."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "netstat", "-ano", "-p", "TCP",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        ports = []
-        for line in stdout.decode(errors="replace").splitlines():
-            parts = line.split()
-            if len(parts) >= 5 and "LISTENING" in parts:
-                local = parts[1]
-                if ":" in local:
-                    port_str = local.rsplit(":", 1)[1]
-                    try:
-                        port = int(port_str)
-                        pid = int(parts[-1])
-                        ports.append(
-                            {
-                                "port": port,
-                                "pid": pid,
-                                "process": await _get_process_name(pid),
-                            }
-                        )
-                    except ValueError:
-                        pass
-        return ports
-    except Exception as e:
-        logger.warning(f"Port scan failed: {e}")
-        return []
-
-
-async def _scan_ports() -> list[dict]:
-    """Scan listening ports. Cross-platform."""
-    system = platform.system()
-    if system == "Darwin":
-        raw = await _scan_ports_darwin()
-    elif system == "Linux":
-        raw = await _scan_ports_linux()
-    elif system == "Windows":
-        raw = await _scan_ports_windows()
-    else:
-        return []
-
-    # Get our own PID to filter ourselves out
-    our_pid = os.getpid()
-
-    # Deduplicate by port and filter
-    seen: set[int] = set()
-    filtered = []
-    for entry in raw:
-        port = entry["port"]
-        if port in seen:
-            continue
-        seen.add(port)
-
-        # Skip system ports and our own process
-        if port in _SYSTEM_PORTS:
-            continue
-        if entry["pid"] == our_pid:
-            continue
-        if entry["process"] in _IGNORED_PROCESSES:
-            continue
-
-        # Session attribution: only include ports spawned by our terminals
-        if entry["pid"]:
-            session_id = await _find_session_for_pid(entry["pid"])
-            if session_id:
-                entry["session_id"] = session_id
-                filtered.append(entry)
-            # else: not from a cptr terminal, skip
-        # pid=0 or no pid: skip
-
-    return filtered
-
-
-async def _port_scanner_loop(ws: WebSocket) -> None:
-    """Periodically scan ports and push add/remove events."""
-    known: dict[int, dict] = {}  # port -> info
-
-    while True:
-        await asyncio.sleep(3)
-
-        try:
-            current_ports = {p["port"]: p for p in await _scan_ports()}
-        except Exception as e:
-            logger.warning(f"Port scan error: {e}")
-            continue
-
-        # Detect new ports
-        for port, info in current_ports.items():
-            if port not in known:
-                try:
-                    await ws.send_json(
-                        {
-                            "type": "port_added",
-                            "port": info["port"],
-                            "pid": info["pid"],
-                            "process": info["process"],
-                            "session_id": info.get("session_id"),
-                        }
-                    )
-                except Exception:
-                    return
-
-        # Detect removed ports
-        for port in list(known.keys()):
-            if port not in current_ports:
-                try:
-                    await ws.send_json(
-                        {
-                            "type": "port_removed",
-                            "port": port,
-                        }
-                    )
-                except Exception:
-                    return
-
-        known = current_ports
-
-
 # ── Receive loop ──────────────────────────────────────────────────
 
 
@@ -567,8 +243,6 @@ async def events_ws(
 
     Pushes:
       - {"type": "fs_change", "paths": [...]}
-      - {"type": "port_added", "port": N, "pid": N, "process": "...", "session_id": "..." | null}
-      - {"type": "port_removed", "port": N}
 
     Receives:
       - {"type": "watch_path", "path": "..."}: change fs watch directory
@@ -592,12 +266,11 @@ async def events_ws(
     path_holder: dict = {}
 
     fs_task = asyncio.create_task(_fs_watcher_loop(websocket, str(target), path_holder))
-    port_task = asyncio.create_task(_port_scanner_loop(websocket))
     recv_task = asyncio.create_task(_receive_loop(websocket, path_holder))
 
     try:
         done, pending = await asyncio.wait(
-            [fs_task, port_task, recv_task],
+            [fs_task, recv_task],
             return_when=asyncio.FIRST_COMPLETED,
         )
         for t in pending:

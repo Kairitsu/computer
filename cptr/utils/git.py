@@ -75,16 +75,6 @@ async def is_repo(root: str, identity: ExecutionIdentity | None = None) -> bool:
     return code == 0
 
 
-async def version(root: str, identity: ExecutionIdentity | None = None) -> str | None:
-    """Return the installed git version, if git is available."""
-    cwd = root if os.path.isdir(root) else "/"
-    try:
-        code, out, _ = await _run("--version", cwd=cwd, check=False, identity=identity)
-    except GitError:
-        return None
-    return out.strip() if code == 0 else None
-
-
 async def status(root: str, identity: ExecutionIdentity | None = None) -> dict[str, Any]:
     """Get repo status using porcelain v2 format."""
     # Refresh Git's cached file metadata first so status catches edits whose

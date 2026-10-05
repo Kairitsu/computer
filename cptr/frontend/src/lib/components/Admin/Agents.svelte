@@ -14,6 +14,7 @@
 	import { t } from '$lib/i18n';
 	import { refreshChatState } from '$lib/stores/chat';
 	import AgentProfileModal from './AgentProfileModal.svelte';
+	import Models from './Models.svelte';
 
 	type ModalState =
 		| { mode: 'create'; profile: AgentProfile }
@@ -235,7 +236,7 @@
 	});
 </script>
 
-<div class="flex flex-col min-h-full">
+<div class="flex flex-col">
 	<div class="flex items-center justify-between mb-4">
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('admin.agents')}</h2>
 		<div class="flex items-center gap-1">
@@ -307,7 +308,7 @@
 			</p>
 		{/if}
 
-		<div class="mt-auto pt-6 flex items-center justify-between">
+		<div class="pt-4 flex items-center justify-between">
 			<span class="text-xs text-gray-500">
 				{profiles.length} profile{profiles.length === 1 ? '' : 's'}
 			</span>
@@ -324,6 +325,10 @@
 			</button>
 		</div>
 	{/if}
+</div>
+
+<div class="mt-8">
+	<Models />
 </div>
 
 {#if modal}

@@ -34,7 +34,6 @@ from cptr.utils.git import (
     discard,
     effective_config,
     fetch,
-    version,
     is_repo,
     log,
     pull,
@@ -83,17 +82,6 @@ async def _require_repo(root: str, identity: ExecutionIdentity) -> None:
     """Raise 400 if root is not a git repository."""
     if not await is_repo(root, identity):
         raise HTTPException(status_code=400, detail="Not a git repository")
-
-
-def _is_admin(request: Request) -> bool:
-    auth = getattr(request.state, "auth", None)
-    return bool(auth and getattr(auth, "role", None) == "admin")
-
-
-def _require_gh_mutation_allowed(request: Request, identity: ExecutionIdentity) -> None:
-    if identity.is_pam or _is_admin(request):
-        return
-    raise HTTPException(status_code=403, detail="admin required")
 
 
 async def _user_git_identity(identity: ExecutionIdentity) -> dict[str, str]:
@@ -145,55 +133,6 @@ async def git_status(request: Request, root: str):
         return result
     except GitError as e:
         _handle_git_error(e)
-
-
-@router.get("/config")
-async def git_config(request: Request, root: str | None = None):
-    """Get Git and gh settings data for the Settings UI."""
-    root, identity = await _root_identity(request, root)
-    git_version = await version(identity.home, identity)
-    git_data: dict = {
-        "installed": bool(git_version),
-        "version": git_version,
-        "is_repo": False,
-        "identity": {},
-        "credential_helpers": [],
-        "remote_url": "",
-    }
-    if not git_version:
-        return {
-            "root": root,
-            "git": git_data,
-            "app_identity": await _user_git_identity(identity),
-            "gh": {
-                "installed": False,
-                "version": None,
-                "hosts": {},
-                "message": "Git is not installed.",
-            },
-            "permissions": {
-                "can_manage_gh": identity.is_pam or _is_admin(request),
-                "can_manage_commit_model": _is_admin(request),
-            },
-        }
-    if await is_repo(root, identity):
-        git_data = {**git_data, "is_repo": True, **await effective_config(root, identity)}
-    else:
-        git_data = {**git_data, "is_repo": False, **await effective_config(identity.home, identity)}
-    try:
-        gh_status = await gh.auth_status(identity)
-    except gh.GhError as e:
-        gh_status = {"installed": False, "version": None, "hosts": {}, "message": str(e)}
-    return {
-        "root": root,
-        "git": git_data,
-        "app_identity": await _user_git_identity(identity),
-        "gh": gh_status,
-        "permissions": {
-            "can_manage_gh": identity.is_pam or _is_admin(request),
-            "can_manage_commit_model": _is_admin(request),
-        },
-    }
 
 
 @router.get("/diff")
@@ -350,23 +289,6 @@ class StashSaveRequest(BaseModel):
 class StashPopRequest(BaseModel):
     root: str
     index: int = 0
-
-
-class GhLoginStartRequest(BaseModel):
-    hostname: str = "github.com"
-    git_protocol: str = "https"
-
-
-class GhLoginStatusRequest(BaseModel):
-    session_id: str
-
-
-class GhHostRequest(BaseModel):
-    hostname: str = "github.com"
-
-
-class GhUserHostRequest(GhHostRequest):
-    user: Optional[str] = None
 
 
 class PrNumberRequest(BaseModel):
@@ -1046,77 +968,5 @@ async def git_pr_review(request: Request, body: PrReviewRequest):
     try:
         _, out, err = await gh.run_gh(args, identity=identity, cwd=root)
         return {"ok": True, "message": (out + err).strip()}
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/login/start")
-async def gh_login_start(request: Request, body: GhLoginStartRequest):
-    identity = await _identity(request)
-    _require_gh_mutation_allowed(request, identity)
-    try:
-        return await gh.start_login(
-            identity,
-            hostname=body.hostname.strip() or "github.com",
-            git_protocol=body.git_protocol if body.git_protocol in {"https", "ssh"} else "https",
-        )
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/login/status")
-async def gh_login_status(request: Request, body: GhLoginStatusRequest):
-    identity = await _identity(request)
-    try:
-        result = gh.login_status(identity, body.session_id)
-        if result["status"] == "complete":
-            result["auth"] = await gh.auth_status(identity)
-        return result
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/login/cancel")
-async def gh_login_cancel(request: Request, body: GhLoginStatusRequest):
-    identity = await _identity(request)
-    _require_gh_mutation_allowed(request, identity)
-    try:
-        gh.cancel_login(identity, body.session_id)
-        return {"ok": True}
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/logout")
-async def gh_logout(request: Request, body: GhUserHostRequest):
-    identity = await _identity(request)
-    _require_gh_mutation_allowed(request, identity)
-    try:
-        await gh.logout(identity, body.hostname.strip() or "github.com", body.user)
-        return {"ok": True, "auth": await gh.auth_status(identity)}
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/switch")
-async def gh_switch(request: Request, body: GhUserHostRequest):
-    identity = await _identity(request)
-    _require_gh_mutation_allowed(request, identity)
-    if not body.user:
-        raise HTTPException(status_code=400, detail="user is required")
-    try:
-        await gh.switch(identity, body.hostname.strip() or "github.com", body.user)
-        return {"ok": True, "auth": await gh.auth_status(identity)}
-    except gh.GhError as e:
-        _handle_gh_error(e)
-
-
-@router.post("/gh/setup-git")
-async def gh_setup_git(request: Request, body: GhHostRequest):
-    identity = await _identity(request)
-    _require_gh_mutation_allowed(request, identity)
-    try:
-        await gh.setup_git(identity, body.hostname.strip() or "github.com")
-        return {"ok": True}
     except gh.GhError as e:
         _handle_gh_error(e)

@@ -38,7 +38,6 @@
 		selectedModel: string;
 		toolApprovalMode?: ToolApprovalMode;
 		planMode?: boolean;
-		requestParams?: Record<string, unknown>;
 		reasoningEffort?: ReasoningEffort | null;
 		contextWindow?: number | null;
 		sending: boolean;
@@ -77,7 +76,6 @@
 		selectedModel = $bindable(),
 		toolApprovalMode = $bindable('auto'),
 		planMode = $bindable(false),
-		requestParams = $bindable({}),
 		reasoningEffort = $bindable(null),
 		contextWindow = $bindable(null),
 		sending,
@@ -1009,13 +1007,9 @@
 			<div class="ml-0.5 self-end flex items-center gap-1">
 				<PlusMenu
 					bind:planMode
-					bind:requestParams
 					onchange={onsettingschange}
 					onfiles={(files) => {
 						if (files) processFiles(Array.from(files));
-					}}
-					oncapture={(file) => {
-						processFiles([file]);
 					}}
 				/>
 				<button
