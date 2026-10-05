@@ -39,29 +39,6 @@ def internal_status(meta: dict | None) -> str | None:
     return meta.get("status") or meta.get("timer_status")
 
 
-def is_subagent_result_message(meta: dict | None) -> bool:
-    """Whether a parent-chat message carries a subagent result."""
-    meta = meta or {}
-    return bool(
-        (meta.get("internal") is True and meta.get("type") == "subagent")
-        or meta.get("async_subagent_result")
-        or meta.get("async_subagent_pending")
-    )
-
-
-def is_pending_subagent_result_message(meta: dict | None) -> bool:
-    """Whether a subagent result is queued behind active parent work."""
-    meta = meta or {}
-    return bool(
-        (
-            meta.get("internal") is True
-            and meta.get("type") == "subagent"
-            and meta.get("status") == "pending"
-        )
-        or meta.get("async_subagent_pending")
-    )
-
-
 class Chat(Base):
     """A chat conversation. Workspace association lives in the filesystem."""
 

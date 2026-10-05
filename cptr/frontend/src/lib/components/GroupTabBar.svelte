@@ -22,14 +22,12 @@
 	} from '$lib/stores';
 	import { openChatTab } from '$lib/stores';
 	import { chatEnabled, chatStatuses, isChatUnread, streamingChatTabs } from '$lib/stores/chat';
-	import { voiceMemosEnabled, showVoiceMemo } from '$lib/stores/audio';
 	import { keybindings, formatChord } from '$lib/stores/keybindings';
 	import Icon from './Icon.svelte';
 	import Spinner from './common/Spinner.svelte';
 	import DropdownMenu from './DropdownMenu.svelte';
 	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
-	import VoiceMemoModal from './VoiceMemoModal.svelte';
 	import { TAB_DRAG_MIME } from '$lib/constants';
 
 	interface Props {
@@ -263,19 +261,7 @@
 						icon: 'browser',
 						shortcut: formatChord($keybindings.newBrowser),
 						onclick: () => openBrowserTab(group.id)
-					},
-					...($voiceMemosEnabled
-						? [
-								{
-									label: $t('bar.voiceMemo'),
-									icon: 'microphone',
-									shortcut: formatChord($keybindings.voiceMemo),
-									onclick: () => {
-										showVoiceMemo.set(true);
-									}
-								}
-							]
-						: [])
+					}
 				]
 	);
 
@@ -525,14 +511,6 @@
 		items={splitMenuItems}
 		anchor={splitBtnEl}
 		onclose={() => (showSplitMenu = false)}
-	/>
-{/if}
-
-{#if !home && $showVoiceMemo}
-	<VoiceMemoModal
-		workspace={$activeWorkspace?.path ?? ''}
-		directory={$activeWorkspace?.fileBrowserCwd ?? $activeWorkspace?.path ?? ''}
-		onclose={() => showVoiceMemo.set(false)}
 	/>
 {/if}
 

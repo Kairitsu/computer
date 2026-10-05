@@ -18,7 +18,7 @@ from cptr.socket.main import is_user_active
 logger = logging.getLogger(__name__)
 
 VALID_EVENTS = {event.name for event in CHAT_NOTIFICATION_EVENTS}
-VALID_TYPES = {"webhook", "bot"}
+VALID_TYPES = {"webhook"}
 VALID_DELIVERY = {"away", "always"}
 
 
@@ -116,43 +116,12 @@ async def list_targets(user_id: str) -> list[dict]:
     visible = []
     default_id = _default_target_id(data)
     for target in _targets(data):
-        if target.get("type") == "bot":
-            try:
-                await _ensure_user_bot(user_id, str((target.get("config") or {}).get("bot_id") or ""))
-            except NotificationError:
-                continue
+        if target.get("type") not in VALID_TYPES:
+            continue
         public = _public_target(target)
         public["is_default"] = target.get("id") == default_id
         visible.append(public)
     return visible
-
-
-async def get_bot_options(user_id: str, bot_manager=None) -> list[dict]:
-    from cptr.utils.bridge import get_bot_configs
-
-    status = bot_manager.get_status() if bot_manager else {}
-    bots = []
-    for bot in await get_bot_configs():
-        if bot.get("user_id") != user_id:
-            continue
-        bots.append(
-            {
-                "id": bot.get("id"),
-                "name": bot.get("name"),
-                "platform": bot.get("platform"),
-                "is_active": bool(bot.get("is_active", True)),
-                "is_running": bool(status.get(bot.get("id"), False)),
-            }
-        )
-    return bots
-
-
-async def _ensure_user_bot(user_id: str, bot_id: str) -> None:
-    from cptr.utils.bridge import get_bot_by_id
-
-    bot = await get_bot_by_id(bot_id)
-    if not bot or bot.get("user_id") != user_id:
-        raise NotificationError("bot target is not available")
 
 
 def _validate_config(target_type: str, config: dict) -> dict:
@@ -160,14 +129,6 @@ def _validate_config(target_type: str, config: dict) -> dict:
         raise NotificationError("config must be an object")
     if target_type == "webhook":
         return {"url": validate_webhook_url(str(config.get("url") or ""))}
-    if target_type == "bot":
-        bot_id = str(config.get("bot_id") or "").strip()
-        destination = str(config.get("destination_chat_id") or "").strip()
-        if not bot_id:
-            raise NotificationError("bot target requires bot_id")
-        if not destination:
-            raise NotificationError("bot target requires destination_chat_id")
-        return {"bot_id": bot_id, "destination_chat_id": destination}
     raise NotificationError("unsupported notification target type")
 
 
@@ -179,7 +140,7 @@ def _validate_target(payload: dict, existing: dict | None = None) -> dict:
     if not target_id:
         raise NotificationError("target id is required")
     if target_type not in VALID_TYPES:
-        raise NotificationError("target type must be webhook or bot")
+        raise NotificationError("target type must be webhook")
     if delivery not in VALID_DELIVERY:
         raise NotificationError("delivery must be away or always")
     config = _validate_config(target_type, dict(merged.get("config") or {}))
@@ -212,8 +173,6 @@ async def create_target(user_id: str, payload: dict) -> dict:
         target_type = str(payload.get("type") or "target").strip() or "target"
         if target_type == "webhook":
             base = urlparse(str(config.get("url") or "")).hostname or "webhook"
-        elif target_type == "bot":
-            base = str(config.get("bot_id") or "bot")
         else:
             base = target_type
         base = re.sub(r"[^a-zA-Z0-9_-]+", "-", base).strip("-").lower() or "target"
@@ -224,8 +183,6 @@ async def create_target(user_id: str, payload: dict) -> dict:
             suffix += 1
         payload["id"] = candidate
     target = _validate_target(payload)
-    if target["type"] == "bot":
-        await _ensure_user_bot(user_id, target["config"]["bot_id"])
     _check_unique_id(targets, target["id"])
     targets.append(target)
     notifications = data.setdefault("notifications", {})
@@ -245,8 +202,6 @@ async def update_target(user_id: str, target_id: str, payload: dict) -> dict:
     for idx, current in enumerate(targets):
         if current.get("id") == target_id:
             target = _validate_target(payload, existing=current)
-            if target["type"] == "bot":
-                await _ensure_user_bot(user_id, target["config"]["bot_id"])
             _check_unique_id(targets, target["id"], target_id)
             targets[idx] = target
             notifications = data.setdefault("notifications", {})
@@ -339,28 +294,9 @@ async def _send_webhook(target: dict, event: str, title: str, message: str, cont
         response.raise_for_status()
 
 
-async def _send_bot(target: dict, title: str, message: str, context: dict) -> None:
-    from cptr.utils.bridge import get_current_bot_manager
-
-    user_id = str(context.get("user_id") or "")
-    if user_id:
-        await _ensure_user_bot(user_id, str((target.get("config") or {}).get("bot_id") or ""))
-
-    manager = get_current_bot_manager()
-    if not manager:
-        raise NotificationError("bot manager is not running")
-    workspace = (context.get("workspace") or {}).get("name") if isinstance(context.get("workspace"), dict) else ""
-    header = f"[{title}] {workspace}".strip() if title else workspace
-    text = f"{header}\n\n{message}".strip() if header else message
-    config = target.get("config") or {}
-    await manager.send_notification(config["bot_id"], config["destination_chat_id"], text)
-
-
 async def _deliver(target: dict, event: str, title: str, message: str, context: dict) -> None:
     if target.get("type") == "webhook":
         await _send_webhook(target, event, title, message, context)
-    elif target.get("type") == "bot":
-        await _send_bot(target, title, message, context)
     else:
         raise NotificationError("unsupported notification target type")
 
@@ -440,27 +376,3 @@ async def dispatch_notification_event(event: Event) -> None:
                 )
 
 
-async def notify_target(
-    user_id: str,
-    message: str,
-    target_id: str | None = None,
-    title: str | None = None,
-) -> str:
-    if not target_id:
-        data = await _state(user_id)
-        target_id = _default_target_id(data)
-        if not target_id:
-            raise NotificationError("no default notification target is set")
-    target = await _find_target(user_id, target_id)
-    if not target:
-        raise NotificationError(f'notification target "{target_id}" was not found')
-    if not target.get("enabled", True):
-        raise NotificationError(f'notification target "{target_id}" is disabled')
-    await _deliver(
-        target,
-        EVENTS.NOTIFICATION_MANUAL.name,
-        title or "",
-        message,
-        {"chat_id": None, "workspace": None, "user_id": user_id},
-    )
-    return f"Notification sent to {target.get('id')}."

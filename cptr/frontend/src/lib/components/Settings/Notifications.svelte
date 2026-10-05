@@ -7,13 +7,11 @@
 		createNotificationTarget,
 		CHAT_NOTIFICATION_EVENTS,
 		deleteNotificationTarget,
-		listNotificationBotOptions,
 		listNotificationEvents,
 		listNotificationTargets,
 		setDefaultNotificationTarget,
 		testNotificationTarget,
 		updateNotificationTarget,
-		type BotOption,
 		type ChatNotificationEvent,
 		type NotificationEventOption,
 		type NotificationDelivery,
@@ -39,7 +37,6 @@
 
 	let targets = $state<NotificationTarget[]>([]);
 	let eventOptions = $state<NotificationEventOption[]>(fallbackEventOptions);
-	let botOptions = $state<BotOption[]>([]);
 	let loadingTargets = $state(false);
 	let savingTarget = $state(false);
 	let editingId = $state<string | null>(null);
@@ -48,15 +45,10 @@
 		id: '',
 		type: 'webhook' as NotificationTargetType,
 		url: '',
-		bot_id: '',
-		destination_chat_id: '',
 		enabled: true,
 		events: [] as ChatNotificationEvent[],
 		delivery: 'away' as NotificationDelivery
 	});
-	let targetTypes = $derived<NotificationTargetType[]>(
-		botOptions.length ? ['webhook', 'bot'] : ['webhook']
-	);
 
 	onMount(() => {
 		void loadNotificationTargets();
@@ -64,9 +56,8 @@
 
 	async function loadNotificationTargets() {
 		loadingTargets = true;
-		const [targetResult, botResult, eventResult] = await Promise.allSettled([
+		const [targetResult, eventResult] = await Promise.allSettled([
 			listNotificationTargets(),
-			listNotificationBotOptions(),
 			listNotificationEvents()
 		]);
 		if (targetResult.status === 'fulfilled') {
@@ -74,7 +65,6 @@
 		} else {
 			toast.error($t('general.notificationTargetsLoadFailed'));
 		}
-		botOptions = botResult.status === 'fulfilled' ? botResult.value : [];
 		eventOptions =
 			eventResult.status === 'fulfilled' && eventResult.value.length
 				? eventResult.value
@@ -98,15 +88,12 @@
 	}
 
 	function openNewTarget(type: NotificationTargetType = 'webhook') {
-		if (type === 'bot' && !botOptions.length) type = 'webhook';
 		editingId = null;
 		formOpen = true;
 		form = {
 			id: '',
 			type,
 			url: '',
-			bot_id: botOptions[0]?.id || '',
-			destination_chat_id: '',
 			enabled: true,
 			events: [],
 			delivery: 'away'
@@ -120,8 +107,6 @@
 			id: target.id,
 			type: target.type,
 			url: '',
-			bot_id: target.config.bot_id || botOptions[0]?.id || '',
-			destination_chat_id: target.config.destination_chat_id || '',
 			enabled: target.enabled,
 			events: [...target.events],
 			delivery: target.delivery
@@ -145,14 +130,7 @@
 				events: form.events,
 				delivery: form.delivery
 			};
-			if (form.type === 'webhook') {
-				if (!editingId || form.url.trim()) payload.config = { url: form.url.trim() };
-			} else {
-				payload.config = {
-					bot_id: form.bot_id,
-					destination_chat_id: form.destination_chat_id.trim()
-				};
-			}
+			if (!editingId || form.url.trim()) payload.config = { url: form.url.trim() };
 			if (originalId) {
 				await updateNotificationTarget(originalId, payload);
 			} else {
@@ -252,8 +230,7 @@
 			{:else}
 				<div class="flex flex-col">
 					{#each targets as target}
-						{@const targetDestination =
-							target.type === 'webhook' ? target.config.url_masked : target.config.destination_chat_id}
+						{@const targetDestination = target.config.url_masked}
 						{@const alertLabels = eventOptions
 							.filter((event) => target.events.includes(event.event))
 							.map((event) => event.label)
@@ -265,7 +242,7 @@
 										{target.id}
 									</span>
 									<span class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600">
-										{target.type === 'webhook' ? $t('general.webhook') : $t('general.bot')}
+										{$t('general.webhook')}
 									</span>
 									{#if target.is_default}
 										<span class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600">
@@ -334,20 +311,6 @@
 				{editingId ? $t('common.edit') : $t('general.addNotificationTarget')}
 			</h2>
 
-			<div class="mb-2 flex gap-1">
-				{#each targetTypes as type}
-					<button
-						class="h-7 rounded-md px-2 text-xs transition-colors
-						{form.type === type
-							? 'bg-gray-200/60 text-gray-900 dark:bg-white/10 dark:text-white'
-							: 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-300'}"
-						onclick={() => (form.type = type)}
-					>
-						{type === 'webhook' ? $t('general.webhook') : $t('general.bot')}
-					</button>
-				{/each}
-			</div>
-
 			<label class="text-[0.625rem] text-gray-400 dark:text-gray-600">
 				{$t('general.targetIdForNotify')}
 			</label>
@@ -360,44 +323,17 @@
 				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
 			/>
 
-			{#if form.type === 'webhook'}
-				<label class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2">
-					{$t('general.webhook')}
-				</label>
-				<input
-					type="url"
-					bind:value={form.url}
-					placeholder={editingId ? $t('general.keepWebhookUrl') : 'https://hooks.slack.com/services/...'}
-					autocomplete="off"
-					spellcheck="false"
-					class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
-				/>
-			{:else}
-				<label class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2">
-					{$t('general.bot')}
-				</label>
-				<select
-					bind:value={form.bot_id}
-					class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none py-0.5 cursor-pointer"
-				>
-					{#each botOptions as bot}
-						<option value={bot.id}>
-							{bot.name} ({bot.platform}){bot.is_running ? '' : ' - stopped'}
-						</option>
-					{/each}
-				</select>
-
-				<label class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2">
-					{$t('general.platformDestinationId')}
-				</label>
-				<input
-					bind:value={form.destination_chat_id}
-					placeholder={$t('general.platformDestinationId')}
-					autocomplete="off"
-					spellcheck="false"
-					class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
-				/>
-			{/if}
+			<label class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2">
+				{$t('general.webhook')}
+			</label>
+			<input
+				type="url"
+				bind:value={form.url}
+				placeholder={editingId ? $t('general.keepWebhookUrl') : 'https://hooks.slack.com/services/...'}
+				autocomplete="off"
+				spellcheck="false"
+				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			/>
 
 			<label class="block text-[0.625rem] text-gray-400 dark:text-gray-600 mt-3 mb-1">
 				{$t('general.automaticEvents')}
@@ -449,7 +385,7 @@
 				<button
 					class="text-[0.8125rem] text-gray-700 hover:text-gray-900 disabled:opacity-30 dark:text-gray-300 dark:hover:text-white transition-colors duration-100"
 					onclick={saveTarget}
-					disabled={savingTarget || (form.type === 'bot' && !botOptions.length)}
+					disabled={savingTarget}
 				>
 					{savingTarget ? $t('settings.saving') : $t('settings.save')}
 				</button>

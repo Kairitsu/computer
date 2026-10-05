@@ -16,13 +16,9 @@ from typing import Any
 from cptr.events import EVENTS, publish_event
 from cptr.env import CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS
 from cptr.utils.context import build_context_usage, chat_context_window
-from cptr.utils.skills import get_skill_settings
 from cptr.models import (
     Chat,
     ChatMessage,
-    Config,
-    is_pending_subagent_result_message,
-    is_subagent_result_message,
 )
 from cptr.socket.main import emit_to_user
 from cptr.utils.config import now_ms
@@ -73,147 +69,6 @@ PLAN_MODE_PROMPT = (
     "approval message before using write tools or implementing."
 )
 
-SKILLS_CREATE_RE = re.compile(r"^/skills:create(?:\s+(.*))?$", re.IGNORECASE | re.DOTALL)
-
-
-COMPUTER_SKILL_AUTHORING_STANDARDS = """\
-Follow the Computer skill-authoring standards:
-
-Frontmatter:
-- name: lowercase-hyphenated, <=64 chars, no spaces.
-- description: one sentence, <=60 characters, ends with a period. State the
-  capability, not the implementation. Do not repeat the skill name. Avoid
-  marketing words like powerful, comprehensive, seamless, advanced, or robust.
-  Count the characters before saving.
-- version: 0.1.0.
-- platforms: declare [macos], [linux], or [windows] only when the skill uses
-  OS-bound primitives. Omit it for portable skills.
-
-Body section order:
-1. "# <Human Title>" plus a short intro covering what it does, what it does not
-   do, and important dependency assumptions.
-2. "## When to Use" with concrete trigger phrases.
-3. "## Prerequisites" with exact env vars, credentials, install steps, or "None".
-4. "## How to Run" with the canonical workflow framed through Computer tools.
-5. "## Quick Reference" with flat commands, routes, files, or APIs.
-6. "## Procedure" with numbered, copy-paste-exact steps.
-7. "## Pitfalls" with known limits and failure modes.
-8. "## Verification" with one focused check that proves the skill works.
-
-Computer-tool framing:
-- Reference Computer tools by name in backticks: `read_file`, `list_directory`,
-  `search_files`, `web_search`, `read_url`, `run_command`, `view_skill`,
-  and `manage_skill`.
-- Frame shell work as "run through `run_command`".
-- Prefer Computer tools in prose over raw shell utilities when a tool exists:
-  say `read_file` instead of cat/head/tail, `search_files` instead of grep/rg/find,
-  and `read_url` instead of curl-to-scrape.
-- Third-party CLIs are fine inside procedures or scripts, but explain that the
-  agent invokes them through `run_command`.
-
-Quality bar:
-- Prefer exact commands, routes, file paths, function names, config keys, and
-  error text found verbatim in the sources. Do not invent flags, paths, APIs,
-  or behavior.
-- Keep SKILL.md tight and scannable: about 100 lines for a simple workflow,
-  about 200 for a complex one.
-- Do not create a router/index/hub skill that only points at other skills.
-- Put larger reusable scripts in `scripts/`, detailed docs in `references/`,
-  reusable outputs in `templates/`, and binary or visual assets in `assets/`.
-- New skills default to workspace scope. Do not use scope="global" unless the
-  user explicitly asks for a global skill."""
-
-
-def _build_skill_create_prompt(user_request: str) -> str:
-    req = (user_request or "").strip()
-    if not req:
-        req = (
-            "the workflow we just went through in this conversation - review the "
-            "steps taken and distill them into a reusable skill"
-        )
-    return (
-        "[/skills:create] The user wants you to create a reusable Computer skill "
-        "from the request below and save it.\n\n"
-        f"THE REQUEST:\n{req}\n\n"
-        "The request is open-ended and may mix SOURCES to gather (directories, "
-        "file paths, URLs, what we just did, pasted notes) and REQUIREMENTS that "
-        "shape the skill (focus, exclusions, scope, naming, style, constraints). "
-        "Treat every part of the request as load-bearing. Prose after a path or "
-        "URL is not incidental; it is authoring guidance. Never fetch the first "
-        "source and ignore the rest.\n\n"
-        "Do this:\n"
-        "1. Gather every source the user named with the tools you already have: "
-        "`read_file`/`search_files`/`list_directory` for local files or directories, "
-        "`web_search`/`read_url` for web sources, the current conversation if they "
-        "refer to what just happened, and pasted text as-is. If scope is ambiguous, "
-        "make a reasonable choice and note it; do not stall.\n"
-        "2. Apply every requirement, focus, and constraint in the request to what "
-        "the skill covers and emphasizes.\n"
-        "3. Author one SKILL.md using the standards below.\n"
-        '4. Save it with manage_skill(action="create", name=..., content=...). '
-        "If the skill needs supporting files, add them after the create with "
-        'manage_skill(action="write_file", name=..., file_path=..., '
-        "file_content=...).\n\n"
-        f"{COMPUTER_SKILL_AUTHORING_STANDARDS}\n\n"
-        "When done, tell the user the skill name, location, and one-line summary."
-    )
-
-
-def _message_has_real_content(message: dict) -> bool:
-    text = _plain_message_text(message.get("content")).strip()
-    return bool(
-        text or message.get("tool_calls") or message.get("reasoning_items") or message.get("output")
-    )
-
-
-def _has_prior_real_chat_content(messages: list[dict], loaded_summary: str | None = None) -> bool:
-    if loaded_summary and loaded_summary.strip():
-        return True
-    last_user_idx = next(
-        (idx for idx in range(len(messages) - 1, -1, -1) if messages[idx].get("role") == "user"),
-        len(messages),
-    )
-    return any(
-        message.get("role") == "user" and _message_has_real_content(message)
-        for message in messages[:last_user_idx]
-    )
-
-
-def _build_skill_create_gate_prompt(reason: str = "empty_chat") -> str:
-    if reason == "disabled":
-        return (
-            "[/skills:create] Skill creation is disabled in admin settings. "
-            "Explain this briefly and do not try to create or update a skill."
-        )
-    return (
-        "[/skills:create] The user tried to create a skill before this chat had "
-        "any prior real content. Explain briefly that skill creation needs an "
-        "existing chat with the workflow or source material already in it, then "
-        "ask them to continue in a chat with content first."
-    )
-
-
-def _apply_skills_create_prompt(
-    messages: list[dict],
-    *,
-    allowed: bool,
-    denial_reason: str = "empty_chat",
-) -> bool:
-    for message in reversed(messages):
-        if message.get("role") != "user":
-            continue
-        text = _plain_message_text(message.get("content"))
-        match = SKILLS_CREATE_RE.match(text.strip())
-        if not match:
-            return False
-        message["content"] = (
-            _build_skill_create_prompt(match.group(1) or "")
-            if allowed
-            else _build_skill_create_gate_prompt(denial_reason)
-        )
-        return True
-    return False
-
 
 # ── Task registry ───────────────────────────────────────────
 
@@ -240,7 +95,6 @@ def start_task(
     workspace: str,
     target: AgentModelTarget,
     regeneration_prompt: str | None = None,
-    output_queue: asyncio.Queue | None = None,
 ):
     """Launch the agent turn as a background asyncio.Task."""
     task = asyncio.create_task(
@@ -252,7 +106,6 @@ def start_task(
             target=target,
             workspace=workspace,
             regeneration_prompt=regeneration_prompt,
-            output_queue=output_queue,
         )
     )
     _tasks[message_id] = task
@@ -371,19 +224,16 @@ async def release_chat_agents(chat_id: str) -> None:
     """Stop the agent processes a chat keeps between turns, as its tab was closed.
 
     A running turn finishes first, and its process then closes instead of being kept.
-    The chat's internal children (sub-agents, timers) are released with it. The next
-    turn starts a new process that reloads the agent's saved session.
+    The next turn starts a new process that reloads the agent's saved session.
     """
     chat = await Chat.get_by_id(chat_id)
     if chat is None:
         return
-    active = get_active_chat_ids()
-    for owner in (chat, *await Chat.get_internal_descendants(chat_id)):
-        if owner.id in active:
-            _released_chats.add(owner.id)
-        else:
-            _released_chats.discard(owner.id)
-            await _close_chat_agents(owner)
+    if chat.id in get_active_chat_ids():
+        _released_chats.add(chat.id)
+    else:
+        _released_chats.discard(chat.id)
+        await _close_chat_agents(chat)
 
 
 async def _close_released_chat_agents(chat_id: str, user_id: str) -> None:
@@ -399,77 +249,14 @@ async def _close_released_chat_agents(chat_id: str, user_id: str) -> None:
     await _close_chat_agents(await Chat.get_by_id(chat_id))
 
 
-def _plain_message_text(content) -> str:
-    if isinstance(content, list):
-        return " ".join(
-            str(block.get("text", ""))
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return str(content or "")
-
-
-def _memory_recall_inputs(
-    messages: list[dict],
-    regeneration_prompt: str | None = None,
-) -> tuple[str, list[str]]:
-    current_message = regeneration_prompt or ""
-    if not current_message:
-        for message in reversed(messages):
-            if message.get("role") == "user":
-                current_message = _plain_message_text(message.get("content"))
-                break
-    mentioned_files = re.findall(
-        r"(?:^|\s)([./~]?[A-Za-z0-9_.\-/]+(?:\.[A-Za-z0-9_]+))",
-        current_message,
-    )[:12]
-    return current_message, mentioned_files
-
-
 # ── Pending input processing ────────────────────────────────
 
 
-def _merge_subagent_result_meta(messages: list[ChatMessage]) -> dict | None:
-    if not messages:
-        return None
-
-    if all(is_subagent_result_message(m.meta) for m in messages):
-        delegation_ids = [
-            m.meta.get("delegation_id") for m in messages if m.meta and m.meta.get("delegation_id")
-        ]
-        subagent_chat_ids = [
-            m.meta.get("subagent_chat_id")
-            for m in messages
-            if m.meta and m.meta.get("subagent_chat_id")
-        ]
-        meta = {"internal": True, "type": "subagent"}
-        if len(delegation_ids) == 1:
-            meta["delegation_id"] = delegation_ids[0]
-        elif delegation_ids:
-            meta["delegation_ids"] = delegation_ids
-        if len(subagent_chat_ids) == 1:
-            meta["subagent_chat_id"] = subagent_chat_ids[0]
-        elif subagent_chat_ids:
-            meta["subagent_chat_ids"] = subagent_chat_ids
-        return meta
-
-    return None
-
-
-def _is_pending_internal_subagent_result(message: ChatMessage) -> bool:
-    return is_pending_subagent_result_message(message.meta)
-
-
 def _is_pending_chat_input(message: ChatMessage) -> bool:
-    meta = message.meta or {}
-    return bool(meta.get("queued") or is_pending_subagent_result_message(meta))
+    return bool((message.meta or {}).get("queued"))
 
 
 def _merge_pending_input_meta(messages: list[ChatMessage]) -> dict | None:
-    subagent_meta = _merge_subagent_result_meta(messages)
-    if subagent_meta:
-        return subagent_meta
-
     files: list[dict] = []
     for message in messages:
         meta = message.meta or {}
@@ -496,7 +283,6 @@ def _first_ready_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMe
     if not first:
         return []
 
-    first_is_internal_subagent_result = _is_pending_internal_subagent_result(first)
     batch = []
     for message in pending_inputs:
         if message is first:
@@ -508,8 +294,6 @@ def _first_ready_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMe
             break
         if message.model != first.model:
             break
-        if _is_pending_internal_subagent_result(message) != first_is_internal_subagent_result:
-            break
         if not _pending_input_ready(message, msg_map):
             break
         batch.append(message)
@@ -517,7 +301,7 @@ def _first_ready_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMe
 
 
 async def process_pending_chat_inputs(request, chat_id: str, user_id: str, workspace: str):
-    """Start the next task from user-queued prompts or internal subagent results.
+    """Start the next task from user-queued prompts.
 
     Uses a per-chat lock to prevent concurrent processing from
     both the task's finally block and the API double-check.
@@ -619,7 +403,7 @@ async def reconcile_chat_state():
     Called once on startup when ENABLE_CHAT_RECONCILE_ON_STARTUP=true (default).
     Finds:
       1. Assistant messages with done=False that have no running task → mark done
-      2. Chats with pending user prompts or subagent results → process them
+      2. Chats with pending user prompts → process them
     """
     from sqlalchemy import select, and_
     from cptr.utils.db import get_db
@@ -659,24 +443,6 @@ async def reconcile_chat_state():
 
     if healed_chats:
         logger.info("[reconcile] Recovered %d chat(s) on startup", len(healed_chats))
-
-
-VOICE_MODE_SYSTEM_PROMPT = (
-    "You are in voice mode. Keep responses brief, conversational, and easy to hear aloud. "
-    "Prefer one or two short paragraphs. Ask at most one focused follow-up question when needed. "
-    "Avoid long lists, code blocks, tables, and verbose explanations unless the user explicitly asks."
-)
-
-
-async def _apply_voice_mode_system_prompt(system: str, chat_params: dict) -> str:
-    if chat_params.get("voice_mode") is not True:
-        return system
-    prompt = str(
-        (await Config.get("audio.voice_mode_system_prompt")) or VOICE_MODE_SYSTEM_PROMPT
-    ).strip()
-    if not prompt:
-        return system
-    return f"{system}\n\n[VOICE MODE]\n{prompt}"
 
 
 # ── Title generation ────────────────────────────────────────
@@ -1142,7 +908,6 @@ async def run_chat_task(
     target: AgentModelTarget,
     workspace: str,
     regeneration_prompt: str | None = None,
-    output_queue: asyncio.Queue | None = None,
 ):
     """Run one assistant turn through the selected coding agent."""
     if request is None:
@@ -1161,20 +926,7 @@ async def run_chat_task(
         try:
             await emit_to_user(user_id, {"chat_id": chat_id, "message_id": message_id, **data})
         except Exception:
-            # Socket failure must not prevent the queue push below,
-            # otherwise the gateway SSE stream hangs forever.
             logger.debug("[task %s] emit_to_user failed", message_id[:8], exc_info=True)
-        # Push to gateway queue if present
-        if output_queue is not None:
-            if "delta" in data:
-                await output_queue.put({"type": "delta", "content": data["delta"]})
-            elif "output" in data:
-                await output_queue.put({"type": "output", "item": data["output"]})
-            elif data.get("done"):
-                if "error" in data:
-                    await output_queue.put({"type": "error", "message": data["error"]})
-                else:
-                    await output_queue.put({"type": "done", "finish_reason": "stop"})
 
     async def _emit_done():
         """Emit done=True enriched with chat title and content preview."""
@@ -1206,8 +958,6 @@ async def run_chat_task(
     content = (msg.content or "") if msg else ""
     output_items: list[dict] = list(msg.output or []) if msg else []
     text_buffer = ""  # Accumulates text between tool calls
-    skill_create_requested = False
-    skill_authoring_allowed = False
 
     logger.info(
         "[task %s] start: existing content=%d chars, output=%d items",
@@ -1284,8 +1034,7 @@ async def run_chat_task(
         await Chat.update_meta(chat_id, meta, now_ms())
 
     async def _run_agent_target(agent_target: AgentModelTarget):
-        nonlocal content, text_buffer, skill_authoring_allowed
-        nonlocal skill_create_requested
+        nonlocal content, text_buffer
         from cptr.utils.agents.claude_code import run_claude_code_agent
         from cptr.utils.agents.cline import run_cline_agent
         from cptr.utils.agents.codex import run_codex_agent
@@ -1300,24 +1049,8 @@ async def run_chat_task(
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         agent_workspace = workspace or str(Path.home())
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
-        skill_settings = await get_skill_settings()
-        skill_authoring_allowed = _has_prior_real_chat_content(messages, loaded_summary)
-        skill_create_denial_reason = "empty_chat"
-        if not skill_settings["enabled"] or not skill_settings["tool_enabled"]:
-            skill_authoring_allowed = False
-            skill_create_denial_reason = "disabled"
-        skill_create_requested = _apply_skills_create_prompt(
-            messages, allowed=skill_authoring_allowed, denial_reason=skill_create_denial_reason
-        )
-        memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
-            request,
-            agent_workspace,
-            agent_target.full_model_id,
-            user_id=user_id,
-            current_message=memory_message,
-            recent_messages=messages,
-            mentioned_files=memory_files,
+            request, agent_workspace, agent_target.full_model_id, user_id=user_id
         )
         if loaded_summary:
             system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
@@ -1342,7 +1075,6 @@ async def run_chat_task(
             # A resumed agent session only receives the latest user message, so append the
             # instruction to it rather than adding a message that would replace it.
             _append_prompt_suffix(messages, f"\n\n{PLAN_MODE_PROMPT}")
-        system = await _apply_voice_mode_system_prompt(system, chat_params)
 
         resume_state = None
         if chat_obj:
@@ -1776,16 +1508,6 @@ async def run_chat_task(
             message=error_msg[:300] if error_msg else "",
         )
     finally:
-        # Guarantee the gateway SSE stream terminates.  If emit()
-        # already pushed a done/error event the sentinel is harmless
-        # (_stream checks for None separately).  Without this, a
-        # crash in emit_to_user or an unexpected exit path leaves
-        # the SSE generator hanging for up to 5 minutes.
-        if output_queue is not None:
-            try:
-                await output_queue.put(None)
-            except Exception:
-                pass
         _tasks.pop(message_id, None)
         _task_state.pop(message_id, None)
         _task_chat.pop(message_id, None)
@@ -1817,7 +1539,7 @@ async def run_chat_task(
             await export_chat_to_file(request, chat_id)
         except Exception:
             logger.exception(f"Failed to export chat {chat_id}")
-        # Process any pending user prompts or internal subagent results.
+        # Process any pending user prompts.
         try:
             await process_pending_chat_inputs(request, chat_id, user_id, workspace)
         except Exception:

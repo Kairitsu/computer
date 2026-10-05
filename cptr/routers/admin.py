@@ -8,8 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from cptr.models import User, Auth, Config
-from cptr.utils.config import AuthResult, _get_jwt_secret, check_access, hash_password, now_ms
-from cptr.utils.crypto import encrypt_key
+from cptr.utils.config import AuthResult, check_access, hash_password, now_ms
 from cptr.utils.agents.detection import get_agent_status, invalidate_agent_detection_cache
 from cptr.utils.agents.models import save_agent_profiles
 
@@ -131,27 +130,11 @@ async def get_config_namespace(request: Request, namespace: str):
     return {"config": await Config.get_namespace(namespace)}
 
 
-def _prepare_config_updates(updates: dict) -> dict:
-    """Normalize sensitive config values before persisting them."""
-    prepared = dict(updates)
-    secret = _get_jwt_secret()
-    for key in (
-        "audio.stt_api_key",
-        "audio.tts_api_key",
-        "images.generation_api_key",
-        "images.edit_api_key",
-    ):
-        value = prepared.get(key)
-        if isinstance(value, str) and value and not value.startswith("encrypted:"):
-            prepared[key] = encrypt_key(value, secret)
-    return prepared
-
-
 @router.put("/config")
 async def put_config(request: Request, body: ConfigUpdateRequest):
     """Update config keys. Upserts each key."""
     require_admin(request)
-    await Config.upsert(_prepare_config_updates(body.config))
+    await Config.upsert(body.config)
     return {"ok": True}
 
 

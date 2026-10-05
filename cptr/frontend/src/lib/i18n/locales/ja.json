@@ -438,7 +438,7 @@
 	"admin.models": "モデル",
 	"models.defaultModel": "デフォルトモデル",
 	"models.defaultModelNone": "なし（最初に利用可能なものを使用）",
-	"models.defaultModelHint": "新しいチャットとゲートウェイ要求で事前選択されるモデル。",
+	"models.defaultModelHint": "新しいチャットで事前選択されるモデル。",
 	"models.defaults": "デフォルト",
 	"models.noDefaults": "グローバルデフォルトなし",
 	"models.noParams": "パラメータなし",

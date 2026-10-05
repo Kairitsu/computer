@@ -50,7 +50,6 @@
 		rejectActiveToolCallShortcut
 	} from '$lib/stores/chat';
 	import { startQuotaPolling } from '$lib/stores/quota';
-	import { refreshAudioState } from '$lib/stores/audio';
 	import SetupWizard from '$lib/components/SetupWizard.svelte';
 	import { dismissSplash, playIntro } from '$lib/intro';
 
@@ -212,7 +211,6 @@
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
-				refreshAudioState();
 
 				// Check for version updates (admin only, after session is set)
 				checkForUpdates();
@@ -227,7 +225,6 @@
 			authState = 'authenticated';
 			initState();
 			refreshChatState();
-			refreshAudioState();
 		}
 	}
 
@@ -247,7 +244,6 @@
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
-				refreshAudioState();
 				if (wasSetup) showSetup = true;
 				return;
 			}
@@ -380,13 +376,6 @@
 			},
 			toggleSearch: () => {
 				showSearch.update((v) => !v);
-			},
-			toggleVoiceMemo: () => {
-				import('$lib/stores/audio').then(({ voiceMemosEnabled, showVoiceMemo }) => {
-					import('svelte/store').then(({ get }) => {
-						if (get(voiceMemosEnabled)) showVoiceMemo.update((v) => !v);
-					});
-				});
 			},
 			approveToolCall: approveActiveToolCallShortcut,
 			rejectToolCall: rejectActiveToolCallShortcut

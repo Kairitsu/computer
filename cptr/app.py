@@ -9,23 +9,16 @@ from fastapi.staticfiles import StaticFiles
 
 from cptr.routers import (
     admin_router,
-    audio_router,
     auth_router,
     automations_router,
-    bridge_router,
     browser_router,
-    webhook_router,
     chat_router,
     events_router,
     files_router,
-    gateway_router,
     grok_router,
     git_router,
-    images_router,
-    memory_router,
     notifications_router,
     search_router,
-    skills_router,
     state_router,
     terminal_router,
     workspace_router,
@@ -72,12 +65,6 @@ async def lifespan(app: FastAPI):
 
     app.state.scheduler_task = asyncio.create_task(scheduler_worker_loop(app))
 
-    # Start messaging bots
-    from cptr.utils.bridge import BotManager
-
-    app.state.bot_manager = BotManager(app)
-    await app.state.bot_manager.start_all()
-
     try:
         yield
     finally:
@@ -87,15 +74,6 @@ async def lifespan(app: FastAPI):
             with suppress(asyncio.CancelledError):
                 await scheduler_task
 
-        bot_manager = getattr(app.state, "bot_manager", None)
-        if bot_manager:
-            await bot_manager.stop_all()
-        try:
-            from cptr.utils.async_subagents import cancel_all_async_subagents
-
-            await cancel_all_async_subagents(reason="shutdown")
-        except Exception:
-            pass
         # Stop the Grok processes chats keep between turns.
         try:
             from cptr.utils.agents.grok import close_all_grok_sessions
@@ -132,7 +110,7 @@ async def auth_middleware(request: Request, call_next):
         or path == "/manifest.json"
     ):
         return await call_next(request)
-    if path.startswith("/_app/") or path.startswith("/v1/") or not path.startswith("/api/"):
+    if path.startswith("/_app/") or not path.startswith("/api/"):
         return await call_next(request)
     # GET /api/files/{id} is public (UUID is unguessable, <img src> can't send cookies)
     if request.method == "GET" and path.startswith("/api/files/"):
@@ -265,23 +243,16 @@ async def get_config():
 
 # Routers
 app.include_router(admin_router)
-app.include_router(audio_router)
 app.include_router(auth_router)
 app.include_router(automations_router)
-app.include_router(bridge_router)
 app.include_router(browser_router)
-app.include_router(webhook_router)
 app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)
-app.include_router(gateway_router)
 app.include_router(grok_router)
 app.include_router(git_router)
-app.include_router(images_router)
-app.include_router(memory_router)
 app.include_router(notifications_router)
 app.include_router(search_router)
-app.include_router(skills_router)
 app.include_router(state_router)
 app.include_router(terminal_router)
 app.include_router(workspace_router)

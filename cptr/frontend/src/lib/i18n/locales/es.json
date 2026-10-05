@@ -438,7 +438,7 @@
 	"admin.models": "Modelos",
 	"models.defaultModel": "Modelo predeterminado",
 	"models.defaultModelNone": "Ninguno (usar el primero disponible)",
-	"models.defaultModelHint": "Modelo preseleccionado para nuevos chats y solicitudes de gateway.",
+	"models.defaultModelHint": "Modelo preseleccionado para nuevos chats.",
 	"models.defaults": "Predeterminados",
 	"models.noDefaults": "Sin valores predeterminados globales",
 	"models.noParams": "Sin parámetros",

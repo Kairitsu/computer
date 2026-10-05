@@ -7,7 +7,6 @@
 	import Notifications from './Settings/Notifications.svelte';
 	import Appearance from './Settings/Appearance.svelte';
 	import Usage from './Settings/Usage.svelte';
-	import Memory from './Settings/Memory.svelte';
 	import PWA from './Settings/PWA.svelte';
 	import Account from './Settings/Account.svelte';
 	import Keyboard from './Settings/Keyboard.svelte';
@@ -15,13 +14,7 @@
 	import Agents from './Admin/Agents.svelte';
 	import Models from './Admin/Models.svelte';
 	import Git from './Settings/Git.svelte';
-	import Skills from './Admin/Skills.svelte';
-	import Messaging from './Admin/Messaging.svelte';
-	import Gateway from './Admin/Gateway.svelte';
-	import AudioSettings from './Admin/AudioSettings.svelte';
-	import Images from './Admin/Images.svelte';
 	import AdminWeb from './Admin/Web.svelte';
-	import Subagents from './Admin/Subagents.svelte';
 	import Workspace from './Admin/Workspace.svelte';
 	import { session } from '$lib/session';
 	import { t } from '$lib/i18n';
@@ -31,7 +24,6 @@
 		| 'notifications'
 		| 'appearance'
 		| 'usage'
-		| 'memory'
 		| 'pwa'
 		| 'keyboard'
 		| 'account'
@@ -39,13 +31,7 @@
 		| 'agents'
 		| 'models'
 		| 'git'
-		| 'skills'
-		| 'messaging'
-		| 'gateway'
-		| 'audio'
-		| 'images'
 		| 'web'
-		| 'subagents'
 		| 'workspace';
 
 	interface Props {
@@ -62,7 +48,6 @@
 			'notifications',
 			'appearance',
 			'usage',
-			'memory',
 			'pwa',
 			'keyboard',
 			'account',
@@ -70,13 +55,7 @@
 			'agents',
 			'models',
 			'git',
-			'skills',
-			'messaging',
-			'gateway',
-			'audio',
-			'images',
 			'web',
-			'subagents',
 			'workspace'
 		];
 		return validTabs.includes(tab as Tab) ? (tab as Tab) : 'general';
@@ -96,20 +75,7 @@
 
 	type SettingsTab = { id: Tab; label: string; icon: string };
 
-	const adminTabIds: Tab[] = [
-		'users',
-		'agents',
-		'models',
-		'messaging',
-		'gateway',
-		'audio',
-		'images',
-		'web',
-		'subagents',
-		'workspace',
-		'memory',
-		'skills'
-	];
+	const adminTabIds: Tab[] = ['users', 'agents', 'models', 'web', 'workspace'];
 
 	const personalTabs: SettingsTab[] = $derived.by(() => {
 		const tabs: SettingsTab[] = [
@@ -130,15 +96,8 @@
 		{ id: 'users', label: tr('admin.users'), icon: 'user' },
 		{ id: 'agents', label: tr('admin.agents'), icon: 'terminal' },
 		{ id: 'models', label: tr('admin.models'), icon: 'cube' },
-		{ id: 'messaging', label: tr('admin.messaging'), icon: 'chat-bubble' },
-		{ id: 'gateway', label: tr('admin.gateway.tab'), icon: 'gateway' },
-		{ id: 'audio', label: tr('admin.audio.title'), icon: 'microphone' },
-		{ id: 'images', label: tr('admin.images.title'), icon: 'image' },
-		{ id: 'web', label: tr('admin.web'), icon: 'globe' },
-		{ id: 'subagents', label: tr('admin.subagents'), icon: 'user' },
-		{ id: 'workspace', label: tr('admin.workspace'), icon: 'folder' },
-		{ id: 'memory', label: tr('settings.memory'), icon: 'brain' },
-		{ id: 'skills', label: tr('chat.skills'), icon: 'spark' }
+		{ id: 'web', label: tr('admin.browser'), icon: 'globe' },
+		{ id: 'workspace', label: tr('admin.workspace'), icon: 'folder' }
 	]);
 
 	onMount(() => {
@@ -231,8 +190,6 @@
 			<Appearance />
 		{:else if activeTab === 'usage'}
 			<Usage />
-		{:else if activeTab === 'memory'}
-			<Memory />
 		{:else if activeTab === 'pwa' && showPwaSettings}
 			<PWA />
 		{:else if activeTab === 'keyboard'}
@@ -247,20 +204,8 @@
 			<Models />
 		{:else if activeTab === 'git'}
 			<Git />
-		{:else if activeTab === 'skills'}
-			<Skills />
-		{:else if activeTab === 'messaging'}
-			<Messaging />
-		{:else if activeTab === 'gateway'}
-			<Gateway />
-		{:else if activeTab === 'audio'}
-			<AudioSettings />
-		{:else if activeTab === 'images'}
-			<Images />
 		{:else if activeTab === 'web'}
 			<AdminWeb />
-		{:else if activeTab === 'subagents'}
-			<Subagents />
 		{:else if activeTab === 'workspace'}
 			<Workspace />
 		{/if}

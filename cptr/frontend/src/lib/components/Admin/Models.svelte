@@ -6,8 +6,7 @@
 		refreshModelList,
 		updateModelConfig,
 		getAdminConfig,
-		updateConfig,
-		type ModelConfigEntry
+		updateConfig
 	} from '$lib/apis/admin';
 	import { t } from '$lib/i18n';
 	import { tooltip } from '$lib/tooltip';
@@ -63,8 +62,6 @@
 {{CPTR_CONTEXT}}
 
 {{INSTRUCTIONS}}
-
-{{SKILLS}}
 
 Workspace: {{WORKSPACE_NAME}}
 Files:

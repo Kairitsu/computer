@@ -6,27 +6,20 @@ chat views still read them.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import time
-from pathlib import Path
 from typing import Any
 
 
+import signal
+
 try:
     import fcntl
-    import pty
-    import signal
     import struct
-    import subprocess
     import termios
 
     _PTY_AVAILABLE = True
 except ImportError:
-    import signal
-    import subprocess
-
     _PTY_AVAILABLE = False  # Windows
 
 
@@ -42,37 +35,11 @@ command_sessions: dict[str, dict] = {}
 #   "exit_code": int | None,
 #   "log_path": str,
 # }
-MAX_COMMAND_SESSIONS = 5
-_MAX_LOG_SIZE = 50 * 1024 * 1024  # 50MB — rotate when exceeded
 
 VALID_TASK_STATUSES = {"pending", "in_progress", "completed", "cancelled"}
 MAX_TASK_ITEMS = 256
 MAX_TASK_CONTENT_CHARS = 4000
 _TASK_TRUNCATION_MARKER = "... [truncated]"
-
-
-def _spawn_pty(command: str, cwd: str, env: dict, preexec_fn=None) -> tuple:
-    """Spawn a command under a PTY (Unix only). Returns (proc, master_fd)."""
-    master_fd, slave_fd = pty.openpty()
-    try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        proc = subprocess.Popen(
-            command,
-            shell=True,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=cwd,
-            env=env,
-            start_new_session=True,
-            preexec_fn=preexec_fn,
-        )
-    except Exception:
-        os.close(slave_fd)
-        os.close(master_fd)
-        raise
-    os.close(slave_fd)
-    return proc, master_fd
 
 
 def _kill_process_group(pid: int, force: bool = False) -> None:
@@ -91,136 +58,7 @@ def _kill_process_group(pid: int, force: bool = False) -> None:
             pass
 
 
-def _rotate_log(log_path: str, log_file) -> tuple:
-    """Keep the newest half of the log file. Returns new (file, bytes_written)."""
-    log_file.flush()
-    log_file.close()
-
-    with open(log_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    keep = lines[len(lines) // 2 :]
-
-    with open(log_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"type": "log_rotated", "ts": time.time()}) + "\n")
-        for line in keep:
-            f.write(line)
-
-    new_file = open(log_path, "a", encoding="utf-8")
-    new_size = sum(len(line.encode("utf-8", errors="replace")) for line in keep)
-    return new_file, new_size
-
-
-async def stream_command_session_output(command_session_id: str):
-    """Read output from a command process into memory + JSONL log."""
-    session = command_sessions.get(command_session_id)
-    if not session:
-        return
-
-    master_fd = session.get("master_fd")
-    proc = session["proc"]
-    log_path = session.get("log_path")
-    log_file = None
-    log_bytes = 0
-    loop = asyncio.get_event_loop()
-
-    try:
-        if log_path:
-            Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-            log_file = open(log_path, "a", encoding="utf-8")
-            entry = (
-                json.dumps(
-                    {
-                        "type": "start",
-                        "command": session["command"],
-                        "pid": proc.pid,
-                        "ts": time.time(),
-                    }
-                )
-                + "\n"
-            )
-            log_file.write(entry)
-            log_file.flush()
-            log_bytes += len(entry.encode("utf-8", errors="replace"))
-
-        while True:
-            # Read from PTY fd (Unix) or subprocess pipe (Windows fallback)
-            if master_fd is not None:
-                try:
-                    chunk = await loop.run_in_executor(None, os.read, master_fd, 4096)
-                    if not chunk:
-                        break
-                except OSError:
-                    break  # EIO when child exits
-            else:
-                chunk = await proc.stdout.read(4096)
-                if not chunk:
-                    break
-
-            session = command_sessions.get(command_session_id)
-            if session:
-                session["output"].extend(chunk)
-                session["total_bytes"] += len(chunk)
-                if len(session["output"]) > 256 * 1024:
-                    session["output"] = session["output"][-256 * 1024 :]
-                async with session["condition"]:
-                    session["condition"].notify_all()
-
-            if log_file:
-                entry = (
-                    json.dumps(
-                        {
-                            "type": "output",
-                            "data": chunk.decode(errors="replace"),
-                            "ts": time.time(),
-                        }
-                    )
-                    + "\n"
-                )
-                entry_size = len(entry.encode("utf-8", errors="replace"))
-                if log_bytes + entry_size > _MAX_LOG_SIZE:
-                    log_file, log_bytes = _rotate_log(log_path, log_file)
-                log_file.write(entry)
-                log_file.flush()
-                log_bytes += entry_size
-    except Exception:
-        pass
-    finally:
-        # Wait for the process to finish and collect exit code
-        session = command_sessions.get(command_session_id)
-        if master_fd is not None:
-            exit_code = await loop.run_in_executor(None, proc.wait)
-            try:
-                os.close(master_fd)
-            except OSError:
-                pass
-        else:
-            await proc.wait()
-            exit_code = proc.returncode
-
-        if session:
-            session["done"] = True
-            session["exit_code"] = exit_code
-            session["master_fd"] = None  # fd is closed
-            async with session["condition"]:
-                session["condition"].notify_all()
-
-        if log_file:
-            log_file.write(
-                json.dumps({"type": "end", "exit_code": exit_code, "ts": time.time()}) + "\n"
-            )
-            log_file.close()
-
-
 # ── Helper ──────────────────────────────────────────────────
-
-
-def _truncate_output(text: str, max_chars: int = 80_000) -> str:
-    """Truncate long output, keeping head and tail."""
-    if len(text) <= max_chars:
-        return text
-    half = max_chars // 2
-    return text[:half] + "\n\n... (truncated) ...\n\n" + text[-half:]
 
 
 def _command_session_snapshot(command_session_id: str, session: dict) -> dict[str, Any]:

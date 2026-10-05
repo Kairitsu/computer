@@ -585,8 +585,10 @@ def _write_file(path: str, content: str | bytes) -> dict[str, Any]:
 
 
 def _ensure_cptr_gitignored_for(path: Path) -> None:
+    from cptr.utils.workspace import auto_gitignore_cptr_enabled
+
     parts = path.parts
-    if ".cptr" not in parts:
+    if ".cptr" not in parts or not auto_gitignore_cptr_enabled():
         return
     root = Path(*parts[: parts.index(".cptr")])
     if not (root / ".git").exists():

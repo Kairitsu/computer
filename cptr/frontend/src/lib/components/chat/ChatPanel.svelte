@@ -42,24 +42,12 @@
 		widescreenMode
 	} from '$lib/stores';
 	import { getPathDisplayName } from '$lib/utils/paths';
-	import {
-		ttsEnabled,
-		ttsConfigured,
-		ttsFormat,
-		setTtsAudioPlaybackSource,
-		ttsAutoStreamEnabled,
-		ttsPlaybackEnabled,
-		ttsVoice,
-		unlockTtsAudioPlayback
-	} from '$lib/stores/audio';
 
 	import ChatInput from './ChatInput.svelte';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import StatusModal from './StatusModal.svelte';
-	import SkillsModal from './SkillsModal.svelte';
 	import { listCommandSessions, type CommandSession } from '$lib/apis/terminal';
-	import { getSkills, type SkillInfo } from '$lib/apis/skills';
 	import Spinner from '../common/Spinner.svelte';
 	import Icon from '../Icon.svelte';
 	import SuperGrokMark from '../brand/SuperGrokMark.svelte';
@@ -67,12 +55,6 @@
 	import { tooltip } from '$lib/tooltip';
 	import { toast } from 'svelte-sonner';
 	import { t } from '$lib/i18n';
-
-	type PreparedTtsAudio = {
-		promise: Promise<Blob>;
-		controller: AbortController;
-		generation: number;
-	};
 
 	interface Props {
 		workspace?: string;
@@ -102,7 +84,6 @@
 	let requestParams = $state<Record<string, unknown>>({});
 	let reasoningEffort = $state<ReasoningEffort | null>(null);
 	let contextWindow = $state<number | null>(null);
-	let voiceModeEnabled = $state(false);
 	let allMessages = $state<ChatMessageRow[]>([]);
 	const pendingAskUser = $derived.by(() => {
 		for (const message of [...allMessages].reverse()) {
@@ -132,8 +113,6 @@
 	let contextUsage = $state<ContextUsage | null>(null);
 	let chatTasks = $state<ChatTask[]>([]);
 	let showStatusModal = $state(false);
-	let showSkillsModal = $state(false);
-	let skillsModalList = $state<SkillInfo[]>([]);
 	let commandSessions = $state<CommandSession[]>([]);
 	let initialCommandSessionId = $state<string | null>(null);
 	let messagesEl: HTMLDivElement;
@@ -144,28 +123,8 @@
 	let cancelledMessageId: string | null = null;
 	let loading = $state(!!initialChatId);
 	let chatTitle = $state('');
-	let ttsQueue: string[] = [];
-	let ttsBuffer = '';
-	let ttsInsideCodeFence = false;
-	let ttsPlaying = false;
-	let ttsGeneration = 0;
-	let ttsPrepareCursor = 0;
-	let ttsPreparing = 0;
-	let ttsAudio: HTMLAudioElement | null = null;
-	let ttsObjectUrl: string | null = null;
-	let ttsErrorShown = false;
-	let speakingMessageId = $state<string | null>(null);
-	let ttsStopRequested = false;
 	let commandSessionsChatId: string | null = null;
 	let taskClearTimer: ReturnType<typeof setTimeout> | null = null;
-	// This browser memory cache only helps while the current page is open, such as when
-	// someone taps the same speak button twice. The backend cache is the durable source
-	// for cross-session reuse and the workspace data flywheel.
-	let ttsAudioCacheBytes = 0;
-	const ttsAudioCache = new Map<string, Blob>();
-	const ttsPreparedAudio = new Map<string, PreparedTtsAudio>();
-	const TTS_AUDIO_CACHE_LIMIT_BYTES = 20 * 1024 * 1024;
-	const TTS_MAX_PREFETCH = 2;
 	let unbindSocketListeners: (() => void) | null = null;
 	let commandSessionsTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -213,11 +172,7 @@
 	}
 
 	function isPendingHiddenMessage(m: ChatMessageRow): boolean {
-		return !!(
-			m.meta?.queued ||
-			m.meta?.async_subagent_pending ||
-			(m.meta?.internal === true && m.meta?.type === 'subagent' && m.meta?.status === 'pending')
-		);
+		return !!m.meta?.queued;
 	}
 
 	function nearestVisibleAncestorId(
@@ -420,7 +375,6 @@
 	}
 
 	async function loadChat(id: string) {
-		if (chatId && chatId !== id) stopTtsPlayback();
 		chatId = id;
 		loadedChatId = null;
 		const gen = ++loadGeneration;
@@ -485,7 +439,6 @@
 		done?: boolean;
 		error?: string;
 		pending_inputs_processed?: boolean;
-		async_subagent_pending?: boolean;
 		title?: string;
 		workspace?: string;
 		active?: boolean;
@@ -509,7 +462,7 @@
 		}
 
 		// Follow-up state changed server-side: reload to see new transcript/generation state.
-		if (data.pending_inputs_processed || data.async_subagent_pending) {
+		if (data.pending_inputs_processed) {
 			loadChat(data.chat_id);
 			return;
 		}
@@ -521,13 +474,8 @@
 		if (data.delta) {
 			msg.content += data.delta;
 			allMessages = [...allMessages];
-			handleTtsDelta(data.message_id, data.delta);
 		}
 		if (data.output) {
-			if (data.output.type === 'function_call') {
-				if (data.output.status === 'pending') stopTtsPlayback();
-				else resetTtsBuffer();
-			}
 			// Merge by call_id to avoid duplicates and update status of existing items
 			const existing = msg.output || [];
 			const callId = data.output.call_id;
@@ -565,7 +513,6 @@
 			toast.error(data.error, { duration: 8000 });
 		}
 		if (data.done) {
-			flushTtsBuffer();
 			// Clear streaming indicator for this tab
 			if (tabId) {
 				streamingChatTabs.update((s) => {
@@ -607,7 +554,6 @@
 		requestParams = {};
 		reasoningEffort = get(defaultReasoningEffort);
 		contextWindow = get(defaultContextWindow);
-		voiceModeEnabled = false;
 	}
 
 	function loadChatSettings(meta: Record<string, any> | null) {
@@ -628,7 +574,6 @@
 		if (params.request_params && typeof params.request_params === 'object') {
 			requestParams = params.request_params;
 		}
-		voiceModeEnabled = params.voice_mode === true;
 		if (['low', 'medium', 'high', 'xhigh'].includes(params.reasoning_effort)) {
 			reasoningEffort = params.reasoning_effort;
 		}
@@ -673,7 +618,6 @@
 	});
 
 	onDestroy(() => {
-		stopTtsPlayback();
 		unbindSocketListeners?.();
 		unbindSocketListeners = null;
 		if (commandSessionsTimer) clearInterval(commandSessionsTimer);
@@ -692,19 +636,6 @@
 		if (!models.length || models.some((model) => model.id === selectedModel)) return;
 		const dm = $defaultModel;
 		selectedModel = dm && models.some((model) => model.id === dm) ? dm : models[0].id;
-	});
-
-	$effect(() => {
-		if (!$ttsEnabled || !$ttsConfigured) {
-			voiceModeEnabled = false;
-			ttsPlaybackEnabled.set(false);
-			stopTtsPlayback();
-		} else if (
-			(!$ttsPlaybackEnabled && !voiceModeEnabled && !$ttsAutoStreamEnabled) ||
-			!$ttsConfigured
-		) {
-			stopTtsPlayback();
-		}
 	});
 
 	// ── Sync streaming state to shared store for tab icon ────
@@ -813,7 +744,6 @@
 		};
 		if (reasoningEffort) params.reasoning_effort = reasoningEffort;
 		if (contextWindow) params.context_window = contextWindow;
-		if (voiceModeEnabled) params.voice_mode = true;
 		return params;
 	}
 
@@ -835,13 +765,6 @@
 			inputText = '';
 			return;
 		}
-		if (hasChatContent && text === '/skills:list') {
-			await handleSkillsListCommand();
-			inputText = '';
-			return;
-		}
-		stopTtsPlayback();
-		if (shouldStreamTts()) void unlockTtsAudioPlayback();
 		sending = true;
 		const files = chatInputEl?.getFiles() ?? [];
 		// Transform TipTap mention format to markdown file links
@@ -1032,15 +955,6 @@
 		refreshCommandSessions();
 	}
 
-	async function handleSkillsListCommand() {
-		try {
-			skillsModalList = await getSkills(workspace);
-			showSkillsModal = true;
-		} catch (err: any) {
-			toast.error(err?.message || 'Failed to load skills');
-		}
-	}
-
 	async function refreshCommandSessions() {
 		const currentChatId = chatId;
 		if (!currentChatId || !workspace) {
@@ -1106,7 +1020,6 @@
 	async function handleCancel() {
 		const active = allMessages.find((m) => m.role === 'assistant' && !m.done);
 		if (!active || !chatId) return;
-		stopTtsPlayback();
 
 		// Tell the socket handler to skip the reload for this message
 		cancelledMessageId = active.id;
@@ -1324,317 +1237,6 @@
 		if (onopenchat) return onopenchat();
 		openChatTab();
 	}
-
-	function shouldUseTts() {
-		return (
-			$ttsEnabled &&
-			$ttsConfigured &&
-			($ttsPlaybackEnabled || voiceModeEnabled || $ttsAutoStreamEnabled)
-		);
-	}
-
-	function shouldStreamTts() {
-		return $ttsEnabled && $ttsConfigured && (voiceModeEnabled || $ttsAutoStreamEnabled);
-	}
-
-	function resetTtsBuffer() {
-		ttsBuffer = '';
-		ttsInsideCodeFence = false;
-	}
-
-	function stopTtsPlayback() {
-		ttsStopRequested = true;
-		ttsGeneration += 1;
-		ttsQueue = [];
-		ttsPrepareCursor = 0;
-		ttsPreparing = 0;
-		resetTtsBuffer();
-		for (const pending of ttsPreparedAudio.values()) pending.controller.abort();
-		ttsPreparedAudio.clear();
-		if (ttsAudio) {
-			ttsAudio.pause();
-			ttsAudio.src = '';
-			ttsAudio = null;
-		}
-		if (ttsObjectUrl) {
-			URL.revokeObjectURL(ttsObjectUrl);
-			ttsObjectUrl = null;
-		}
-		ttsPlaying = false;
-		speakingMessageId = null;
-	}
-
-	function stripCodeFenceDelta(delta: string): string {
-		let out = '';
-		for (let i = 0; i < delta.length; i++) {
-			if (delta.startsWith('```', i)) {
-				ttsInsideCodeFence = !ttsInsideCodeFence;
-				i += 2;
-				continue;
-			}
-			if (!ttsInsideCodeFence) out += delta[i];
-		}
-		return out;
-	}
-
-	function cleanSpeechText(text: string): string {
-		return text
-			.replace(/```[\s\S]*?```/g, ' ')
-			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-			.replace(/`([^`]+)`/g, '$1')
-			.replace(/^#{1,6}\s+/gm, '')
-			.replace(/^\s*[-*+]\s+/gm, '')
-			.replace(/\s+/g, ' ')
-			.trim();
-	}
-
-	function findSpeechBoundary(text: string, firstChunk = false): number {
-		const min = firstChunk ? 35 : 60;
-		const scanFrom = firstChunk ? 30 : 40;
-		const hardMax = firstChunk ? 95 : 220;
-		if (text.length < min) return -1;
-		for (let i = scanFrom; i < text.length; i++) {
-			const ch = text[i];
-			const next = text[i + 1] || '';
-			if ((ch === '.' || ch === '!' || ch === '?' || ch === '\n') && (!next || /\s/.test(next))) {
-				return i + 1;
-			}
-		}
-		if (text.length > hardMax) {
-			const idx = text.lastIndexOf(' ', hardMax);
-			return idx > min ? idx : hardMax;
-		}
-		return -1;
-	}
-
-	function handleTtsDelta(messageId: string, delta: string) {
-		if (!shouldStreamTts()) return;
-		if (!delta.trim()) return;
-
-		const active = allMessages.find((m) => m.id === messageId);
-		if (!active || active.role !== 'assistant') return;
-
-		const speakable = stripCodeFenceDelta(delta);
-		if (!speakable.trim()) return;
-
-		ttsBuffer += speakable;
-		let boundary = findSpeechBoundary(ttsBuffer, ttsQueue.length === 0 && !ttsPlaying);
-		while (boundary > 0) {
-			const chunk = cleanSpeechText(ttsBuffer.slice(0, boundary));
-			ttsBuffer = ttsBuffer.slice(boundary);
-			if (chunk.length > 1) enqueueSpeech(chunk);
-			boundary = findSpeechBoundary(ttsBuffer);
-		}
-	}
-
-	function flushTtsBuffer() {
-		if (!shouldStreamTts()) return;
-		const chunk = cleanSpeechText(ttsBuffer);
-		resetTtsBuffer();
-		if (chunk.length > 1) enqueueSpeech(chunk);
-	}
-
-	function enqueueSpeech(text: string) {
-		ttsQueue = [...ttsQueue, text];
-		scheduleTtsPrepare(ttsGeneration);
-		if (!ttsPlaying) void playTtsQueue(ttsGeneration);
-	}
-
-	function chunkSpeechText(text: string): string[] {
-		const chunks: string[] = [];
-		let remaining = cleanSpeechText(text);
-		while (remaining) {
-			const boundary = findSpeechBoundary(remaining);
-			const end = boundary > 0 ? boundary : remaining.length;
-			const chunk = cleanSpeechText(remaining.slice(0, end));
-			if (chunk.length > 1) chunks.push(chunk);
-			remaining = remaining.slice(end).trimStart();
-		}
-		return chunks;
-	}
-
-	function getAssistantSpeechText(msg: ChatMessageRow): string {
-		const outputText = (msg.output || [])
-			.filter((item: any) => item.type === 'message')
-			.flatMap((item: any) => item.content || [])
-			.map((part: any) => part.text || part.content || '')
-			.join(' ');
-		return cleanSpeechText(outputText || msg.content || '');
-	}
-
-	function speakMessage(messageId: string) {
-		const msg = allMessages.find((m) => m.id === messageId && m.role === 'assistant');
-		if (!msg || !$ttsEnabled || !$ttsConfigured) return;
-		const text = getAssistantSpeechText(msg);
-		if (!text) return;
-		if (speakingMessageId === messageId && ttsPlaying && $ttsPlaybackEnabled) {
-			ttsPlaybackEnabled.set(false);
-			stopTtsPlayback();
-			return;
-		}
-		stopTtsPlayback();
-		void unlockTtsAudioPlayback();
-		speakingMessageId = messageId;
-		ttsPlaybackEnabled.set(true);
-		ttsErrorShown = false;
-		for (const chunk of chunkSpeechText(text)) enqueueSpeech(chunk);
-	}
-
-	function ttsCacheKey(text: string): string {
-		return [$ttsVoice, $ttsFormat, text].join('\u001f');
-	}
-
-	function getCachedTtsAudio(key: string): Blob | null {
-		const cached = ttsAudioCache.get(key);
-		if (!cached) return null;
-		ttsAudioCache.delete(key);
-		ttsAudioCache.set(key, cached);
-		return cached;
-	}
-
-	function cacheTtsAudio(key: string, blob: Blob) {
-		if (blob.size > TTS_AUDIO_CACHE_LIMIT_BYTES) return;
-		const existing = ttsAudioCache.get(key);
-		if (existing) {
-			ttsAudioCacheBytes -= existing.size;
-			ttsAudioCache.delete(key);
-		}
-		while (ttsAudioCacheBytes + blob.size > TTS_AUDIO_CACHE_LIMIT_BYTES) {
-			const oldest = ttsAudioCache.entries().next().value;
-			if (!oldest) break;
-			ttsAudioCache.delete(oldest[0]);
-			ttsAudioCacheBytes -= oldest[1].size;
-		}
-		ttsAudioCache.set(key, blob);
-		ttsAudioCacheBytes += blob.size;
-	}
-
-	async function readTtsError(response: Response): Promise<string> {
-		try {
-			const data = await response.json();
-			return data?.detail || data?.error || `${response.status}`;
-		} catch {
-			return `${response.status}`;
-		}
-	}
-
-	function showTtsFailure(detail: string) {
-		if (!ttsErrorShown) {
-			ttsErrorShown = true;
-			toast.error($t('admin.audio.tts') + ': ' + detail);
-		}
-		ttsPlaybackEnabled.set(false);
-		voiceModeEnabled = false;
-	}
-
-	function scheduleTtsPrepare(generation: number) {
-		while (
-			generation === ttsGeneration &&
-			ttsPreparing < TTS_MAX_PREFETCH &&
-			ttsPrepareCursor < ttsQueue.length
-		) {
-			const text = ttsQueue[ttsPrepareCursor++];
-			ttsPreparing += 1;
-			void prepareTtsAudio(text, generation)
-				.catch(() => {})
-				.finally(() => {
-					if (generation !== ttsGeneration) return;
-					ttsPreparing = Math.max(0, ttsPreparing - 1);
-					scheduleTtsPrepare(generation);
-				});
-		}
-	}
-
-	function prepareTtsAudio(text: string, generation: number): Promise<Blob> {
-		const cacheKey = ttsCacheKey(text);
-		const cached = getCachedTtsAudio(cacheKey);
-		if (cached) return Promise.resolve(cached);
-
-		const existing = ttsPreparedAudio.get(cacheKey);
-		if (existing && existing.generation === generation) return existing.promise;
-		if (existing) existing.controller.abort();
-
-		const controller = new AbortController();
-		let promise!: Promise<Blob>;
-		promise = fetch('/api/audio/speech', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ text, voice: $ttsVoice, workspace }),
-			signal: controller.signal
-		})
-			.then(async (response) => {
-				if (!response.ok) throw new Error(await readTtsError(response));
-				const blob = await response.blob();
-				if (blob.size <= 0) throw new Error('empty audio response');
-				cacheTtsAudio(cacheKey, blob);
-				return blob;
-			})
-			.finally(() => {
-				const current = ttsPreparedAudio.get(cacheKey);
-				if (current?.promise === promise) ttsPreparedAudio.delete(cacheKey);
-			});
-		void promise.catch(() => {});
-		ttsPreparedAudio.set(cacheKey, { promise, controller, generation });
-		return promise;
-	}
-
-	async function playTtsQueue(generation: number) {
-		ttsStopRequested = false;
-		ttsPlaying = true;
-		try {
-			while (generation === ttsGeneration && ttsQueue.length > 0) {
-				if (!shouldUseTts()) break;
-				const text = ttsQueue[0];
-				if (!text) {
-					ttsQueue = ttsQueue.slice(1);
-					if (ttsPrepareCursor > 0) ttsPrepareCursor -= 1;
-					continue;
-				}
-				scheduleTtsPrepare(generation);
-
-				const blob = await prepareTtsAudio(text, generation);
-
-				if (generation !== ttsGeneration) break;
-				if (ttsObjectUrl) URL.revokeObjectURL(ttsObjectUrl);
-				ttsObjectUrl = URL.createObjectURL(blob);
-				ttsAudio = setTtsAudioPlaybackSource(ttsObjectUrl, chatTitle) ?? new Audio(ttsObjectUrl);
-				await new Promise<void>((resolve, reject) => {
-					const audio = ttsAudio!;
-					audio.onended = () => resolve();
-					audio.onerror = () => {
-						if (ttsStopRequested || generation !== ttsGeneration) resolve();
-						else reject(new Error('audio playback failed'));
-					};
-					const started = audio.play();
-					if (started) started.catch(reject);
-				});
-				if (ttsObjectUrl) {
-					URL.revokeObjectURL(ttsObjectUrl);
-					ttsObjectUrl = null;
-				}
-				ttsAudio = null;
-				if (generation !== ttsGeneration) break;
-				if (ttsQueue[0] === text) {
-					ttsQueue = ttsQueue.slice(1);
-					if (ttsPrepareCursor > 0) ttsPrepareCursor -= 1;
-				}
-			}
-		} catch (err: any) {
-			if (!ttsStopRequested && err?.name !== 'AbortError' && !ttsErrorShown) {
-				showTtsFailure(err?.message || 'playback failed');
-			}
-		} finally {
-			if (generation === ttsGeneration && ttsObjectUrl) {
-				URL.revokeObjectURL(ttsObjectUrl);
-				ttsObjectUrl = null;
-			}
-			if (generation === ttsGeneration) ttsAudio = null;
-			if (generation === ttsGeneration) ttsPlaying = false;
-			if (generation === ttsGeneration) speakingMessageId = null;
-			if (generation === ttsGeneration) ttsStopRequested = false;
-			if (generation === ttsGeneration && !voiceModeEnabled) ttsPlaybackEnabled.set(false);
-		}
-	}
 </script>
 
 <div
@@ -1714,7 +1316,6 @@
 					bind:requestParams
 					bind:reasoningEffort
 					bind:contextWindow
-					bind:voiceModeEnabled
 					{sending}
 					{workspace}
 					placeholder={$t('chat.landingPlaceholder')}
@@ -1723,7 +1324,6 @@
 					onaskuseranswer={handleAskUserAnswer}
 					onsend={send}
 					onplan={handlePlanCommand}
-					onskillslist={handleSkillsListCommand}
 					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
 					{onworkspacechange}
@@ -1778,12 +1378,10 @@
 								createdAt={msg.created_at}
 								{siblingIndex}
 								siblingTotal={siblingIds.length}
-								speaking={speakingMessageId === msg.id}
 								onnavigate={(dir) => handleNavigate(msg.id, dir)}
 								onfork={sending || streaming ? undefined : () => handleForkChat(msg.id)}
 								onregenerate={() => handleRegenerate(msg.id)}
 								onedit={(c, o, submit) => handleEditMessage(msg.id, c, o, submit)}
-								onspeak={() => speakMessage(msg.id)}
 								onapprove={handleApprove}
 							/>
 						{/if}
@@ -1831,7 +1429,6 @@
 					bind:requestParams
 					bind:reasoningEffort
 					bind:contextWindow
-					bind:voiceModeEnabled
 					{sending}
 					{streaming}
 					{workspace}
@@ -1850,7 +1447,6 @@
 					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
 					onstatus={handleStatusCommand}
-					onskillslist={handleSkillsListCommand}
 					oncancel={handleCancel}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
@@ -1873,16 +1469,6 @@
 		onclose={() => {
 			showStatusModal = false;
 			initialCommandSessionId = null;
-		}}
-	/>
-{/if}
-
-{#if showSkillsModal}
-	<SkillsModal
-		skills={skillsModalList}
-		onclose={() => {
-			showSkillsModal = false;
-			skillsModalList = [];
 		}}
 	/>
 {/if}
