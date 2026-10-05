@@ -226,15 +226,15 @@ Files:
 	</div>
 {/snippet}
 
-<div class="flex flex-col h-full">
+<div class="flex flex-col">
 	{#if loading}
 		<div class="flex justify-center py-8"><Spinner size={16} /></div>
 	{:else}
-		<div class="flex-1 min-h-0 overflow-y-auto">
-			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-medium text-gray-900 dark:text-white">
+		<div>
+			<div class="flex items-center justify-between mb-3">
+				<h3 class="text-xs font-medium text-gray-700 dark:text-gray-300">
 					{$t('admin.models')}
-				</h2>
+				</h3>
 				<button
 					class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-700 disabled:opacity-50 disabled:hover:text-gray-400 dark:text-gray-600 dark:hover:text-gray-300 dark:disabled:hover:text-gray-600 transition-colors duration-75"
 					onclick={refreshModels}
@@ -323,7 +323,7 @@ Files:
 			{/if}
 		</div>
 
-		<div class="shrink-0 pt-3 flex justify-end">
+		<div class="pt-3 flex justify-end">
 			<button
 				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
 				onclick={saveAll}

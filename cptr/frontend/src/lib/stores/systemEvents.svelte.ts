@@ -1,19 +1,11 @@
 /**
- * Unified system events store.
+ * System events store.
  *
- * Single WebSocket to /api/events/ws that multiplexes:
- * - fs_change events (for FileBrowser auto-refresh)
- * - port_added / port_removed events (for port notifications)
+ * WebSocket to /api/events/ws that carries fs_change events (for FileBrowser
+ * auto-refresh).
  *
  * Replaces the old fsWatch store.
  */
-
-export interface PortInfo {
-	port: number;
-	pid: number;
-	process: string;
-	session_id: string | null;
-}
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,11 +14,6 @@ let currentWatchPath: string | null = null;
 // ── FS events ────────────────────────────────────────────────────
 let _fsTick = $state(0);
 let _fsChangedPaths = $state<string[]>([]);
-
-// ── Port events ──────────────────────────────────────────────────
-let _ports = $state<PortInfo[]>([]);
-let _newPorts = $state<PortInfo[]>([]);
-let _dismissedPorts = new Set<number>();
 
 function connect(watchPath: string) {
 	currentWatchPath = watchPath;
@@ -51,23 +38,6 @@ function connect(watchPath: string) {
 			if (msg.type === 'fs_change') {
 				_fsChangedPaths = msg.paths ?? [];
 				_fsTick++;
-			} else if (msg.type === 'port_added') {
-				const info: PortInfo = {
-					port: msg.port,
-					pid: msg.pid,
-					process: msg.process,
-					session_id: msg.session_id ?? null
-				};
-				// Add to active ports
-				_ports = [..._ports.filter((p) => p.port !== info.port), info];
-				// Add to new ports (for notification) unless dismissed
-				if (!_dismissedPorts.has(info.port)) {
-					_newPorts = [..._newPorts.filter((p) => p.port !== info.port), info];
-				}
-			} else if (msg.type === 'port_removed') {
-				_ports = _ports.filter((p) => p.port !== msg.port);
-				_newPorts = _newPorts.filter((p) => p.port !== msg.port);
-				_dismissedPorts.delete(msg.port);
 			}
 		} catch {}
 	};
@@ -109,11 +79,6 @@ function isRelevantFsChange(targetPath: string): boolean {
 	return _fsChangedPaths.some((p) => p === targetPath || p.startsWith(targetPath + '/'));
 }
 
-function dismissPort(port: number) {
-	_dismissedPorts.add(port);
-	_newPorts = _newPorts.filter((p) => p.port !== port);
-}
-
 export const systemEvents = {
 	connect,
 	disconnect,
@@ -126,14 +91,5 @@ export const systemEvents = {
 	get fsChangedPaths() {
 		return _fsChangedPaths;
 	},
-	isRelevantFsChange,
-
-	// Ports
-	get ports() {
-		return _ports;
-	},
-	get newPorts() {
-		return _newPorts;
-	},
-	dismissPort
+	isRelevantFsChange
 };

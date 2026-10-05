@@ -1,7 +1,6 @@
 export type LaunchIntentKind =
 	| 'newNote'
 	| 'newChat'
-	| 'newTerminal'
 	| 'openWorkspace'
 	| 'search'
 	| 'openChat'

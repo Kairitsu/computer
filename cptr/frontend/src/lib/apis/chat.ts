@@ -66,7 +66,6 @@ export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export interface ChatSendParams {
 	tool_approval_mode?: ToolApprovalMode;
 	plan_mode?: boolean;
-	request_params?: Record<string, unknown>;
 	/** Composer reasoning effort; omitted = provider default. */
 	reasoning_effort?: ReasoningEffort;
 	/** Context window (tokens) that drives usage and auto-compaction for this chat. */

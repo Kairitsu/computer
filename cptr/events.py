@@ -46,30 +46,14 @@ class EventDefinitions:
         "A chat run failed.",
         "Chat failed",
     )
-    NOTIFICATION_TEST = EventDefinition(
-        "notification.test",
-        "A notification target test was sent.",
-        "Test notification",
-    )
-    NOTIFICATION_MANUAL = EventDefinition(
-        "manual.notify",
-        "A manual notification was sent.",
-        "Notification",
-    )
 
 
 EVENTS = EventDefinitions()
 EVENT_DEFINITIONS = tuple(
     value for value in vars(EventDefinitions).values() if isinstance(value, EventDefinition)
 )
-EVENT_DEFINITIONS_BY_NAME = {definition.name: definition for definition in EVENT_DEFINITIONS}
 EVENT_CATALOG = tuple(definition.name for definition in EVENT_DEFINITIONS)
 EVENT_CATALOG_SET = set(EVENT_CATALOG)
-
-CHAT_NOTIFICATION_EVENTS = (
-    EVENTS.CHAT_FINISHED,
-    EVENTS.CHAT_FAILED,
-)
 
 SENSITIVE_KEYS = {
     "password",
@@ -183,25 +167,8 @@ def build_event(
     )
 
 
-def get_event_catalog() -> list[dict[str, str]]:
-    return [
-        {
-            "event": definition.name,
-            "label": definition.label,
-            "description": definition.description or "",
-        }
-        for definition in EVENT_DEFINITIONS
-    ]
-
-
-class NotificationEventSink:
-    async def handle_event(self, event: Event) -> None:
-        from cptr.utils.notifications import dispatch_notification_event
-
-        await dispatch_notification_event(event)
-
-
-EVENT_SINKS = [NotificationEventSink()]
+# Nothing consumes events at the moment; sinks expose `async handle_event(event)`.
+EVENT_SINKS: list[Any] = []
 
 
 async def publish_event(

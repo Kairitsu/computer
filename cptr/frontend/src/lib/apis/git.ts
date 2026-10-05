@@ -3,54 +3,6 @@
  */
 import { fetchJSON, jsonBody } from '$lib/apis';
 
-export interface GitIdentity {
-	name?: string;
-	email?: string;
-	name_source?: string;
-	email_source?: string;
-}
-
-export interface GhAccount {
-	state?: string;
-	active?: boolean;
-	host?: string;
-	login?: string;
-	tokenSource?: string;
-	scopes?: string;
-	gitProtocol?: string;
-}
-
-export interface GitSettingsConfig {
-	root: string;
-	git: {
-		installed: boolean;
-		version?: string | null;
-		is_repo: boolean;
-		identity?: GitIdentity;
-		credential_helpers?: string[];
-		remote_url?: string;
-	};
-	app_identity?: GitIdentity;
-	gh: {
-		installed: boolean;
-		version?: string | null;
-		hosts?: Record<string, GhAccount[]>;
-		message?: string;
-	};
-	permissions: {
-		can_manage_gh: boolean;
-		can_manage_commit_model: boolean;
-	};
-}
-
-export interface GhLoginStatus {
-	session_id: string;
-	status: 'pending' | 'complete' | 'failed' | 'expired';
-	verification_uri?: string;
-	user_code?: string;
-	auth?: GitSettingsConfig['gh'];
-}
-
 export interface GitOperationResult {
 	ok: boolean;
 	message: string;
@@ -163,27 +115,6 @@ export const createGitWorktree = (root: string, branch: string, path?: string) =
 
 export const getGitStashes = (root: string) =>
 	fetchJSON(`/api/git/stashes?root=${encodeURIComponent(root)}`);
-
-export const getGitConfig = (root?: string) =>
-	fetchJSON<GitSettingsConfig>(`/api/git/config${root ? `?root=${encodeURIComponent(root)}` : ''}`);
-
-export const startGhLogin = (hostname = 'github.com', git_protocol = 'https') =>
-	fetchJSON<GhLoginStatus>('/api/git/gh/login/start', jsonBody({ hostname, git_protocol }));
-
-export const getGhLoginStatus = (session_id: string) =>
-	fetchJSON<GhLoginStatus>('/api/git/gh/login/status', jsonBody({ session_id }));
-
-export const cancelGhLogin = (session_id: string) =>
-	fetchJSON('/api/git/gh/login/cancel', jsonBody({ session_id }));
-
-export const ghLogout = (hostname = 'github.com', user?: string) =>
-	fetchJSON('/api/git/gh/logout', jsonBody({ hostname, user }));
-
-export const ghSwitch = (hostname: string, user: string) =>
-	fetchJSON('/api/git/gh/switch', jsonBody({ hostname, user }));
-
-export const ghSetupGit = (hostname = 'github.com') =>
-	fetchJSON('/api/git/gh/setup-git', jsonBody({ hostname }));
 
 export const getGitPrCapabilities = (root: string) =>
 	fetchJSON<GitPrCapabilities>(`/api/git/pr/capabilities?root=${encodeURIComponent(root)}`);

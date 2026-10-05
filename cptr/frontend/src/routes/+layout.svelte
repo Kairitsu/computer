@@ -1,12 +1,10 @@
 <script lang="ts">
 	import '../app.css';
-	import '@xterm/xterm/css/xterm.css';
 
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
 	import GitBar from '$lib/components/GitBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
@@ -17,7 +15,6 @@
 	import { Toaster, toast } from 'svelte-sonner';
 	import {
 		activeTab,
-		activeHomeTab,
 		currentWorkspace,
 		stateLoaded,
 		initState,
@@ -40,7 +37,6 @@
 	import { setSession, clearSession, session } from '$lib/session';
 	import { getSession, getConfig } from '$lib/apis/auth';
 	import { fetchJSON } from '$lib/apis';
-	import { getGitConfig } from '$lib/apis/git';
 	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
 	import { t } from '$lib/i18n';
 	import {
@@ -58,7 +54,6 @@
 	let settingsTab = $state('general');
 	let showUpdateToast = $state(false);
 	let showSetup = $state(false);
-	let gitSettingsAvailable = $state(false);
 	let connectionToast: string | number | undefined;
 	let applyingServiceWorkerUpdate = false;
 	let lastGitRefreshFsTick = 0;
@@ -207,7 +202,6 @@
 					role: auth.role!,
 					profile_image_url: auth.profile_image_url
 				});
-				await refreshGitSettingsAvailability();
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
@@ -221,7 +215,6 @@
 				authState = cfg.needs_setup ? 'needs_setup' : 'needs_login';
 			}
 		} catch {
-			await refreshGitSettingsAvailability();
 			authState = 'authenticated';
 			initState();
 			refreshChatState();
@@ -240,7 +233,6 @@
 					role: auth.role!,
 					profile_image_url: auth.profile_image_url
 				});
-				await refreshGitSettingsAvailability();
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
@@ -249,14 +241,6 @@
 			}
 		} catch {}
 		authState = 'needs_login';
-	}
-
-	async function refreshGitSettingsAvailability() {
-		try {
-			gitSettingsAvailable = (await getGitConfig()).git.installed;
-		} catch {
-			gitSettingsAvailable = false;
-		}
 	}
 
 	async function checkForUpdates() {
@@ -486,7 +470,7 @@
 		class="app-theme h-screen max-h-[100dvh] flex overflow-hidden font-sans antialiased text-gray-900 bg-white dark:text-gray-100 dark:bg-black"
 		style="background: var(--app-bg); color: var(--app-fg);"
 	>
-		<Sidebar {gitSettingsAvailable} />
+		<Sidebar />
 
 		<div
 			id="main-col"
@@ -500,17 +484,12 @@
 			{#if $currentWorkspace && $isGitRepo && !$gitReviewOpen}
 				<GitBar />
 			{/if}
-
-			{#if $activeTab?.type === 'terminal' || (!$currentWorkspace && $activeHomeTab?.type === 'terminal')}
-				<ShortcutBar />
-			{/if}
 		</div>
 	</div>
 
 	<SearchModal onclose={() => showSearch.set(false)} />
 	{#if showSettings}
 		<SettingsModal
-			{gitSettingsAvailable}
 			initialTab={settingsTab}
 			onclose={() => {
 				showSettings = false;

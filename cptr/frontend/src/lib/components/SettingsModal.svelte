@@ -4,70 +4,38 @@
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
 	import General from './Settings/General.svelte';
-	import Notifications from './Settings/Notifications.svelte';
 	import Appearance from './Settings/Appearance.svelte';
 	import Usage from './Settings/Usage.svelte';
 	import PWA from './Settings/PWA.svelte';
 	import Account from './Settings/Account.svelte';
 	import Keyboard from './Settings/Keyboard.svelte';
-	import Users from './Admin/Users.svelte';
 	import Agents from './Admin/Agents.svelte';
-	import Models from './Admin/Models.svelte';
-	import Git from './Settings/Git.svelte';
-	import AdminWeb from './Admin/Web.svelte';
-	import Workspace from './Admin/Workspace.svelte';
 	import { session } from '$lib/session';
 	import { t } from '$lib/i18n';
 
-	type Tab =
-		| 'general'
-		| 'notifications'
-		| 'appearance'
-		| 'usage'
-		| 'pwa'
-		| 'keyboard'
-		| 'account'
-		| 'users'
-		| 'agents'
-		| 'models'
-		| 'git'
-		| 'web'
-		| 'workspace';
+	type Tab = 'general' | 'appearance' | 'usage' | 'agents' | 'keyboard' | 'account' | 'pwa';
 
 	interface Props {
 		onclose: () => void;
 		initialTab?: string;
-		gitSettingsAvailable?: boolean;
 	}
 
-	let { onclose, initialTab = 'general', gitSettingsAvailable = false }: Props = $props();
+	let { onclose, initialTab = 'general' }: Props = $props();
+
+	// Pages that were merged into another keep opening where their settings now live.
+	const mergedTabs: Record<string, Tab> = {
+		notifications: 'general',
+		workspace: 'general',
+		models: 'agents'
+	};
 
 	function normalizeTab(tab: string): Tab {
-		const validTabs: Tab[] = [
-			'general',
-			'notifications',
-			'appearance',
-			'usage',
-			'pwa',
-			'keyboard',
-			'account',
-			'users',
-			'agents',
-			'models',
-			'git',
-			'web',
-			'workspace'
-		];
+		const validTabs: Tab[] = ['general', 'appearance', 'usage', 'agents', 'keyboard', 'account'];
+		if (tab in mergedTabs) return mergedTabs[tab];
 		return validTabs.includes(tab as Tab) ? (tab as Tab) : 'general';
 	}
 
-	let activeTab = $state<Tab>(
-		untrack(() =>
-			initialTab === 'pwa' || (initialTab === 'git' && !gitSettingsAvailable)
-				? 'general'
-				: normalizeTab(initialTab)
-		)
-	);
+	let activeTab = $state<Tab>(untrack(() => normalizeTab(initialTab)));
 	let showPwaSettings = $state(false);
 
 	const isAdmin = $derived($session?.role === 'admin');
@@ -75,46 +43,29 @@
 
 	type SettingsTab = { id: Tab; label: string; icon: string };
 
-	const adminTabIds: Tab[] = ['users', 'agents', 'models', 'web', 'workspace'];
-
-	const personalTabs: SettingsTab[] = $derived.by(() => {
+	const tabs: SettingsTab[] = $derived.by(() => {
 		const tabs: SettingsTab[] = [
 			{ id: 'general', label: tr('settings.general'), icon: 'settings' },
 			{ id: 'appearance', label: tr('settings.appearance'), icon: 'sun-light' },
-			{ id: 'usage', label: tr('usage.title'), icon: 'usage' },
-			{ id: 'notifications', label: tr('general.notifications'), icon: 'chat-bubble' },
+			{ id: 'usage', label: tr('usage.title'), icon: 'usage' }
+		];
+		if (isAdmin) tabs.push({ id: 'agents', label: tr('admin.agents'), icon: 'terminal' });
+		tabs.push(
 			{ id: 'keyboard', label: tr('settings.keyboard'), icon: 'terminal' },
 			{ id: 'account', label: tr('settings.account'), icon: 'user' }
-		];
-		if (gitSettingsAvailable)
-			tabs.splice(tabs.length - 1, 0, { id: 'git', label: tr('admin.git'), icon: 'git-branch' });
+		);
 		if (showPwaSettings) tabs.push({ id: 'pwa', label: 'PWA', icon: 'phone' });
 		return tabs;
 	});
-
-	const adminTabs: { id: Tab; label: string; icon: string }[] = $derived([
-		{ id: 'users', label: tr('admin.users'), icon: 'user' },
-		{ id: 'agents', label: tr('admin.agents'), icon: 'terminal' },
-		{ id: 'models', label: tr('admin.models'), icon: 'cube' },
-		{ id: 'web', label: tr('admin.browser'), icon: 'globe' },
-		{ id: 'workspace', label: tr('admin.workspace'), icon: 'folder' }
-	]);
 
 	onMount(() => {
 		showPwaSettings = isInstalledPwa();
 		if (showPwaSettings && initialTab === 'pwa') {
 			activeTab = 'pwa';
-		} else if (
-			!$session ||
-			($session.role !== 'admin' && adminTabIds.includes(normalizeTab(initialTab)))
-		) {
+		} else if (!$session || ($session.role !== 'admin' && normalizeTab(initialTab) === 'agents')) {
 			activeTab = 'general';
-		} else if (initialTab === 'git' && !gitSettingsAvailable) {
-			activeTab = 'general';
-		} else if (initialTab !== 'pwa') {
-			activeTab = normalizeTab(initialTab);
 		} else {
-			activeTab = 'general';
+			activeTab = normalizeTab(initialTab);
 		}
 	});
 
@@ -144,8 +95,7 @@
 				<span>{tr('settings.back')}</span>
 			</button>
 
-			<!-- Personal -->
-			{#each personalTabs as tab}
+			{#each tabs as tab}
 				<button
 					class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 rounded-lg text-xs text-left transition-colors duration-75
 						{activeTab === tab.id
@@ -157,57 +107,24 @@
 					{tab.label}
 				</button>
 			{/each}
-
-			<!-- Admin section -->
-			{#if isAdmin}
-				<span
-					class="hidden md:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mt-2 mb-0.5"
-					>{tr('sidebar.admin')}</span
-				>
-
-				{#each adminTabs as tab}
-					<button
-						class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 rounded-lg text-xs text-left transition-colors duration-75
-							{activeTab === tab.id
-							? 'font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-white/6'
-							: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
-						onclick={() => (activeTab = tab.id)}
-					>
-						<Icon name={tab.icon} size={14} />
-						{tab.label}
-					</button>
-				{/each}
-			{/if}
 		</div>
 	</nav>
 
 	<div class="flex-1 overflow-y-auto scrollbar-none min-h-0 p-4 md:px-5">
 		{#if activeTab === 'general'}
 			<General {showPwaSettings} />
-		{:else if activeTab === 'notifications'}
-			<Notifications />
 		{:else if activeTab === 'appearance'}
 			<Appearance />
 		{:else if activeTab === 'usage'}
 			<Usage />
-		{:else if activeTab === 'pwa' && showPwaSettings}
-			<PWA />
+		{:else if activeTab === 'agents'}
+			<Agents />
 		{:else if activeTab === 'keyboard'}
 			<Keyboard />
 		{:else if activeTab === 'account'}
 			<Account />
-		{:else if activeTab === 'users'}
-			<Users />
-		{:else if activeTab === 'agents'}
-			<Agents />
-		{:else if activeTab === 'models'}
-			<Models />
-		{:else if activeTab === 'git'}
-			<Git />
-		{:else if activeTab === 'web'}
-			<AdminWeb />
-		{:else if activeTab === 'workspace'}
-			<Workspace />
+		{:else if activeTab === 'pwa' && showPwaSettings}
+			<PWA />
 		{/if}
 	</div>
 </Modal>

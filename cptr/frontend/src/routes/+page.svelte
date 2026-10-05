@@ -12,7 +12,6 @@
 		moveTabToNewSplit,
 		openChatTab,
 		openFileTab,
-		openTerminalTab,
 		setFileBrowserCwd,
 		showSearch,
 		pwaPreferences,
@@ -28,12 +27,8 @@
 	} from '$lib/stores';
 	import type { Tab, EditorGroup, EditorLayout, SplitDirection, WorkspaceState } from '$lib/stores';
 	import { chatEnabled } from '$lib/stores/chat';
-	import { t } from '$lib/i18n';
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
-	import { toast } from 'svelte-sonner';
-	import { createSession, deleteSession } from '$lib/apis/terminal';
-	import { createBrowserSession, deleteBrowserSession } from '$lib/apis/browser';
 	import { createEntry, writeFile, uploadFiles as uploadFilesApi } from '$lib/apis/files';
 	import { getChat } from '$lib/apis/chat';
 	import { deleteSharePayload, getSharePayload } from '$lib/intents/payloadStore';
@@ -41,13 +36,10 @@
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import FileEditor from '$lib/components/FileEditor.svelte';
 	import GitView from '$lib/components/GitView.svelte';
-	import Terminal from '$lib/components/Terminal.svelte';
-	import BrowserPreview from '$lib/components/BrowserPreview.svelte';
 	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
 	import DirectoryPicker from '$lib/components/DirectoryPicker.svelte';
 	import GroupTabBar from '$lib/components/GroupTabBar.svelte';
 	import WorkspacePicker from '$lib/components/WorkspacePicker.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { TAB_DRAG_MIME } from '$lib/constants';
 	import { isSupportedWorkspacePath } from '$lib/utils/paths';
 
@@ -155,46 +147,12 @@
 		updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
 	}
 
-	async function openHomeTerminal(groupId = $homeState.activeGroupId) {
-		try {
-			const session = await createSession();
-			const tab: Tab = {
-				id: `home-${Date.now()}`,
-				type: 'terminal',
-				label: 'Terminal',
-				sessionId: session.session_id
-			};
-			updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
-		} catch (error) {
-			console.error('Failed to create Home terminal:', error);
-		}
-	}
-
-	async function openHomeBrowser(url?: string, groupId = $homeState.activeGroupId) {
-		try {
-			const session = await createBrowserSession(url);
-			const tab: Tab = {
-				id: `home-${Date.now()}`,
-				type: 'browser',
-				label: 'Browser',
-				path: url,
-				browserSessionId: session.session_id
-			};
-			updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
-		} catch (error) {
-			console.error('Failed to create Home browser:', error);
-			toast.error(error instanceof Error ? error.message : 'Failed to open Browser');
-		}
-	}
-
 	function closeHomeTab(tabId: string, groupId = $homeState.activeGroupId) {
 		const group = $homeState.groups.find((item) => item.id === groupId);
 		if (!group) return;
 		const index = group.tabs.findIndex((tab) => tab.id === tabId);
 		const tab = group.tabs[index];
 		if (!tab || tab.permanent) return;
-		if (tab.type === 'terminal' && tab.sessionId) deleteSession(tab.sessionId);
-		if (tab.type === 'browser' && tab.browserSessionId) deleteBrowserSession(tab.browserSessionId);
 		releaseClosedChatTab(tab);
 		const tabs = group.tabs.filter((item) => item.id !== tabId);
 		const activeTabId =
@@ -219,14 +177,6 @@
 		}));
 	}
 
-	function updateHomeBrowserTab(tabId: string, label: string, groupId = $homeState.activeGroupId) {
-		const group = $homeState.groups.find((item) => item.id === groupId);
-		if (!group) return;
-		updateHomeTabs(groupId, (tabs) => ({
-			tabs: tabs.map((tab) => (tab.id === tabId ? { ...tab, label } : tab)),
-			activeTabId: group.activeTabId
-		}));
-	}
 	const INTENT_URL_KEYS = [
 		'intent',
 		'chatId',
@@ -266,7 +216,6 @@
 
 		if (intent === 'newNote') return { kind: 'newNote', workspace };
 		if (intent === 'newChat') return { kind: 'newChat', workspace };
-		if (intent === 'newTerminal') return { kind: 'newTerminal', workspace };
 		if (intent === 'openWorkspace') return { kind: 'openWorkspace' };
 		if (intent === 'search') return { kind: 'search', workspace };
 		if (intent === 'importFiles') {
@@ -370,10 +319,6 @@
 			case 'newChat':
 				if (targetWorkspace) openChatTab();
 				else openHomeChat();
-				break;
-			case 'newTerminal':
-				if (targetWorkspace) await openTerminalTab();
-				else await openHomeTerminal();
 				break;
 			case 'search':
 				showSearch.set(true);
@@ -570,23 +515,11 @@
 		const handleHomeAction = (event: Event) => {
 			if ($currentWorkspace) return;
 			switch (
-				(
-					event as CustomEvent<
-						| 'newChat'
-						| 'newTerminal'
-						| 'newBrowser'
-						| 'closeTab'
-						| 'nextTab'
-						| 'prevTab'
-						| 'toggleSplit'
-					>
-				).detail
+				(event as CustomEvent<'newChat' | 'closeTab' | 'nextTab' | 'prevTab' | 'toggleSplit'>)
+					.detail
 			) {
 				case 'newChat':
 					openHomeChat();
-					break;
-				case 'newBrowser':
-					void openHomeBrowser();
 					break;
 				case 'closeTab':
 					if (
@@ -605,8 +538,6 @@
 				case 'toggleSplit':
 					toggleHomeSplit();
 					break;
-				default:
-					void openHomeTerminal();
 			}
 		};
 		window.addEventListener('cptr:home-action', handleHomeAction);
@@ -621,41 +552,6 @@
 			homeChatRequest.set(null);
 			openHomeChat(request.chatId);
 		});
-	});
-
-	// Lazy-init terminal sessions for any group's active tab
-	let initingTerminal = $state(false);
-	$effect(() => {
-		const ws = $currentWorkspace;
-		if (!ws || initingTerminal) return;
-
-		// Find any terminal tab across all groups that needs a session
-		for (const group of ws.groups) {
-			const tab = group.tabs.find((t) => t.id === group.activeTabId);
-			if (tab && tab.type === 'terminal' && !tab.sessionId) {
-				initingTerminal = true;
-				createSession(ws.path)
-					.then((data) => {
-						currentWorkspace.update((w) => {
-							if (!w) return w;
-							return {
-								...w,
-								groups: w.groups.map((g) => ({
-									...g,
-									tabs: g.tabs.map((t) =>
-										t.id === tab.id ? { ...t, sessionId: data.session_id } : t
-									)
-								}))
-							};
-						});
-					})
-					.catch((e) => console.error('Failed to init terminal:', e))
-					.finally(() => {
-						initingTerminal = false;
-					});
-				return; // Only init one at a time
-			}
-		}
 	});
 
 	// ── Draggable divider ──────────────────────────────────────────
@@ -872,8 +768,6 @@
 				onHomeReorder={(oldIndex, newIndex) => reorderHomeTabs(homePane.id, oldIndex, newIndex)}
 				onHomeMove={(tabId, fromGroupId) => moveHomeTabToGroup(tabId, fromGroupId, homePane.id)}
 				onHomeNewChat={() => openHomeChatTab(homePane.id)}
-				onHomeNewTerminal={() => openHomeTerminal(homePane.id)}
-				onHomeNewBrowser={() => openHomeBrowser(undefined, homePane.id)}
 				onHomeSplit={(direction) => {
 					setHomeActiveGroup(homePane.id);
 					splitHomeTab(direction);
@@ -921,24 +815,6 @@
 							tabId={tab.id}
 							edit={tab.edit === true}
 							searchTarget={tab.searchTarget}
-						/>
-					</div>
-				{/each}
-				{#each homePane.tabs.filter((tab) => tab.type === 'terminal' && tab.sessionId) as tab (tab.id)}
-					<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== homePane.activeTabId}>
-						<Terminal sessionId={tab.sessionId!} />
-					</div>
-				{/each}
-				{#each homePane.tabs.filter((tab) => tab.type === 'browser' && tab.browserSessionId) as tab (tab.id)}
-					<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== homePane.activeTabId}>
-						<BrowserPreview
-							sessionId={tab.browserSessionId!}
-							groupId={homePane.id}
-							tabId={tab.id}
-							initialUrl={tab.path}
-							active={tab.id === homePane.activeTabId && homePane.id === $homeState.activeGroupId}
-							onTabUpdate={(label) => updateHomeBrowserTab(tab.id, label, homePane.id)}
-							onOpenBrowser={(url) => openHomeBrowser(url, homePane.id)}
 						/>
 					</div>
 				{/each}
@@ -1075,33 +951,8 @@
 					/>
 				</div>
 			{/each}
-			{#each group.tabs.filter((tab) => tab.type === 'terminal' && tab.sessionId) as tab (tab.id)}
-				<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== group.activeTabId}>
-					<Terminal sessionId={tab.sessionId!} />
-				</div>
-			{/each}
-			{#each group.tabs.filter((tab) => tab.type === 'browser' && tab.browserSessionId) as tab (tab.id)}
-				<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== group.activeTabId}>
-					<BrowserPreview
-						sessionId={tab.browserSessionId!}
-						groupId={group.id}
-						tabId={tab.id}
-						initialUrl={tab.path}
-						active={tab.id === group.activeTabId && group.id === activeGroup?.id}
-					/>
-				</div>
-			{/each}
 			{#if !groupTab}
 				<FileBrowser />
-			{:else if groupTab.type === 'terminal' && !groupTab.sessionId}
-				<div class="flex items-center justify-center h-full"><Spinner size={20} /></div>
-			{:else if groupTab.type === 'browser' && !groupTab.browserSessionId}
-				<div
-					class="flex h-full items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400"
-				>
-					<Spinner size={16} />
-					<span>{$t('browser.starting')}</span>
-				</div>
 			{/if}
 			{#if $gitReviewOpen && group.id === allGroups[0]?.id}
 				<div class="persisted-tab git-review-panel">

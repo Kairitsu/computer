@@ -1,51 +1,7 @@
 /**
- * Admin API: user management, instance config.
+ * Admin API: instance config, agents and models.
  */
 import { fetchJSON, jsonBody } from '$lib/apis';
-
-export interface AdminUser {
-	user_id: string;
-	username: string;
-	display_name: string | null;
-	profile_image_url: string | null;
-	role: string;
-	created_at: number;
-}
-
-export const listUsers = async (): Promise<AdminUser[]> => {
-	const data = await fetchJSON<{ users: AdminUser[] }>('/api/admin/users');
-	return data.users;
-};
-
-export const createUser = (username: string, password: string, role = 'user') =>
-	fetchJSON('/api/admin/users', jsonBody({ username, password, role }));
-
-export const deleteUser = (userId: string) =>
-	fetchJSON(`/api/admin/users/${userId}`, { method: 'DELETE' });
-
-export const updateRole = (userId: string, role: string) =>
-	fetchJSON(`/api/admin/users/${userId}/role`, {
-		...jsonBody({ role }),
-		method: 'PUT'
-	});
-
-export const updateUserProfile = (userId: string, display_name: string | null) =>
-	fetchJSON(`/api/admin/users/${userId}/profile`, {
-		...jsonBody({ display_name }),
-		method: 'PUT'
-	});
-
-export const resetPassword = (userId: string, password: string) =>
-	fetchJSON(`/api/admin/users/${userId}/password`, {
-		...jsonBody({ password }),
-		method: 'PUT'
-	});
-
-export const updateUsername = (userId: string, username: string) =>
-	fetchJSON(`/api/admin/users/${userId}/username`, {
-		...jsonBody({ username }),
-		method: 'PUT'
-	});
 
 export const getAdminConfig = async (): Promise<Record<string, unknown>> => {
 	const data = await fetchJSON<{ config: Record<string, unknown> }>('/api/admin/config');

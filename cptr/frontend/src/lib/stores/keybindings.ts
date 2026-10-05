@@ -13,8 +13,6 @@
 import { writable, get } from 'svelte/store';
 import {
 	openUntitledFileTab,
-	openTerminalTab,
-	openBrowserTab,
 	closeTab,
 	setActiveTab,
 	activeGroup,
@@ -30,9 +28,7 @@ import { openChatTab } from '$lib/stores';
 
 export const ACTION_IDS = [
 	'newFile',
-	'newTerminal',
 	'newChat',
-	'newBrowser',
 	'closeTab',
 	'nextTab',
 	'prevTab',
@@ -51,9 +47,7 @@ export type ActionId = (typeof ACTION_IDS)[number];
 
 export const ACTION_LABELS: Record<ActionId, string> = {
 	newFile: 'New File',
-	newTerminal: 'New Terminal',
 	newChat: 'New Chat',
-	newBrowser: 'New Browser',
 	closeTab: 'Close Tab',
 	nextTab: 'Next Tab',
 	prevTab: 'Previous Tab',
@@ -70,9 +64,7 @@ export const ACTION_LABELS: Record<ActionId, string> = {
 
 export const DEFAULT_KEYBINDINGS: Record<ActionId, string> = {
 	newFile: 'Cmd+N',
-	newTerminal: 'Ctrl+`',
 	newChat: 'Cmd+Shift+O',
-	newBrowser: 'Cmd+Shift+B',
 	closeTab: 'Cmd+W',
 	nextTab: 'Cmd+Shift+]',
 	prevTab: 'Cmd+Shift+[',
@@ -250,14 +242,7 @@ export function executeAction(
 	}
 ): boolean {
 	const dispatchHomeAction = (
-		detail:
-			| 'newChat'
-			| 'newTerminal'
-			| 'newBrowser'
-			| 'closeTab'
-			| 'nextTab'
-			| 'prevTab'
-			| 'toggleSplit'
+		detail: 'newChat' | 'closeTab' | 'nextTab' | 'prevTab' | 'toggleSplit'
 	) => {
 		if (typeof window !== 'undefined')
 			window.dispatchEvent(new CustomEvent('cptr:home-action', { detail }));
@@ -268,19 +253,9 @@ export function executeAction(
 			openUntitledFileTab();
 			return true;
 
-		case 'newTerminal':
-			if (get(currentWorkspace)) openTerminalTab();
-			else dispatchHomeAction('newTerminal');
-			return true;
-
 		case 'newChat':
 			if (get(currentWorkspace)) openChatTab();
 			else dispatchHomeAction('newChat');
-			return true;
-
-		case 'newBrowser':
-			if (get(currentWorkspace)) void openBrowserTab();
-			else dispatchHomeAction('newBrowser');
 			return true;
 
 		case 'closeTab': {

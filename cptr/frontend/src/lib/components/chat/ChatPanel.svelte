@@ -47,7 +47,6 @@
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import StatusModal from './StatusModal.svelte';
-	import { listCommandSessions, type CommandSession } from '$lib/apis/terminal';
 	import Spinner from '../common/Spinner.svelte';
 	import Icon from '../Icon.svelte';
 	import SuperGrokMark from '../brand/SuperGrokMark.svelte';
@@ -81,7 +80,6 @@
 	let selectedModel = $state('');
 	let toolApprovalMode = $state<ToolApprovalMode>('auto');
 	let planMode = $state(false);
-	let requestParams = $state<Record<string, unknown>>({});
 	let reasoningEffort = $state<ReasoningEffort | null>(null);
 	let contextWindow = $state<number | null>(null);
 	let allMessages = $state<ChatMessageRow[]>([]);
@@ -113,8 +111,6 @@
 	let contextUsage = $state<ContextUsage | null>(null);
 	let chatTasks = $state<ChatTask[]>([]);
 	let showStatusModal = $state(false);
-	let commandSessions = $state<CommandSession[]>([]);
-	let initialCommandSessionId = $state<string | null>(null);
 	let messagesEl: HTMLDivElement;
 	let chatInputEl: ChatInput;
 	let statusButtonEl: HTMLButtonElement | undefined = $state();
@@ -123,10 +119,8 @@
 	let cancelledMessageId: string | null = null;
 	let loading = $state(!!initialChatId);
 	let chatTitle = $state('');
-	let commandSessionsChatId: string | null = null;
 	let taskClearTimer: ReturnType<typeof setTimeout> | null = null;
 	let unbindSocketListeners: (() => void) | null = null;
-	let commandSessionsTimer: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		if (initialChatId || typeof sessionStorage === 'undefined') return;
@@ -320,13 +314,9 @@
 		workspace ? getPathDisplayName(workspace, 'workspace') : 'Computer'
 	);
 	const displayChatTitle = $derived(chatTitle || firstUserMessageTitle() || workspaceDisplayName);
-	const runningCommandSessions = $derived(commandSessions.filter((session) => !session.done));
-	const summaryCount = $derived(runningCommandSessions.length);
 	const statusButtonClass =
 		'text-gray-400 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-gray-300';
-	const statusTitle = $derived(
-		summaryCount > 0 ? `${summaryCount} active command session` : 'Status'
-	);
+	const statusTitle = 'Status';
 
 	// Queued messages: user-authored messages waiting behind an active response.
 	const queuedMessages = $derived(
@@ -356,13 +346,6 @@
 			}, 4000);
 		}
 	}
-
-	$effect(() => {
-		if (chatId === commandSessionsChatId) return;
-		commandSessionsChatId = chatId;
-		commandSessions = [];
-		if (chatId) refreshCommandSessions();
-	});
 
 	// ── Load chat from DB ───────────────────────────────────────
 
@@ -551,7 +534,6 @@
 		else if (models.length) selectedModel = models[0].id;
 		toolApprovalMode = get(defaultToolApprovalMode);
 		planMode = false;
-		requestParams = {};
 		reasoningEffort = get(defaultReasoningEffort);
 		contextWindow = get(defaultContextWindow);
 	}
@@ -571,9 +553,6 @@
 			toolApprovalMode = params.tool_approval_mode;
 		}
 		planMode = params.plan_mode === true;
-		if (params.request_params && typeof params.request_params === 'object') {
-			requestParams = params.request_params;
-		}
 		if (['low', 'medium', 'high', 'xhigh'].includes(params.reasoning_effort)) {
 			reasoningEffort = params.reasoning_effort;
 		}
@@ -605,9 +584,6 @@
 		resetChatSettings();
 
 		if (chatId) loadChat(chatId);
-		refreshCommandSessions();
-		commandSessionsTimer = setInterval(refreshCommandSessions, 5000);
-		window.addEventListener('computer:inspectCommandSession', handleInspectCommandSession);
 
 		const offChat = socketStore.on('events:chat', handleSocketEvent);
 		const offConnect = socketStore.on('connect', handleReconnect);
@@ -620,9 +596,6 @@
 	onDestroy(() => {
 		unbindSocketListeners?.();
 		unbindSocketListeners = null;
-		if (commandSessionsTimer) clearInterval(commandSessionsTimer);
-		commandSessionsTimer = null;
-		window.removeEventListener('computer:inspectCommandSession', handleInspectCommandSession);
 		if (taskClearTimer) clearTimeout(taskClearTimer);
 		// Don't clear streamingChatTabs here -- the global listener in
 		// chat.ts handles cleanup when the "done" event arrives, so the
@@ -739,8 +712,7 @@
 	function getChatSendParams(): ChatSendParams {
 		const params: ChatSendParams = {
 			tool_approval_mode: toolApprovalMode,
-			plan_mode: planMode,
-			request_params: requestParams
+			plan_mode: planMode
 		};
 		if (reasoningEffort) params.reasoning_effort = reasoningEffort;
 		if (contextWindow) params.context_window = contextWindow;
@@ -950,33 +922,7 @@
 
 	function handleStatusCommand() {
 		if (isLanding) return;
-		initialCommandSessionId = null;
 		showStatusModal = true;
-		refreshCommandSessions();
-	}
-
-	async function refreshCommandSessions() {
-		const currentChatId = chatId;
-		if (!currentChatId || !workspace) {
-			commandSessions = [];
-			return;
-		}
-		try {
-			const sessions = await listCommandSessions(workspace, currentChatId);
-			if (chatId !== currentChatId) return;
-			commandSessions = sessions;
-		} catch (err) {
-			console.error('[chat] command sessions refresh error', err);
-			if (chatId === currentChatId) commandSessions = [];
-		}
-	}
-
-	function handleInspectCommandSession(e: Event) {
-		const id = (e as CustomEvent<{ commandSessionId?: string }>).detail?.commandSessionId;
-		if (!id) return;
-		initialCommandSessionId = id;
-		showStatusModal = true;
-		refreshCommandSessions();
 	}
 
 	// ── Queue actions ──────────────────────────────────────────
@@ -1313,7 +1259,6 @@
 					bind:selectedModel
 					bind:toolApprovalMode
 					bind:planMode
-					bind:requestParams
 					bind:reasoningEffort
 					bind:contextWindow
 					{sending}
@@ -1426,7 +1371,6 @@
 					bind:selectedModel
 					bind:toolApprovalMode
 					bind:planMode
-					bind:requestParams
 					bind:reasoningEffort
 					bind:contextWindow
 					{sending}
@@ -1462,14 +1406,9 @@
 	<StatusModal
 		{chatId}
 		{contextUsage}
-		{commandSessions}
 		{queuedMessages}
-		{initialCommandSessionId}
 		anchor={statusButtonEl ?? { x: 0, y: 0 }}
-		onclose={() => {
-			showStatusModal = false;
-			initialCommandSessionId = null;
-		}}
+		onclose={() => (showStatusModal = false)}
 	/>
 {/if}
 

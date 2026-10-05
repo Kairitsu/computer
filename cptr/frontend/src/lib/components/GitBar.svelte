@@ -1076,10 +1076,6 @@
 		return branch ? branch.replace(/[-_/]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : '';
 	}
 
-	function openGitSettings() {
-		window.dispatchEvent(new CustomEvent('cptr:open-settings', { detail: { tab: 'git' } }));
-	}
-
 	function askCodexAboutSelectedPr() {
 		if (!selectedPr || !workspacePath) return;
 		const draft = [
@@ -2141,12 +2137,6 @@
 													gh auth login
 												</div>
 											</div>
-											<button
-												class="h-6 shrink-0 rounded-md px-2 text-[0.6875rem] text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/6 dark:hover:text-gray-200"
-												onclick={openGitSettings}
-											>
-												Settings
-											</button>
 										</div>
 									</div>
 								{:else if prLoading}
@@ -2281,13 +2271,12 @@
 											>gh auth</span
 										>
 									</div>
-									<div class="flex h-full items-center justify-center px-6">
-										<button
-											class="h-7 rounded-md px-2.5 text-[0.6875rem] text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/6 dark:hover:text-gray-200"
-											onclick={openGitSettings}
-										>
-											Open Git settings
-										</button>
+									<div
+										class="flex h-full items-center justify-center px-6 text-[0.6875rem] text-gray-500 dark:text-gray-400"
+									>
+										<span>
+											Run <code class="font-mono">gh auth login</code> in a terminal
+										</span>
 									</div>
 								{:else if selectedPr}
 									{@const detail = selectedPrInfo}

@@ -5,7 +5,7 @@
 </script>
 
 <script lang="ts">
-	import { activeWorkspace, setFileBrowserCwd, openFileTab, openPreviewTab } from '$lib/stores';
+	import { activeWorkspace, setFileBrowserCwd, openFileTab } from '$lib/stores';
 	import { gitStatusStore, type GitFile } from '$lib/stores/gitStatus.svelte';
 	import { systemEvents } from '$lib/stores/systemEvents.svelte';
 	import { tooltip } from '$lib/tooltip';
@@ -99,15 +99,6 @@
 	let contentOnlyMatches = $derived(matchResults?.filter((match) => !match.name_match) ?? []);
 	let gitStatus = $derived(gitStatusStore.status);
 	let gitRoot = $derived(workspacePath.replace(/\/$/, ''));
-
-	// Ports from this workspace's terminals
-	let workspacePorts = $derived(
-		systemEvents.ports.filter(
-			(p) =>
-				p.session_id &&
-				$activeWorkspace?.groups.some((g) => g.tabs.some((t) => t.sessionId === p.session_id))
-		)
-	);
 
 	let breadcrumbs = $derived(() => {
 		if (!cwd || !workspacePath) return [];
@@ -1164,22 +1155,6 @@
 			</button>
 		{/if}
 	</div>
-
-	<!-- Ports -->
-	{#if workspacePorts.length > 0}
-		<div
-			class="flex items-center gap-1.5 h-7 px-3 border-b border-gray-200 dark:border-white/6 shrink-0"
-		>
-			<span class="text-[0.625rem] text-gray-400 shrink-0">{$t('files.ports')}</span>
-			{#each workspacePorts as p (p.port)}
-				<button
-					class="px-1.5 py-0.5 rounded text-[0.6875rem] font-mono font-medium text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
-					onclick={() => openPreviewTab(p.port)}
-					use:tooltip={$t('files.clickToPreview', { process: p.process })}>:{p.port}</button
-				>
-			{/each}
-		</div>
-	{/if}
 
 	<!-- Search -->
 	<div

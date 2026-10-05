@@ -14,9 +14,7 @@
 	/** Action descriptions for the second line. */
 	const ACTION_DESCRIPTIONS: Record<ActionId, string> = $derived({
 		newFile: $t('keyboard.newFile'),
-		newTerminal: $t('keyboard.newTerminal'),
 		newChat: $t('keyboard.newChat'),
-		newBrowser: $t('keyboard.newBrowser'),
 		closeTab: $t('keyboard.closeTab'),
 		nextTab: $t('keyboard.nextTab'),
 		prevTab: $t('keyboard.prevTab'),
@@ -32,9 +30,7 @@
 	/** Translated action labels for display. */
 	const ACTION_LABELS: Record<ActionId, string> = $derived({
 		newFile: $t('keyboard.action.newFile'),
-		newTerminal: $t('keyboard.action.newTerminal'),
 		newChat: $t('keyboard.action.newChat'),
-		newBrowser: $t('keyboard.action.newBrowser'),
 		closeTab: $t('keyboard.action.closeTab'),
 		nextTab: $t('keyboard.action.nextTab'),
 		prevTab: $t('keyboard.action.prevTab'),
