@@ -39,6 +39,10 @@ XAI_EXTENSION_REQUESTS = XAI_ASK_USER_QUESTION_METHODS | XAI_EXIT_PLAN_MODE_METH
 # Carries Grok's per-model-call usage and auto-compaction progress.
 XAI_SESSION_NOTIFICATIONS = frozenset({"_x.ai/session_notification", "x.ai/session_notification"})
 XAI_COMPACT_METHOD = "_x.ai/compact_conversation"
+# Carries Grok's model catalog (same shape as session/new's `models`).
+XAI_MODELS_UPDATE_METHODS = frozenset({"_x.ai/models/update", "x.ai/models/update"})
+# How long session setup waits for Grok to push its model catalog.
+GROK_MODEL_CATALOG_WAIT_SECONDS = 5
 # Grok's default `[session] auto_compact_threshold_percent`.
 GROK_AUTO_COMPACT_PERCENT = 85
 
@@ -273,6 +277,42 @@ def _model_state(setup: dict[str, Any], initialize_meta: Any) -> dict[str, Any]:
     if not isinstance(models, dict) and isinstance(initialize_meta, dict):
         models = initialize_meta.get("modelState")
     return models if isinstance(models, dict) else {}
+
+
+async def await_grok_model_catalog(
+    client: AcpClient, timeout: float = GROK_MODEL_CATALOG_WAIT_SECONDS
+) -> None:
+    """Replace the session's model list with the catalog Grok pushes after setup.
+
+    A Grok process that starts with an expired login answers session/new with a
+    stand-in catalog of older models, then pushes the real one once it has refreshed
+    the token; session/load answers before pushing it. Other queued events keep their
+    order.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    kept: list[dict[str, Any]] = []
+    catalog: Any = None
+    while catalog is None and (remaining := deadline - loop.time()) > 0:
+        try:
+            message = await asyncio.wait_for(client.events.get(), timeout=remaining)
+        except asyncio.TimeoutError:
+            break
+        if message.get("method") in XAI_MODELS_UPDATE_METHODS:
+            catalog = message.get("params")
+        else:
+            kept.append(message)
+    # No await from here on, so nothing lands in the queue while it is rebuilt.
+    while not client.events.empty():
+        message = client.events.get_nowait()
+        if message.get("method") in XAI_MODELS_UPDATE_METHODS:
+            catalog = message.get("params")
+        else:
+            kept.append(message)
+    for message in kept:
+        client.events.put_nowait(message)
+    if isinstance(catalog, dict) and isinstance(catalog.get("availableModels"), list):
+        client.setup_result["models"] = catalog
 
 
 def _session_reasoning_effort(setup: dict[str, Any]) -> str | None:
@@ -571,6 +611,7 @@ async def run_grok_agent(
             await _discard_stale_events(client)
         else:
             await client.start()
+            await await_grok_model_catalog(client)
         if live.settings == settings:
             context_window = live.context_window
         else:

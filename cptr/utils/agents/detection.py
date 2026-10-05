@@ -478,7 +478,7 @@ async def _probe_grok_models(
     command: str, profile: dict[str, Any]
 ) -> tuple[list[str] | None, dict[str, dict[str, Any]]]:
     from cptr.utils.agents.acp import AcpClient, acp_models_from_setup
-    from cptr.utils.agents.grok import grok_model_options
+    from cptr.utils.agents.grok import await_grok_model_catalog, grok_model_options
 
     env = os.environ.copy()
     if profile.get("home"):
@@ -494,6 +494,7 @@ async def _probe_grok_models(
     )
     try:
         await asyncio.wait_for(client.start(), timeout=10)
+        await await_grok_model_catalog(client)
         options = grok_model_options(client.setup_result, client.initialize_result.get("_meta"))
         return acp_models_from_setup(client.setup_result) or None, options
     except Exception:
