@@ -1560,7 +1560,7 @@
 	{/if}
 
 	<!-- Composer chips: workspace (left), usage + model hub (right) -->
-	<div class="composer-chips mb-2 flex items-center gap-2 px-0.5">
+	<div class="composer-chips mb-2 flex items-center gap-2 px-0.5" data-intro="chips">
 		<button
 			bind:this={workspaceChipEl}
 			type="button"
@@ -1624,7 +1624,7 @@
 		</Popover>
 	{/if}
 
-	<div class="app-surface rounded-3xl shadow-lg border transition px-1">
+	<div class="app-surface rounded-3xl shadow-lg border transition px-1" data-intro="composer">
 		<!-- Uploaded Files Preview -->
 		{#if attachedUploads.length > 0}
 			<div class="mx-2 pt-2 flex flex-wrap gap-2">

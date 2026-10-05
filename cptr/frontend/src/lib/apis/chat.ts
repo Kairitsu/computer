@@ -82,11 +82,13 @@ export interface SuperGrokQuota {
 	products: { id: number; label: string; used_percent: number }[];
 	source: string;
 	fetched_at: number;
+	/** Plan display name, e.g. "SuperGrok" or "SuperGrok Heavy". */
+	plan?: string | null;
 }
 
 export interface QuotaResponse {
 	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
-	supergrok: SuperGrokQuota | { error: string; fetched_at: number } | null;
+	supergrok: SuperGrokQuota | { error: string; fetched_at: number; plan?: string | null } | null;
 	local: {
 		period: 'day' | 'week' | 'month';
 		tokens_used: number;

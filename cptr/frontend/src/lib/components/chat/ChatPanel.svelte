@@ -62,6 +62,8 @@
 	import { getSkills, type SkillInfo } from '$lib/apis/skills';
 	import Spinner from '../common/Spinner.svelte';
 	import Icon from '../Icon.svelte';
+	import SuperGrokMark from '../brand/SuperGrokMark.svelte';
+	import { quotaData } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import { toast } from 'svelte-sonner';
 	import { t } from '$lib/i18n';
@@ -346,6 +348,9 @@
 
 	const streaming = $derived(allMessages.some((m) => m.role === 'assistant' && !m.done));
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
+	/** Landing wordmark follows the Grok CLI plan, like Grok App. */
+	const landingPlan = $derived($quotaData?.supergrok?.plan ?? '');
+	const landingTitle = $derived($t('chat.landingTitle'));
 	// In plan mode, a finished reply is a plan waiting for approval.
 	const planApprovalMessageId = $derived.by(() => {
 		if (!planMode || streaming || sending || pendingAskUser) return null;
@@ -1688,15 +1693,15 @@
 		<!-- Landing: Grok-style new chat -->
 		<div class="flex-1 overflow-y-auto flex flex-col">
 			<div class="max-w-3xl w-full mx-auto px-4 flex flex-col my-auto pt-6 pb-16">
-				<div class="mb-10 flex flex-col items-center gap-3 text-center">
-					<div class="flex items-center gap-2">
-						<img src="/favicon.png" alt="" class="size-8" />
-						<span class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white"
-							>Computer</span
-						>
+				<div class="landing-mark mb-10" data-intro-landing>
+					<div class="landing-brand text-gray-900 dark:text-white">
+						<SuperGrokMark heavy={/heavy/i.test(landingPlan)} title={landingPlan || undefined} />
 					</div>
-					<h1 class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
-						{$t('chat.landingTitle')}
+					<h1
+						class="landing-prompt text-gray-900 dark:text-white"
+						style:--prompt-steps={Math.max(1, Array.from(landingTitle).length)}
+					>
+						{landingTitle}
 					</h1>
 				</div>
 
@@ -1883,6 +1888,72 @@
 {/if}
 
 <style>
+	/* Landing, after Grok App: the wordmark rises out of a mask, then the
+	 * prompt types in. Plays whenever a new chat opens; on first load it waits
+	 * for the sidebar (html.cptr-intro, see app.css). */
+	.landing-mark {
+		--brand-delay: 60ms;
+		--prompt-delay: 520ms;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.875rem;
+		text-align: center;
+		user-select: none;
+	}
+
+	:global(html.cptr-intro) .landing-mark {
+		--brand-delay: 480ms;
+		--prompt-delay: 940ms;
+	}
+
+	.landing-brand {
+		display: flex;
+		justify-content: center;
+		max-width: 100%;
+		overflow: hidden;
+		padding: 0.25rem 0.5rem;
+	}
+
+	.landing-brand :global(svg) {
+		animation: landing-brand-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) var(--brand-delay) backwards;
+	}
+
+	.landing-prompt {
+		width: max-content;
+		max-width: calc(100% - 2rem);
+		font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+		font-weight: 600;
+		line-height: 1.2;
+		letter-spacing: -0.02em;
+		text-wrap: balance;
+		animation: landing-prompt-type 680ms steps(var(--prompt-steps), end) var(--prompt-delay)
+			backwards;
+	}
+
+	@keyframes landing-brand-rise {
+		from {
+			opacity: 0;
+			transform: translate3d(0, calc(100% + 0.75rem), 0);
+		}
+	}
+
+	@keyframes landing-prompt-type {
+		from {
+			clip-path: inset(0 100% 0 0);
+		}
+		to {
+			clip-path: inset(0);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.landing-brand :global(svg),
+		.landing-prompt {
+			animation: none;
+		}
+	}
+
 	.status-dot {
 		width: 0.375rem;
 		height: 0.375rem;

@@ -380,6 +380,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+	data-intro="topbar"
 	class="flex items-center h-9 px-1.5 gap-1 shrink-0 select-none border-b transition-colors duration-100
 		{dropHighlight ? 'tab-reorder-drop-preview' : 'border-gray-200 dark:border-white/6'}
 		{isActiveGroup ? '' : 'opacity-50'}"

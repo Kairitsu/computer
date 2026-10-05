@@ -19,6 +19,7 @@ from cptr.routers import (
     events_router,
     files_router,
     gateway_router,
+    grok_router,
     git_router,
     images_router,
     memory_router,
@@ -294,6 +295,7 @@ app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)
 app.include_router(gateway_router)
+app.include_router(grok_router)
 app.include_router(git_router)
 app.include_router(images_router)
 app.include_router(memory_router)

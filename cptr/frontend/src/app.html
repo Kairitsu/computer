@@ -18,9 +18,121 @@
 		<meta name="apple-mobile-web-app-title" content="Computer" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<link rel="apple-touch-startup-image" href="/icon-512.png" />
+		<script>
+			// Boot splash colors from the last loaded appearance (cached by
+			// rememberBootTheme), so it paints in the user's theme before the app loads.
+			(function () {
+				var root = document.documentElement;
+				var cached = null;
+				try {
+					cached = JSON.parse(localStorage.getItem('cptr:boot-theme') || 'null');
+				} catch (e) {}
+				var dark = cached
+					? !!cached.dark
+					: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+				root.classList.add(dark ? 'boot-dark' : 'boot-light');
+				if (cached && cached.bg) root.style.setProperty('--boot-bg', cached.bg);
+			})();
+		</script>
+		<style>
+			#boot-splash {
+				position: fixed;
+				inset: 0;
+				z-index: 9999;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				background: var(--boot-bg, #ffffff);
+				color: rgba(0, 0, 0, 0.88);
+				transition:
+					opacity 520ms cubic-bezier(0.4, 0, 0.2, 1),
+					visibility 0s linear 520ms;
+			}
+			.boot-dark #boot-splash {
+				background: var(--boot-bg, #0d0d0d);
+				color: rgba(255, 255, 255, 0.92);
+			}
+			#boot-splash .boot-logo {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 4.75rem;
+				height: 4.75rem;
+				border-radius: 1.375rem;
+				background: #ffffff;
+				border: 1px solid rgba(0, 0, 0, 0.06);
+				box-shadow:
+					0 8px 28px rgba(0, 0, 0, 0.1),
+					0 20px 48px rgba(0, 0, 0, 0.08);
+				animation:
+					boot-logo-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both,
+					boot-logo-glow 1.6s ease-in-out 560ms infinite;
+				transition:
+					transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+					filter 520ms ease;
+			}
+			.boot-dark #boot-splash .boot-logo {
+				background: #1a1a1a;
+				border-color: rgba(255, 255, 255, 0.07);
+				box-shadow:
+					0 8px 28px rgba(0, 0, 0, 0.4),
+					0 24px 64px rgba(0, 0, 0, 0.32);
+				animation-name: boot-logo-in, boot-logo-glow-dark;
+			}
+			#boot-splash.is-leaving {
+				opacity: 0;
+				visibility: hidden;
+			}
+			#boot-splash.is-leaving .boot-logo {
+				transform: scale(1.12);
+				filter: blur(6px);
+				animation: none;
+			}
+			@keyframes boot-logo-in {
+				from {
+					opacity: 0;
+					transform: scale(0.86);
+				}
+			}
+			@keyframes boot-logo-glow {
+				50% {
+					box-shadow:
+						0 0 30px rgba(61, 95, 217, 0.22),
+						0 8px 28px rgba(0, 0, 0, 0.1),
+						0 20px 48px rgba(0, 0, 0, 0.08);
+				}
+			}
+			@keyframes boot-logo-glow-dark {
+				50% {
+					box-shadow:
+						0 0 32px rgba(138, 164, 255, 0.28),
+						0 8px 28px rgba(0, 0, 0, 0.4),
+						0 24px 64px rgba(0, 0, 0, 0.32);
+				}
+			}
+			@media (prefers-reduced-motion: reduce) {
+				#boot-splash,
+				#boot-splash .boot-logo {
+					animation: none;
+					transition: none;
+				}
+			}
+		</style>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<div id="boot-splash" aria-hidden="true">
+			<div class="boot-logo">
+				<svg width="36" height="34" viewBox="0 0 35 33" fill="currentColor">
+					<path
+						d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"
+					/>
+					<path
+						d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"
+					/>
+				</svg>
+			</div>
+		</div>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

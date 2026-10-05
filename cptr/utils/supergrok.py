@@ -6,15 +6,20 @@ from the Grok CLI's `auth.json` (written by `grok login`) and is never logged.
 Source of truth is the grok.com usage page RPC:
 `POST https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig`
 (empty gRPC-web request). The JSON billing endpoint the CLI uses is the fallback.
+The plan name ("SuperGrok", "SuperGrok Heavy") comes from the CLI proxy's
+settings, then its user profile, then the token's `tier` claim.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import os
 import struct
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +29,8 @@ log = logging.getLogger(__name__)
 
 BILLING_URL = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig"
 CLI_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+CLI_SETTINGS_URL = "https://cli-chat-proxy.grok.com/v1/settings"
+CLI_USER_URL = "https://cli-chat-proxy.grok.com/v1/user?include=subscription"
 # Empty protobuf message framed as gRPC-web (flags=0, length=0).
 EMPTY_GRPC_WEB_FRAME = b"\x00\x00\x00\x00\x00"
 TIMEOUT_SECONDS = 12
@@ -32,50 +39,146 @@ CACHE_SECONDS = 60
 PRODUCT_LABELS = {1: "API", 2: "Grok Build", 4: "Other"}
 JSON_PRODUCT_IDS = {"Api": 1, "API": 1, "GrokBuild": 2, "Grok Build": 2, "GrokChat": 4}
 
+PLAN_CACHE_SECONDS = 30 * 60
+
 _cache: dict[str, Any] = {"at": 0.0, "value": None}
+# sha256(token)[:16] → (fetched at, plan name or None)
+_plan_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def invalidate_cache() -> None:
+    """Drop the cached quota, e.g. after the Grok CLI login changed."""
+    _cache["at"] = 0.0
+    _cache["value"] = None
 
 
 # ── Token discovery ─────────────────────────────────────────
 
 
 def _auth_json_candidates(extra_homes: list[str] | None = None) -> list[Path]:
+    """auth.json paths in the order the Grok agent would use them.
+
+    Agent profile homes come before `~/.grok` because cptr runs the agent with
+    that HOME, so on a tie the login the agent actually uses wins.
+    """
     paths: list[Path] = []
     grok_home = os.environ.get("GROK_HOME")
     if grok_home:
         paths.append(Path(grok_home).expanduser() / "auth.json")
-    paths.append(Path.home() / ".grok" / "auth.json")
     for home in extra_homes or []:
         paths.append(Path(home).expanduser() / ".grok" / "auth.json")
+    paths.append(Path.home() / ".grok" / "auth.json")
     return list(dict.fromkeys(paths))
+
+
+def _str(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _usable_token(entry: object) -> str | None:
     if not isinstance(entry, dict):
         return None
     for field in ("key", "access_token"):
-        value = entry.get(field)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        value = _str(entry.get(field))
+        if value:
+            return value
     return None
+
+
+def _usable_entry(data: object) -> dict | None:
+    """The credential entry holding a token.
+
+    auth.json maps issuer::client_id → credential entry; a stale first entry from
+    an older login must not mask the valid one.
+    """
+    if not isinstance(data, dict):
+        return None
+    entries = [entry for entry in data.values() if isinstance(entry, dict)]
+    for entry in entries:
+        if _usable_token(entry) or _str(entry.get("refresh_token")):
+            return entry
+    return entries[0] if entries else None
+
+
+def _read_auth_json(path: Path) -> object | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _parse_rfc3339(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _profile_from_entry(entry: dict | None) -> dict:
+    entry = entry or {}
+    email = _str(entry.get("email"))
+    name = " ".join(
+        part for part in (_str(entry.get("first_name")), _str(entry.get("last_name"))) if part
+    )
+    expires_at = _str(entry.get("expires_at"))
+    expires = _parse_rfc3339(expires_at)
+    has_refresh = bool(_str(entry.get("refresh_token")))
+    return {
+        "signed_in": bool(_usable_token(entry)) or has_refresh,
+        "email": email,
+        "display_name": name or email,
+        "user_id": _str(entry.get("user_id")) or _str(entry.get("principal_id")),
+        "team_id": _str(entry.get("team_id")),
+        "expires_at": expires_at,
+        "expired": bool(expires and expires < datetime.now(timezone.utc)),
+        "has_refresh": has_refresh,
+    }
+
+
+def _signed_out_profile() -> dict:
+    return _profile_from_entry(None)
+
+
+def best_auth(extra_homes: list[str] | None = None) -> tuple[dict, Path | None, dict | None]:
+    """(profile, auth.json path, credential entry) of the strongest Grok CLI login.
+
+    Ranking: signed in, then refreshable, then unexpired; ties keep path order.
+    """
+    best: tuple[dict, Path | None, dict | None] = (_signed_out_profile(), None, None)
+    best_score: tuple[bool, bool, bool] | None = None
+    for path in _auth_json_candidates(extra_homes):
+        data = _read_auth_json(path)
+        if data is None:
+            continue
+        entry = _usable_entry(data)
+        profile = _profile_from_entry(entry)
+        score = (profile["signed_in"], profile["has_refresh"], not profile["expired"])
+        if best_score is None or score > best_score:
+            best, best_score = (profile, path, entry), score
+    return best
+
+
+def read_auth_profile(extra_homes: list[str] | None = None) -> dict:
+    """Public profile of the Grok CLI login (never includes tokens)."""
+    return best_auth(extra_homes)[0]
 
 
 def read_access_token(extra_homes: list[str] | None = None) -> str | None:
-    """Return the first usable Grok CLI access token, or None when signed out."""
+    """Return the Grok CLI access token, or None when signed out."""
+    token = _usable_token(best_auth(extra_homes)[2])
+    if token:
+        return token
     for path in _auth_json_candidates(extra_homes):
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
-        # auth.json maps issuer::client_id → credential entry.
-        entries = data.values() if isinstance(data, dict) else []
-        for entry in entries:
-            token = _usable_token(entry)
-            if token:
-                return token
+        token = _usable_token(_usable_entry(_read_auth_json(path)))
+        if token:
+            return token
     return None
 
 
-async def _grok_profile_homes() -> list[str]:
+async def grok_profile_homes() -> list[str]:
     try:
         from cptr.utils.agents.models import get_raw_agent_profiles
 
@@ -321,13 +424,91 @@ async def _fetch_cli(client: httpx.AsyncClient, token: str) -> dict:
     return parse_cli_billing(response.json())
 
 
+# ── Plan name ───────────────────────────────────────────────
+
+
+def plan_from_code(code: str | None) -> str | None:
+    """Map a subscription tier enum ("SuperGrokPro") to its display name."""
+    raw = (code or "").strip()
+    compact = raw.lower().replace("_", "").replace(" ", "").replace("-", "")
+    if not compact or compact in {"free", "basic", "none", "null", "anonymous"}:
+        return None
+    if compact in {"supergrokpro", "supergrokheavy", "heavy"}:
+        return "SuperGrok Heavy"
+    if compact in {"supergrok", "supergroklite", "grokpro"}:
+        return "SuperGrok"
+    if compact in {"xpremiumplus", "premiumplus"}:
+        return "X Premium+"
+    if compact in {"xpremium", "premium"}:
+        return "X Premium"
+    return raw
+
+
+def _plan_from_jwt(token: str) -> str | None:
+    """Fallback from the token's unverified `tier` claim (display only)."""
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        tier = int(payload.get("tier"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    # Observed: SuperGrok-capable accounts have tier ≥ 2, Heavy accounts 5.
+    if tier >= 5:
+        return "SuperGrok Heavy"
+    if tier >= 2:
+        return "SuperGrok"
+    return None
+
+
+async def _fetch_plan(client: httpx.AsyncClient, token: str) -> str | None:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "x-grok-client-mode": "cli",
+        "Accept": "application/json",
+    }
+    try:
+        response = await client.get(CLI_SETTINGS_URL, headers=headers)
+        if response.is_success:
+            data = response.json()
+            display = _str(
+                data.get("subscription_tier_display") or data.get("subscriptionTierDisplay")
+            )
+            if display:
+                return display
+    except (httpx.HTTPError, ValueError, AttributeError) as error:
+        log.info("Grok plan settings unavailable: %s", error)
+    try:
+        response = await client.get(CLI_USER_URL, headers=headers)
+        if response.is_success:
+            data = response.json()
+            plan = plan_from_code(data.get("subscriptionTier") or data.get("subscription_tier"))
+            if plan:
+                return plan
+    except (httpx.HTTPError, ValueError, AttributeError) as error:
+        log.info("Grok plan profile unavailable: %s", error)
+    return _plan_from_jwt(token)
+
+
+async def _plan(client: httpx.AsyncClient, token: str) -> str | None:
+    key = hashlib.sha256(token.encode()).hexdigest()[:16]
+    cached = _plan_cache.get(key)
+    if cached and time.monotonic() - cached[0] < PLAN_CACHE_SECONDS:
+        return cached[1]
+    plan = await _fetch_plan(client, token)
+    _plan_cache.clear()
+    _plan_cache[key] = (time.monotonic(), plan)
+    return plan
+
+
 async def get_supergrok_quota(force: bool = False) -> dict | None:
     """Return the SuperGrok quota snapshot, None when signed out, or {"error": ...}."""
     now = time.monotonic()
     if not force and _cache["at"] and now - _cache["at"] < CACHE_SECONDS:
         return _cache["value"]
 
-    token = read_access_token(await _grok_profile_homes())
+    token = read_access_token(await grok_profile_homes())
     if not token:
         value = None
     else:
@@ -346,6 +527,7 @@ async def get_supergrok_quota(force: bool = False) -> dict | None:
                         "error": f"{type(cli_error).__name__}: {cli_error}"[:200],
                         "fetched_at": int(time.time()),
                     }
+            value["plan"] = await _plan(client, token)
 
     _cache["at"] = now
     _cache["value"] = value

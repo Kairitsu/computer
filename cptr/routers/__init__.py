@@ -9,6 +9,7 @@ from cptr.routers.bridge import webhook_router
 from cptr.routers.browser import router as browser_router
 from cptr.routers.chat import router as chat_router
 from cptr.routers.gateway import router as gateway_router
+from cptr.routers.grok import router as grok_router
 from cptr.routers.events import router as events_router
 from cptr.routers.files import router as files_router
 from cptr.routers.git import router as git_router
@@ -33,6 +34,7 @@ __all__ = [
     "events_router",
     "files_router",
     "gateway_router",
+    "grok_router",
     "git_router",
     "images_router",
     "memory_router",

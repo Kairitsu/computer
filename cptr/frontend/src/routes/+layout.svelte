@@ -2,7 +2,7 @@
 	import '../app.css';
 	import '@xterm/xterm/css/xterm.css';
 
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -52,6 +52,7 @@
 	import { startQuotaPolling } from '$lib/stores/quota';
 	import { refreshAudioState } from '$lib/stores/audio';
 	import SetupWizard from '$lib/components/SetupWizard.svelte';
+	import { dismissSplash, playIntro } from '$lib/intro';
 
 	let { children } = $props();
 	let showSettings = $state(false);
@@ -151,6 +152,17 @@
 					showChangelog.set(true);
 				}
 			}
+		}
+	});
+
+	// Opening animation: the boot splash lifts once the shell (or auth screen) is
+	// ready, then the shell's regions rise in one after another.
+	$effect(() => {
+		if (authState === 'checking') return;
+		if (authState !== 'authenticated' || showSetup) {
+			void dismissSplash();
+		} else if ($stateLoaded) {
+			void tick().then(playIntro);
 		}
 	});
 

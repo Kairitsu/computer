@@ -468,6 +468,16 @@ async def close_all_grok_sessions() -> None:
         await _close_live(session_id, live)
 
 
+async def close_idle_grok_sessions() -> None:
+    """Stop processes between turns, e.g. after the Grok CLI login changed.
+
+    A kept process holds the credentials it started with; running turns finish first.
+    """
+    for session_id, live in list(_live_sessions.items()):
+        if not live.lock.locked():
+            await _close_live(session_id, live)
+
+
 async def _checkout(session_id: str | None, key: tuple[Any, ...]) -> _LiveGrok | None:
     """The chat's running process, held for one turn, if it can serve this turn."""
     live = _live_sessions.get(session_id) if session_id else None

@@ -131,7 +131,7 @@
 		const tabs: SettingsTab[] = [
 			{ id: 'general', label: tr('settings.general'), icon: 'settings' },
 			{ id: 'appearance', label: tr('settings.appearance'), icon: 'sun-light' },
-			{ id: 'usage', label: 'Usage', icon: 'usage' },
+			{ id: 'usage', label: tr('usage.title'), icon: 'usage' },
 			{ id: 'notifications', label: tr('general.notifications'), icon: 'chat-bubble' },
 			{ id: 'keyboard', label: tr('settings.keyboard'), icon: 'terminal' },
 			{ id: 'account', label: tr('settings.account'), icon: 'user' }
