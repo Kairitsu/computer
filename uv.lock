@@ -310,7 +310,6 @@ agents = [
 ]
 all = [
     { name = "claude-agent-sdk" },
-    { name = "mcp" },
     { name = "openpyxl" },
     { name = "pypdf" },
     { name = "python-docx" },
@@ -320,9 +319,6 @@ docs = [
     { name = "openpyxl" },
     { name = "pypdf" },
     { name = "python-docx" },
-]
-mcp = [
-    { name = "mcp" },
 ]
 pam = [
     { name = "python-pam" },
@@ -345,8 +341,6 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.8" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.8,<2" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.8,<2" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "openpyxl", marker = "extra == 'docs'", specifier = ">=3.1" },
     { name = "pyjwt", specifier = ">=2.8" },

@@ -72,11 +72,6 @@ async def lifespan(app: FastAPI):
 
     app.state.scheduler_task = asyncio.create_task(scheduler_worker_loop(app))
 
-    from cptr.utils.timers import recover_timers, timer_worker_loop
-
-    await recover_timers()
-    app.state.timer_task = asyncio.create_task(timer_worker_loop(app))
-
     # Start messaging bots
     from cptr.utils.bridge import BotManager
 
@@ -86,12 +81,6 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        timer_task = getattr(app.state, "timer_task", None)
-        if timer_task:
-            timer_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await timer_task
-
         scheduler_task = getattr(app.state, "scheduler_task", None)
         if scheduler_task:
             scheduler_task.cancel()
@@ -114,24 +103,15 @@ async def lifespan(app: FastAPI):
             await close_all_grok_sessions()
         except Exception:
             pass
-        # Clean up browser sessions and launched Chrome used by agent tools.
+        # Clean up browser tab sessions and the Chrome they launched.
         try:
-            from cptr.utils.browser.session import session_manager
             from cptr.utils.browser.launcher import shutdown_browser
             from cptr.utils.browser.proxy import manager as browser_proxy_manager
             from cptr.utils.browser.viewer import manager as chrome_viewer_manager
 
             await chrome_viewer_manager.close_all()
             await browser_proxy_manager.close_all()
-            await session_manager.close_all()
             await shutdown_browser()
-        except Exception:
-            pass
-        # Clean up stdio MCP server processes
-        try:
-            from cptr.utils.mcp.stdio_manager import stdio_manager
-
-            await stdio_manager.disconnect_all()
         except Exception:
             pass
 

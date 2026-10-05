@@ -201,16 +201,7 @@ class NotificationEventSink:
         await dispatch_notification_event(event)
 
 
-class TimerEventSink:
-    async def handle_event(self, event: Event) -> None:
-        if event.event not in {EVENTS.CHAT_READ.name, EVENTS.CHAT_USER_MESSAGE.name}:
-            return
-        from cptr.utils.timers import cancel_timers_for_event
-
-        await cancel_timers_for_event(event)
-
-
-EVENT_SINKS = [TimerEventSink(), NotificationEventSink()]
+EVENT_SINKS = [NotificationEventSink()]
 
 
 async def publish_event(

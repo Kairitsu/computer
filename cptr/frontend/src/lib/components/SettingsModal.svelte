@@ -12,11 +12,8 @@
 	import Account from './Settings/Account.svelte';
 	import Keyboard from './Settings/Keyboard.svelte';
 	import Users from './Admin/Users.svelte';
-	import Connections from './Admin/Connections.svelte';
 	import Agents from './Admin/Agents.svelte';
 	import Models from './Admin/Models.svelte';
-	import Chat from './Admin/Chat.svelte';
-	import Tools from './Admin/Tools.svelte';
 	import Git from './Settings/Git.svelte';
 	import Skills from './Admin/Skills.svelte';
 	import Messaging from './Admin/Messaging.svelte';
@@ -24,7 +21,6 @@
 	import AudioSettings from './Admin/AudioSettings.svelte';
 	import Images from './Admin/Images.svelte';
 	import AdminWeb from './Admin/Web.svelte';
-	import ToolServers from './Admin/ToolServers.svelte';
 	import Subagents from './Admin/Subagents.svelte';
 	import Workspace from './Admin/Workspace.svelte';
 	import { session } from '$lib/session';
@@ -40,11 +36,8 @@
 		| 'keyboard'
 		| 'account'
 		| 'users'
-		| 'connections'
 		| 'agents'
 		| 'models'
-		| 'chat'
-		| 'tools'
 		| 'git'
 		| 'skills'
 		| 'messaging'
@@ -52,7 +45,6 @@
 		| 'audio'
 		| 'images'
 		| 'web'
-		| 'toolservers'
 		| 'subagents'
 		| 'workspace';
 
@@ -75,11 +67,8 @@
 			'keyboard',
 			'account',
 			'users',
-			'connections',
 			'agents',
 			'models',
-			'chat',
-			'tools',
 			'git',
 			'skills',
 			'messaging',
@@ -87,7 +76,6 @@
 			'audio',
 			'images',
 			'web',
-			'toolservers',
 			'subagents',
 			'workspace'
 		];
@@ -110,17 +98,13 @@
 
 	const adminTabIds: Tab[] = [
 		'users',
-		'connections',
 		'agents',
 		'models',
-		'chat',
-		'tools',
 		'messaging',
 		'gateway',
 		'audio',
 		'images',
 		'web',
-		'toolservers',
 		'subagents',
 		'workspace',
 		'memory',
@@ -144,17 +128,13 @@
 
 	const adminTabs: { id: Tab; label: string; icon: string }[] = $derived([
 		{ id: 'users', label: tr('admin.users'), icon: 'user' },
-		{ id: 'connections', label: tr('admin.connections'), icon: 'plug' },
 		{ id: 'agents', label: tr('admin.agents'), icon: 'terminal' },
 		{ id: 'models', label: tr('admin.models'), icon: 'cube' },
-		{ id: 'chat', label: tr('admin.chat'), icon: 'chat-bubble' },
-		{ id: 'tools', label: tr('admin.tools'), icon: 'tools' },
 		{ id: 'messaging', label: tr('admin.messaging'), icon: 'chat-bubble' },
 		{ id: 'gateway', label: tr('admin.gateway.tab'), icon: 'gateway' },
 		{ id: 'audio', label: tr('admin.audio.title'), icon: 'microphone' },
 		{ id: 'images', label: tr('admin.images.title'), icon: 'image' },
 		{ id: 'web', label: tr('admin.web'), icon: 'globe' },
-		{ id: 'toolservers', label: tr('admin.toolServers'), icon: 'plug' },
 		{ id: 'subagents', label: tr('admin.subagents'), icon: 'user' },
 		{ id: 'workspace', label: tr('admin.workspace'), icon: 'folder' },
 		{ id: 'memory', label: tr('settings.memory'), icon: 'brain' },
@@ -261,16 +241,10 @@
 			<Account />
 		{:else if activeTab === 'users'}
 			<Users />
-		{:else if activeTab === 'connections'}
-			<Connections />
 		{:else if activeTab === 'agents'}
 			<Agents />
 		{:else if activeTab === 'models'}
 			<Models />
-		{:else if activeTab === 'chat'}
-			<Chat />
-		{:else if activeTab === 'tools'}
-			<Tools />
 		{:else if activeTab === 'git'}
 			<Git />
 		{:else if activeTab === 'skills'}
@@ -285,8 +259,6 @@
 			<Images />
 		{:else if activeTab === 'web'}
 			<AdminWeb />
-		{:else if activeTab === 'toolservers'}
-			<ToolServers />
 		{:else if activeTab === 'subagents'}
 			<Subagents />
 		{:else if activeTab === 'workspace'}

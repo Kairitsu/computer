@@ -340,14 +340,6 @@ async def compare_diff(
     return _parse_diff(out)
 
 
-async def staged_diff(
-    root: str, max_chars: int = 30000, identity: ExecutionIdentity | None = None
-) -> str:
-    """Return the staged patch, capped for lightweight AI requests."""
-    _, out, _ = await _run("diff", "--staged", "--unified=3", cwd=root, identity=identity)
-    return out[:max_chars]
-
-
 def _parse_diff(raw: str) -> dict[str, Any]:
     """Parse unified diff into structured format."""
     files: list[dict] = []

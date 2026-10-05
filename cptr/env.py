@@ -56,7 +56,6 @@ UPSTREAM_REQUEST_LOG_ROTATION = os.environ.get("CPTR_UPSTREAM_REQUEST_LOG_ROTATI
 STARTUP_TOKEN: str | None = os.environ.pop("CPTR_STARTUP_TOKEN", None)
 
 # ── Chat settings ───────────────────────────────────────────
-CHAT_MAX_ITERATIONS = int(os.environ.get("CHAT_MAX_ITERATIONS", "2048"))
 ENABLE_CHAT_RECONCILE_ON_STARTUP: bool = os.environ.get(
     "ENABLE_CHAT_RECONCILE_ON_STARTUP", "true"
 ).lower() in ("true", "1", "yes")
@@ -73,22 +72,8 @@ CLAUDE_CODE_MAX_BUFFER_SIZE = _env_int("CPTR_CLAUDE_CODE_MAX_BUFFER_SIZE", 128 *
 WORKSPACE_AUTO_GITIGNORE_DOT_CPTR_ENV = os.environ.get("CPTR_AUTO_GITIGNORE_DOT_CPTR")
 WORKSPACE_AUTO_GITIGNORE_DOT_CPTR = _env_bool("CPTR_AUTO_GITIGNORE_DOT_CPTR", "true")
 
-# ── Execute timeout ─────────────────────────────────────────
-# Default wait (seconds) for run_command / check_task when the caller
-# doesn't pass an explicit wait value.  None = return immediately.
-EXECUTE_TIMEOUT: float | None = None
-_execute_timeout = os.environ.get("CPTR_EXECUTE_TIMEOUT")
-if _execute_timeout is not None:
-    EXECUTE_TIMEOUT = float(_execute_timeout)
-
-# ── AI stream settings ──────────────────────────────────────
-STREAM_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("CPTR_STREAM_CONNECT_TIMEOUT", "30"))
-STREAM_READ_TIMEOUT_SECONDS = float(os.environ.get("CPTR_STREAM_READ_TIMEOUT", "300"))
-STREAM_WRITE_TIMEOUT_SECONDS = float(os.environ.get("CPTR_STREAM_WRITE_TIMEOUT", "600"))
-
 # ── Automation scheduler ────────────────────────────────────
 AUTOMATION_POLL_INTERVAL = int(os.environ.get("AUTOMATION_POLL_INTERVAL", "10"))
-TIMER_POLL_INTERVAL = int(os.environ.get("TIMER_POLL_INTERVAL", "1"))
 
 # ── CORS ────────────────────────────────────────────────────
 # Socket.IO CORS allowed origins.

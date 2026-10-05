@@ -30,36 +30,6 @@ def estimate_messages_tokens(messages: list[dict]) -> int:
     return total
 
 
-def should_compact(
-    messages: list[dict],
-    system_prompt: str,
-    last_usage: dict | None = None,
-    new_messages_since: int = 0,
-    threshold: int | None = None,
-) -> bool:
-    """True when estimated tokens exceed the compact token threshold.
-
-    If last_usage is provided (real data from the previous API call),
-    uses actual input_tokens + output_tokens as the base and only
-    estimates the new messages appended since that call.
-    Falls back to full estimation when no usage data exists.
-    """
-    resolved_threshold = threshold or _get_threshold()
-
-    last_usage = normalize_usage(last_usage)
-    if last_usage and last_usage.get("input_tokens"):
-        # Real base from last API call + estimate only new additions
-        base = last_usage["input_tokens"] + last_usage.get("output_tokens", 0)
-        if new_messages_since > 0:
-            new_msgs = messages[-new_messages_since:]
-            base += estimate_messages_tokens(new_msgs)
-        return base > resolved_threshold
-
-    # Full estimation fallback
-    total = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
-    return total > resolved_threshold
-
-
 def build_context_usage(tokens: int, *, threshold: int | None = None) -> dict:
     """Return context fullness stats for estimated token counts."""
     resolved_threshold = threshold or _get_threshold()
