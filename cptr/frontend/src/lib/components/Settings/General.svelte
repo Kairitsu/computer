@@ -12,7 +12,15 @@
 	import { session } from '$lib/session';
 	import { toast } from 'svelte-sonner';
 	import { notificationsEnabled, notificationSound } from '$lib/stores/chat';
-	import { getAdminConfig, updateConfig } from '$lib/apis/admin';
+	import {
+		getAdminConfig,
+		getChatRetention,
+		previewChatRetention,
+		updateChatRetention,
+		updateConfig,
+		type ChatRetention
+	} from '$lib/apis/admin';
+	import { requestConfirm } from '$lib/stores/confirm';
 	import {
 		getGrokProcessSettings,
 		updateGrokProcessSettings,
@@ -48,6 +56,48 @@
 	let resetting = $state(false);
 	// Server-wide limits for the Grok processes chats keep between turns; admins set them.
 	let processSettings = $state<GrokProcessSettings | null>(null);
+
+	// How long chats are kept, server-wide; admins set it. Idle chats past it are deleted.
+	let retention = $state<ChatRetention | null>(null);
+
+	$effect(() => {
+		if ($session?.role !== 'admin' || retention) return;
+		getChatRetention()
+			.then((value) => (retention = value))
+			.catch(() => {});
+	});
+
+	async function saveRetention(input: HTMLInputElement) {
+		if (!retention) return;
+		const days = Number(input.value);
+		if (
+			input.value.trim() &&
+			Number.isInteger(days) &&
+			days >= 0 &&
+			days <= retention.max_days &&
+			days !== retention.days
+		) {
+			try {
+				// Saving deletes the chats now out of range, so say how many first.
+				const { count } = days > 0 ? await previewChatRetention(days) : { count: 0 };
+				const confirmed =
+					count === 0 ||
+					(await requestConfirm({
+						title: $t('general.chatRetentionConfirmTitle'),
+						message: $t('general.chatRetentionConfirm', { count, days }),
+						confirmLabel: $t('general.chatRetentionConfirmDelete'),
+						cancelLabel: $t('common.cancel')
+					}));
+				if (confirmed) {
+					retention = await updateChatRetention(days);
+					toast.success($t('settings.saved'));
+				}
+			} catch {
+				toast.error($t('admin.failedToSave'));
+			}
+		}
+		input.value = String(retention.days);
+	}
 
 	// Workspace setting, server-wide; admins set it.
 	let autoGitignoreDotCptr = $state<boolean | null>(null);
@@ -286,6 +336,29 @@
 			</div>
 			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 				{$t('general.grokProcessesDesc')}
+			</p>
+		{/if}
+
+		{#if $session?.role === 'admin' && retention}
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+				{$t('general.chatRetention')}
+			</h3>
+			<label class="flex items-center justify-between gap-3">
+				<span class="text-xs text-gray-600 dark:text-gray-400"
+					>{$t('general.chatRetentionDays')}</span
+				>
+				<input
+					type="number"
+					min="0"
+					max={retention.max_days}
+					step="1"
+					value={retention.days}
+					onchange={(e) => saveRetention(e.currentTarget)}
+					class="w-20 h-7 px-2 rounded-lg text-xs text-right bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none transition-colors"
+				/>
+			</label>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+				{$t('general.chatRetentionDesc')}
 			</p>
 		{/if}
 

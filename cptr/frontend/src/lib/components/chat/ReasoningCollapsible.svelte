@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
-	import { t } from '$lib/i18n';
 
 	interface Props {
 		item: any;
@@ -10,10 +9,12 @@
 
 	let { item, fallbackId }: Props = $props();
 
-	let expanded = $state(false);
-
 	const reasoningId = $derived(item.id || fallbackId);
 	const isThinking = $derived(item.status === 'in_progress' || item.status === 'running');
+	// Open while the model thinks, so the thought streams in; closed once it is done.
+	// A click overrides that for the rest of the block's life.
+	let userExpanded = $state<boolean | null>(null);
+	const expanded = $derived(userExpanded ?? isThinking);
 	const thoughtText = $derived.by(() => {
 		return (item.summary ?? item.content ?? [])
 			.filter((part: any) => 'text' in part)
@@ -23,7 +24,17 @@
 	});
 
 	function toggleExpanded() {
-		expanded = !expanded;
+		userExpanded = !expanded;
+	}
+
+	/** Keep the newest line of a streaming thought in view. */
+	function followTail(node: HTMLElement, _text: string) {
+		node.scrollTop = node.scrollHeight;
+		return {
+			update() {
+				node.scrollTop = node.scrollHeight;
+			}
+		};
 	}
 </script>
 
@@ -53,9 +64,7 @@
 			</div>
 
 			<div class="flex-1 min-w-0 line-clamp-1">
-				<span class="font-normal">
-					{isThinking ? $t('chat.thinking') : $t('chat.edit.thought')}
-				</span>
+				<span class="font-normal"> Thinking </span>
 			</div>
 
 			<div class="flex shrink-0 self-center translate-y-[0.0625rem]">
@@ -78,7 +87,12 @@
 	{#if expanded && thoughtText}
 		<div id={reasoningId} transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
 			<div class="mt-1 mb-0.5 px-1">
-				<div class="text-sm text-gray-500 dark:text-gray-400 whitespace-pre-wrap">
+				<div
+					class="text-sm text-gray-500 dark:text-gray-400 whitespace-pre-wrap {isThinking
+						? 'max-h-48 overflow-y-auto scrollbar-hover'
+						: ''}"
+					use:followTail={thoughtText}
+				>
 					{thoughtText}
 				</div>
 			</div>

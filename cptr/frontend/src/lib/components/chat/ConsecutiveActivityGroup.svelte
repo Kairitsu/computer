@@ -37,9 +37,10 @@
 		expanded = $expandToolDetails;
 	});
 
-	const hasReasoningPending = $derived(
-		reasoning.some((ri: any) => ri.status === 'in_progress' || ri.status === 'running')
+	const activeReasoning = $derived(
+		reasoning.find((ri: any) => ri.status === 'in_progress' || ri.status === 'running')
 	);
+	const hasReasoningPending = $derived(!!activeReasoning);
 	const hasPending = $derived(
 		(!done && calls.some((c: any) => c.status !== 'completed' && c.status !== 'rejected')) ||
 			hasReasoningPending
@@ -183,13 +184,7 @@
 
 			<div class="flex-1 min-w-0 line-clamp-1">
 				<span class="text-gray-600 dark:text-gray-300">
-					{isThoughtOnly
-						? hasPending
-							? $t('chat.thinking')
-							: $t('chat.edit.thought')
-						: hasPending
-							? $t('chat.exploring')
-							: $t('chat.explored')}
+					{isThoughtOnly ? 'Thinking' : hasPending ? $t('chat.exploring') : $t('chat.explored')}
 				</span>
 				{#if !isThoughtOnly && summaryText}
 					<span class="text-gray-400 dark:text-gray-500 ml-1">{summaryText}</span>
@@ -230,6 +225,16 @@
 					{/if}
 				{/each}
 			</div>
+		</div>
+	{/if}
+
+	{#if !expanded && activeReasoning}
+		<!-- The live thought stays visible while the rest of the group is folded. -->
+		<div class="mt-1">
+			<ReasoningCollapsible
+				item={activeReasoning}
+				fallbackId={`reasoning-${groupIdx}-${entries.indexOf(activeReasoning)}`}
+			/>
 		</div>
 	{/if}
 

@@ -235,6 +235,13 @@ export const answerAskUser = (
 export const cancelTask = (chatId: string, messageId: string) =>
 	fetchJSON(`/api/chats/${chatId}/messages/${messageId}/cancel`, { method: 'POST' });
 
+/** Stop a running reply and delete it with the user message it answers. */
+export const retractMessage = (chatId: string, messageId: string) =>
+	fetchJSON<{ ok: boolean; parent_id: string | null; queued: string[] }>(
+		`/api/chats/${chatId}/messages/${messageId}/retract`,
+		{ method: 'POST' }
+	);
+
 export const updateCurrentMessage = (chatId: string, messageId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}/current`, jsonBody({ message_id: messageId }));
 

@@ -14,6 +14,25 @@ export const updateConfig = (config: Record<string, unknown>) =>
 		method: 'PUT'
 	});
 
+// ── Chat history retention ──────────────────────────────────
+
+/** Days without activity after which chats are deleted; 0 keeps them forever. */
+export interface ChatRetention {
+	days: number;
+	max_days: number;
+}
+
+export const getChatRetention = () => fetchJSON<ChatRetention>('/api/admin/chat-retention');
+
+export const previewChatRetention = (days: number) =>
+	fetchJSON<{ count: number }>(`/api/admin/chat-retention/preview?days=${days}`);
+
+export const updateChatRetention = (days: number) =>
+	fetchJSON<ChatRetention>('/api/admin/chat-retention', {
+		...jsonBody({ days }),
+		method: 'PUT'
+	});
+
 // ── Agents ─────────────────────────────────────────────────
 
 export type AgentType =

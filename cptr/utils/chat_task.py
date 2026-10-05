@@ -35,6 +35,7 @@ from cptr.utils.agents.events import (
     AgentTextDelta,
     AgentToolOutputDelta,
     AgentToolUpdate,
+    AgentTurnStarted,
 )
 from cptr.utils.agents.attachments import prepare_agent_attachments
 from cptr.utils.model_targets import AgentModelTarget
@@ -136,6 +137,13 @@ async def cancel_task(message_id: str) -> bool:
         task.cancel()
         return True
     return False
+
+
+async def wait_task(message_id: str, timeout: float = 15) -> None:
+    """Wait for a (cancelled) task to finish saving and releasing its agent process."""
+    task = _tasks.get(message_id)
+    if task and not task.done():
+        await asyncio.wait({task}, timeout=timeout)
 
 
 def is_running(message_id: str) -> bool:
@@ -957,6 +965,7 @@ async def run_chat_task(
     msg = await ChatMessage.get_by_id(message_id)
     content = (msg.content or "") if msg else ""
     output_items: list[dict] = list(msg.output or []) if msg else []
+    message_meta: dict = dict(msg.meta or {}) if msg else {}
     text_buffer = ""  # Accumulates text between tool calls
 
     logger.info(
@@ -1032,6 +1041,26 @@ async def run_chat_task(
         }
         meta["agent_sessions"] = sessions
         await Chat.update_meta(chat_id, meta, now_ms())
+
+    async def record_turn_start(agent_target: AgentModelTarget, event: AgentTurnStarted):
+        """Note where this turn sits in the agent session, so it can be rewound later.
+
+        A pending rewind was applied as the turn started, so it is cleared here.
+        """
+        message_meta["agent_turn"] = {
+            "profile_id": agent_target.profile_id,
+            "session_id": event.session_id,
+            "prompt_index": event.prompt_index,
+        }
+        await ChatMessage.update(message_id, meta=message_meta)
+        chat = await Chat.get_by_id(chat_id)
+        sessions = dict(((chat.meta or {}).get("agent_sessions") or {}) if chat else {})
+        entry = sessions.get(agent_target.profile_id)
+        if isinstance(entry, dict) and "rewind" in entry:
+            sessions[agent_target.profile_id] = {k: v for k, v in entry.items() if k != "rewind"}
+            await Chat.update_meta(
+                chat_id, {**(chat.meta or {}), "agent_sessions": sessions}, now_ms()
+            )
 
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
@@ -1250,6 +1279,10 @@ async def run_chat_task(
                         "content": [{"type": "reasoning_text", "text": f"{text}{event.text}"}],
                     }
                 else:
+                    # Keep the order: text streamed before this thought goes first.
+                    flushed_item = _flush_text()
+                    if flushed_item:
+                        await emit(output=flushed_item)
                     section = sum(item.get("type") == "reasoning" for item in output_items) + 1
                     item = {
                         "type": "reasoning",
@@ -1400,6 +1433,8 @@ async def run_chat_task(
                 except asyncio.CancelledError:
                     await agent_events.aclose()
                     raise
+            elif isinstance(event, AgentTurnStarted):
+                await record_turn_start(agent_target, event)
             elif isinstance(event, AgentContextUsage):
                 await emit(
                     context_usage=build_context_usage(
@@ -1494,7 +1529,7 @@ async def run_chat_task(
             content=content,
             output=output_items,
             done=True,
-            meta={"error": error_msg},
+            meta={**message_meta, "error": error_msg},
         )
         _task_state.pop(message_id, None)
         await emit(done=True, error=error_msg)
