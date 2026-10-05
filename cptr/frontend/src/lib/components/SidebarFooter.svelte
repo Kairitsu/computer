@@ -30,6 +30,7 @@
 </script>
 
 <div
+	data-intro="sidebar-footer"
 	class="relative flex items-center gap-0.5 px-1 py-1 shrink-0 border-t"
 	style="border-color: var(--app-border);"
 >

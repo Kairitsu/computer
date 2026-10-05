@@ -72,7 +72,7 @@
 		aria-label={$t('sidebar.closeSidebar')}
 	></button>
 
-	<aside class="sidebar" style="--sw: {$sidebarWidth}px;">
+	<aside class="sidebar" data-intro="sidebar" style="--sw: {$sidebarWidth}px;">
 		<!-- Resize handle (md+ only) -->
 		<div
 			class="resize-handle"

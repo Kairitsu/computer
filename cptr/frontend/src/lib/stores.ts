@@ -35,6 +35,7 @@ import { defaultPwaPreferences, type PwaPreferences } from '$lib/intents/types';
 import { getPathDisplayName, isSupportedWorkspacePath } from '$lib/utils/paths';
 import {
 	applyAppearance,
+	rememberBootTheme,
 	normalizeBorderContrast,
 	sanitizeThemeConfig,
 	type AppearancePreferences,
@@ -863,7 +864,13 @@ export const loadStateFromServer = initState;
 
 function applyCurrentAppearance() {
 	applyAppearance(get(theme), get(themeConfig), get(textScale), get(borderContrast));
+	// Before the saved preferences load this is only the default theme.
+	if (get(stateLoaded)) rememberBootTheme();
 }
+
+stateLoaded.subscribe((loaded) => {
+	if (loaded) rememberBootTheme();
+});
 
 theme.subscribe(applyCurrentAppearance);
 themeConfig.subscribe(applyCurrentAppearance);

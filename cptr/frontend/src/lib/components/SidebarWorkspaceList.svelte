@@ -347,11 +347,15 @@
 	});
 </script>
 
-{#snippet chatList(path: string)}
+{#snippet chatList(path: string, introIndex?: number)}
 	{@const chats = wsChatsCache.get(path)}
 	{@const hasMoreChats = wsChatsHasMore.get(path)}
 	{@const isLoading = wsChatsLoading.has(path)}
-	<div class="ws-chats">
+	<div
+		class="ws-chats"
+		data-intro-row={introIndex == null ? undefined : ''}
+		style:--intro-i={introIndex}
+	>
 		{#if isLoading && !chats}
 			<div class="ws-chat-loading">
 				<span class="ws-chat-loading-dot"></span>
@@ -384,7 +388,7 @@
 
 <div class="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
 	<!-- Projects -->
-	<div class="section-header">
+	<div class="section-header" data-intro-row style:--intro-i={0}>
 		<button
 			class="section-toggle"
 			onclick={() => toggleCollapsed(PROJECTS_KEY)}
@@ -410,9 +414,9 @@
 	</div>
 
 	<div id="workspace-list" bind:this={wsListEl} class:hidden={!projectsExpanded}>
-		{#each $workspaceList as ws (ws.path)}
+		{#each $workspaceList as ws, index (ws.path)}
 			{@const expanded = isExpanded(ws.path)}
-			<div class="ws-item">
+			<div class="ws-item" data-intro-row style:--intro-i={index + 1}>
 				<div
 					class="ws-row group flex items-center gap-1 w-full h-8 px-2 rounded-lg text-[0.8125rem] transition-colors duration-100
 					{ws.path === currentPath
@@ -503,7 +507,7 @@
 
 	<!-- Default workspace: Home chats -->
 	{#if $chatEnabled}
-		<div class="section-header mt-3">
+		<div class="section-header mt-3" data-intro-row style:--intro-i={$workspaceList.length + 1}>
 			<button
 				class="section-toggle"
 				onclick={() => toggleCollapsed(HOME)}
@@ -525,7 +529,7 @@
 			</button>
 		</div>
 		{#if homeExpanded}
-			{@render chatList(HOME)}
+			{@render chatList(HOME, $workspaceList.length + 2)}
 		{/if}
 	{/if}
 </div>

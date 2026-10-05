@@ -17,7 +17,7 @@
 </script>
 
 {#if $chatEnabled}
-	<div class="px-1.5 mt-1 shrink-0">
+	<div class="px-1.5 mt-1 shrink-0" data-intro="sidebar-nav">
 		<button
 			class="nav-item group flex items-center gap-2 w-full h-8 px-2 rounded-lg text-[0.8125rem] font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors duration-100"
 			onclick={newChat}
@@ -30,7 +30,7 @@
 	</div>
 {/if}
 
-<div class="px-1.5 shrink-0" class:mt-1={!$chatEnabled}>
+<div class="px-1.5 shrink-0" class:mt-1={!$chatEnabled} data-intro="sidebar-nav">
 	<button
 		class="nav-item group flex items-center gap-2 w-full h-8 px-2 rounded-lg text-[0.8125rem] text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors duration-100"
 		onclick={() => showSearch.set(true)}

@@ -1440,6 +1440,7 @@
 
 {#if gitStatus?.is_repo}
 	<div
+		data-intro="gitbar"
 		class="shrink-0 border-t border-gray-200 dark:border-white/6 relative"
 		bind:this={containerEl}
 	>

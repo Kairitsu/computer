@@ -174,3 +174,22 @@ export function applyAppearance(
 	const meta = document.querySelector('meta[name="theme-color"]');
 	if (meta) meta.setAttribute('content', merged.background);
 }
+
+const BOOT_THEME_KEY = 'cptr:boot-theme';
+
+/** Cache the applied theme so the boot splash in app.html paints in it next load. */
+export function rememberBootTheme() {
+	if (typeof document === 'undefined') return;
+	const root = document.documentElement;
+	try {
+		localStorage.setItem(
+			BOOT_THEME_KEY,
+			JSON.stringify({
+				dark: root.classList.contains('dark'),
+				bg: root.style.getPropertyValue('--app-bg').trim()
+			})
+		);
+	} catch {
+		// Storage can be unavailable (private mode); the splash falls back to the OS theme.
+	}
+}
