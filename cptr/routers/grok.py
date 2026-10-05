@@ -1,7 +1,8 @@
-"""Grok CLI account API for Settings → Usage.
+"""Grok CLI account API for Settings → Usage, and process limits for Settings → General.
 
 Everyone can read the login and SuperGrok quota. Signing in or out and switching
-accounts change the server's Grok CLI login for every user, so they need admin.
+accounts change the server's Grok CLI login for every user, so they need admin, as do
+the process limits, which cover every user's chats.
 """
 
 from __future__ import annotations
@@ -9,9 +10,10 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cptr.utils import grok_account
+from cptr.utils.agents.grok import grok_process_settings, save_grok_process_settings
 from cptr.utils.config import AuthResult, check_access
 from cptr.utils.supergrok import get_supergrok_quota, grok_profile_homes
 
@@ -41,6 +43,11 @@ class LoginRequest(BaseModel):
 
 class LoginCodeRequest(BaseModel):
     code: str
+
+
+class ProcessSettingsRequest(BaseModel):
+    max_idle_processes: int | None = Field(None, ge=0)
+    idle_timeout_minutes: int | None = Field(None, ge=0)
 
 
 async def _call(coro):
@@ -126,3 +133,16 @@ async def remove_account(request: Request, account_id: str):
     except grok_account.GrokAccountError as error:
         raise HTTPException(error.status, str(error)) from error
     return {"ok": True}
+
+
+@router.get("/processes")
+async def get_process_settings(request: Request):
+    """How many idle Grok processes chats keep between turns, and for how long."""
+    _get_auth(request)
+    return await grok_process_settings()
+
+
+@router.put("/processes")
+async def put_process_settings(request: Request, body: ProcessSettingsRequest):
+    _require_admin(request)
+    return await save_grok_process_settings(body.max_idle_processes, body.idle_timeout_minutes)

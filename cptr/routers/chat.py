@@ -1046,13 +1046,11 @@ async def delete_chat(request: Request, chat_id: str):
             await asyncio.to_thread(child_file.unlink, True)
 
     # Stop the Grok processes these chats kept between turns.
-    from cptr.utils.agents.grok import close_grok_session
+    from cptr.utils.agents.grok import close_grok_session, grok_session_ids
 
     for owner in (chat, *children):
-        for session in ((owner.meta or {}).get("agent_sessions") or {}).values():
-            if isinstance(session, dict) and session.get("agent") == "grok":
-                if isinstance(session.get("session_id"), str):
-                    await close_grok_session(session["session_id"])
+        for session_id in grok_session_ids(owner):
+            await close_grok_session(session_id)
 
     await Chat.delete(chat_id)
     from cptr.socket.main import emit_to_user
@@ -1069,6 +1067,23 @@ async def delete_chat(request: Request, chat_id: str):
             "workspace_unread_count": unread_counts.get(workspace or "", 0),
         },
     )
+    return {"ok": True}
+
+
+@router.post("/{chat_id}/release")
+async def release_chat(request: Request, chat_id: str):
+    """The chat's tab was closed: stop the agent processes it keeps between turns.
+
+    A running turn still finishes. The chat's next turn starts a new process that
+    reloads the agent session, so the conversation carries over.
+    """
+    user_id = _get_user(request)
+    chat = await Chat.get_by_id(chat_id)
+    if not chat or chat.user_id != user_id:
+        raise HTTPException(404, "chat not found")
+    from cptr.utils.chat_task import release_chat_agents
+
+    await release_chat_agents(chat_id)
     return {"ok": True}
 
 

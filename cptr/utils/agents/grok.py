@@ -9,7 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-from cptr.env import GROK_IDLE_TIMEOUT_SECONDS, GROK_MAX_IDLE_PROCESSES
+from cptr.models import Config
 from cptr.utils.agents.attachments import PreparedAgentAttachments
 from cptr.utils.agents.acp import (
     ACP_PERMISSION_METHOD,
@@ -421,8 +421,66 @@ async def _apply_session_settings(
 # Grok tracks how full its context window is inside the process. A process that only
 # reloads the session (session/load) starts that count near zero, so Grok's turn-start
 # auto-compaction never fires. Keeping each chat's process between turns keeps the
-# count; idle processes are closed after GROK_IDLE_TIMEOUT_SECONDS and beyond the
-# GROK_MAX_IDLE_PROCESSES most recently used ones, since each holds its MCP servers.
+# count. Each process holds its MCP servers, so idle ones close after the idle timeout
+# and beyond the most recently used few (both in Settings → General); running turns
+# are never closed. Closing a chat's tab closes its process too
+# (chat_task.release_chat_agents). A closed chat's next turn reloads the session.
+
+MAX_IDLE_PROCESSES_KEY = "grok.max_idle_processes"
+IDLE_TIMEOUT_MINUTES_KEY = "grok.idle_timeout_minutes"
+DEFAULT_MAX_IDLE_PROCESSES = 3
+DEFAULT_IDLE_TIMEOUT_MINUTES = 30
+MAX_IDLE_PROCESSES_LIMIT = 100
+IDLE_TIMEOUT_MINUTES_LIMIT = 7 * 24 * 60
+
+
+def _int_setting(value: Any, default: int, limit: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(number, 0), limit)
+
+
+async def grok_process_settings() -> dict[str, int]:
+    """How many idle Grok processes are kept, and for how long."""
+    try:
+        config = await Config.get_namespace("grok")
+    except Exception:  # noqa: BLE001 - the defaults still apply.
+        config = {}
+    return {
+        "max_idle_processes": _int_setting(
+            config.get(MAX_IDLE_PROCESSES_KEY),
+            DEFAULT_MAX_IDLE_PROCESSES,
+            MAX_IDLE_PROCESSES_LIMIT,
+        ),
+        "idle_timeout_minutes": _int_setting(
+            config.get(IDLE_TIMEOUT_MINUTES_KEY),
+            DEFAULT_IDLE_TIMEOUT_MINUTES,
+            IDLE_TIMEOUT_MINUTES_LIMIT,
+        ),
+    }
+
+
+async def save_grok_process_settings(
+    max_idle_processes: int | None = None, idle_timeout_minutes: int | None = None
+) -> dict[str, int]:
+    """Save the limits and apply them to the processes kept now."""
+    updates: dict[str, int] = {}
+    if max_idle_processes is not None:
+        updates[MAX_IDLE_PROCESSES_KEY] = _int_setting(
+            max_idle_processes, DEFAULT_MAX_IDLE_PROCESSES, MAX_IDLE_PROCESSES_LIMIT
+        )
+    if idle_timeout_minutes is not None:
+        updates[IDLE_TIMEOUT_MINUTES_KEY] = _int_setting(
+            idle_timeout_minutes, DEFAULT_IDLE_TIMEOUT_MINUTES, IDLE_TIMEOUT_MINUTES_LIMIT
+        )
+    if updates:
+        await Config.upsert(updates)
+    await _trim_idle()
+    return await grok_process_settings()
 
 
 @dataclass
@@ -456,11 +514,28 @@ async def _close_live(session_id: str, live: _LiveGrok) -> None:
     await live.client.close()
 
 
-async def close_grok_session(session_id: str) -> None:
-    """Stop the Grok process kept for one session, e.g. when its chat is deleted."""
+async def close_grok_session(session_id: str, *, running: bool = True) -> None:
+    """Stop the Grok process kept for one session, e.g. when its chat is deleted.
+
+    With ``running=False`` a process that is serving a turn is left to finish it.
+    """
     live = _live_sessions.get(session_id)
-    if live:
+    if live and (running or not live.lock.locked()):
         await _close_live(session_id, live)
+
+
+def grok_session_ids(chat: Any) -> list[str]:
+    """The Grok sessions a chat has saved for its next turns."""
+    sessions = ((getattr(chat, "meta", None) or {}).get("agent_sessions")) or {}
+    if not isinstance(sessions, dict):
+        return []
+    return [
+        session["session_id"]
+        for session in sessions.values()
+        if isinstance(session, dict)
+        and session.get("agent") == "grok"
+        and isinstance(session.get("session_id"), str)
+    ]
 
 
 async def close_all_grok_sessions() -> None:
@@ -493,7 +568,13 @@ async def _checkout(session_id: str | None, key: tuple[Any, ...]) -> _LiveGrok |
 
 
 async def _trim_idle() -> None:
-    """Close processes idle too long, and the oldest beyond the idle limit."""
+    """Close processes idle too long, and the oldest beyond the idle limit.
+
+    Processes serving a turn are neither closed nor counted.
+    """
+    settings = await grok_process_settings()
+    max_idle = settings["max_idle_processes"]
+    idle_timeout = settings["idle_timeout_minutes"] * 60
     now = time.monotonic()
     idle = sorted(
         (
@@ -505,11 +586,10 @@ async def _trim_idle() -> None:
         reverse=True,
     )
     for index, (session_id, live) in enumerate(idle):
-        if (
-            index >= GROK_MAX_IDLE_PROCESSES
-            or now - live.last_used >= GROK_IDLE_TIMEOUT_SECONDS
-            or not live.alive()
-        ):
+        if live.lock.locked():
+            # A turn took it while an earlier one was closing.
+            continue
+        if index >= max_idle or now - live.last_used >= idle_timeout or not live.alive():
             await _close_live(session_id, live)
 
 
@@ -627,11 +707,14 @@ async def run_grok_agent(
         else:
             context_window = await _apply_session_settings(client, model, chat_params)
             live.settings, live.context_window = settings, context_window
-        if session_id and not reused:
+        # A session Grok can no longer load (e.g. its files were cleaned up) starts over,
+        # so the prompt carries the chat transcript instead.
+        resumed = bool(session_id) and client.session_id == session_id
+        if resumed and not reused:
             await _compact_if_full(client, resume_state, context_window)
         context_tokens: int | None = None
 
-        prompt = turn_prompt_text(messages, system_prompt, resumed=bool(session_id))
+        prompt = turn_prompt_text(messages, system_prompt, resumed=resumed)
 
         images = [
             {"data": image.base64, "mimeType": image.mime_type} for image in attachments.images
@@ -684,7 +767,7 @@ async def run_grok_agent(
                 "model": model,
                 # For a later process that reloads the session; see _compact_if_full.
                 "context_tokens": context_tokens
-                or _positive_int((resume_state or {}).get("context_tokens")),
+                or (_positive_int((resume_state or {}).get("context_tokens")) if resumed else None),
                 "context_window": context_window,
             },
         )
