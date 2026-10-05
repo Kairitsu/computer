@@ -158,6 +158,10 @@ export const getQuota = (period: 'day' | 'week' | 'month' = 'week', refresh = fa
 export const deleteChat = (chatId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}`, { method: 'DELETE' });
 
+/** Stop the agent processes a chat keeps between turns; a running turn still finishes. */
+export const releaseChat = (chatId: string) =>
+	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}/release`, { method: 'POST' }).catch(() => {});
+
 export const updateChatTitle = (chatId: string, title: string) =>
 	fetchJSON<{ ok: boolean; title: string }>(`/api/chats/${chatId}`, {
 		method: 'PATCH',

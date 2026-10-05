@@ -27,6 +27,7 @@ import {
 } from '$lib/apis/state';
 import { listSessions, createSession, deleteSession } from '$lib/apis/terminal';
 import { createBrowserSession, deleteBrowserSession, listBrowserSessions } from '$lib/apis/browser';
+import { releaseChat } from '$lib/apis/chat';
 import { changeLocale, i18next } from '$lib/i18n';
 import { requestConfirm } from '$lib/stores/confirm';
 import { streamingChatTabs } from '$lib/stores/chat';
@@ -1329,6 +1330,25 @@ export function openChatTab(chatId?: string, targetGroupId?: string): void {
 	}));
 }
 
+/**
+ * The user closed a chat tab: stop the agent process the chat keeps between turns,
+ * as closing a terminal or browser tab stops its session. A running turn still
+ * finishes, and the chat's next turn reloads the agent session. Skipped while another
+ * tab still shows the chat.
+ */
+export function releaseClosedChatTab(tab: Tab): void {
+	const chatId = tab.type === 'chat' ? tab.path : undefined;
+	if (!chatId || chatId.startsWith('new-') || chatId.startsWith('pending-')) return;
+	const groups = [...(get(currentWorkspace)?.groups ?? []), ...get(homeState).groups];
+	const stillOpen = groups.some((group) =>
+		group.tabs.some(
+			(other) =>
+				other !== tab && (other.type === 'chat' || other.type === 'home') && other.path === chatId
+		)
+	);
+	if (!stillOpen) releaseChat(chatId);
+}
+
 export async function closeTab(
 	tabId: string,
 	groupId?: string,
@@ -1372,6 +1392,7 @@ export async function closeTab(
 
 	// Clean up streaming indicator for closed chat tabs
 	if (tab.type === 'chat') {
+		releaseClosedChatTab(tab);
 		streamingChatTabs.update((s) => {
 			const n = new Set(s);
 			n.delete(tabId);

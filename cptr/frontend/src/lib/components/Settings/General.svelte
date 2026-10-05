@@ -10,6 +10,12 @@
 	import type { StreamingBehavior } from '$lib/stores';
 	import { t, locale, changeLocale, supportedLocales } from '$lib/i18n';
 	import { session } from '$lib/session';
+	import { toast } from 'svelte-sonner';
+	import {
+		getGrokProcessSettings,
+		updateGrokProcessSettings,
+		type GrokProcessSettings
+	} from '$lib/apis/grok';
 	import ToggleSwitch from '../common/ToggleSwitch.svelte';
 
 	interface Props {
@@ -38,6 +44,30 @@
 
 	let copied = $state(false);
 	let resetting = $state(false);
+	// Server-wide limits for the Grok processes chats keep between turns; admins set them.
+	let processSettings = $state<GrokProcessSettings | null>(null);
+
+	$effect(() => {
+		if ($session?.role !== 'admin' || processSettings) return;
+		getGrokProcessSettings()
+			.then((settings) => (processSettings = settings))
+			.catch(() => {});
+	});
+
+	async function saveProcessSetting(key: keyof GrokProcessSettings, input: HTMLInputElement) {
+		if (!processSettings) return;
+		const value = Number(input.value);
+		if (input.value.trim() && Number.isInteger(value) && value >= 0) {
+			try {
+				processSettings = await updateGrokProcessSettings({ [key]: value });
+				toast.success($t('settings.saved'));
+			} catch {
+				toast.error($t('admin.failedToSave'));
+			}
+		}
+		// Show the value the server kept (it caps very large ones).
+		input.value = String(processSettings[key]);
+	}
 
 	function copyLink() {
 		navigator.clipboard.writeText(REPO_URL);
@@ -166,6 +196,31 @@
 		<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 			{$streamingBehavior === 'queue' ? $t('general.queueDesc') : $t('general.interruptDesc')}
 		</p>
+
+		{#if $session?.role === 'admin' && processSettings}
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+				{$t('general.grokProcesses')}
+			</h3>
+			<div class="flex flex-col gap-2">
+				{#each [{ key: 'max_idle_processes' as const, label: $t('general.maxIdleProcesses'), max: 100 }, { key: 'idle_timeout_minutes' as const, label: $t('general.idleTimeoutMinutes'), max: 10080 }] as field (field.key)}
+					<label class="flex items-center justify-between gap-3">
+						<span class="text-xs text-gray-600 dark:text-gray-400">{field.label}</span>
+						<input
+							type="number"
+							min="0"
+							max={field.max}
+							step="1"
+							value={processSettings[field.key]}
+							onchange={(e) => saveProcessSetting(field.key, e.currentTarget)}
+							class="w-20 h-7 px-2 rounded-lg text-xs text-right bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none transition-colors"
+						/>
+					</label>
+				{/each}
+			</div>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+				{$t('general.grokProcessesDesc')}
+			</p>
+		{/if}
 
 		<div class="pt-5">
 			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">

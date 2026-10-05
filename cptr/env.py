@@ -68,11 +68,6 @@ AGENT_SEED_TRANSCRIPT_MAX_CHARS = max(
 )
 # Claude SDK stdout JSON buffer; chat/tool output caps apply later after parsing.
 CLAUDE_CODE_MAX_BUFFER_SIZE = _env_int("CPTR_CLAUDE_CODE_MAX_BUFFER_SIZE", 128 * 1024 * 1024)
-# Each Grok chat keeps its own `grok agent` process (with its MCP servers) between turns.
-# Idle ones close after this many seconds, and only the most recently used few are kept;
-# 0 closes the process after every turn.
-GROK_IDLE_TIMEOUT_SECONDS = max(0, _env_int("CPTR_GROK_IDLE_TIMEOUT_SECONDS", 30 * 60))
-GROK_MAX_IDLE_PROCESSES = max(0, _env_int("CPTR_GROK_MAX_IDLE_PROCESSES", 2))
 
 # ── Workspace storage ───────────────────────────────────────
 WORKSPACE_AUTO_GITIGNORE_DOT_CPTR_ENV = os.environ.get("CPTR_AUTO_GITIGNORE_DOT_CPTR")

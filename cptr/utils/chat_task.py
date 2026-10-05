@@ -515,6 +515,49 @@ def get_active_chat_ids() -> set[str]:
     return {cid for mid, cid in _task_chat.items() if mid in _tasks and not _tasks[mid].done()}
 
 
+# Chats whose tab was closed during a turn; their agent processes close once it ends.
+_released_chats: set[str] = set()
+
+
+async def _close_chat_agents(chat: Chat | None) -> None:
+    from cptr.utils.agents.grok import close_grok_session, grok_session_ids
+
+    for session_id in grok_session_ids(chat):
+        await close_grok_session(session_id, running=False)
+
+
+async def release_chat_agents(chat_id: str) -> None:
+    """Stop the agent processes a chat keeps between turns, as its tab was closed.
+
+    A running turn finishes first, and its process then closes instead of being kept.
+    The chat's internal children (sub-agents, timers) are released with it. The next
+    turn starts a new process that reloads the agent's saved session.
+    """
+    chat = await Chat.get_by_id(chat_id)
+    if chat is None:
+        return
+    active = get_active_chat_ids()
+    for owner in (chat, *await Chat.get_internal_descendants(chat_id)):
+        if owner.id in active:
+            _released_chats.add(owner.id)
+        else:
+            _released_chats.discard(owner.id)
+            await _close_chat_agents(owner)
+
+
+async def _close_released_chat_agents(chat_id: str, user_id: str) -> None:
+    """Close the processes of a chat whose tab was closed during the turn that just ended."""
+    if chat_id not in _released_chats or chat_id in get_active_chat_ids():
+        return
+    _released_chats.discard(chat_id)
+    from cptr.socket.main import is_chat_visible
+
+    # Reopened while the turn ran: keep the process for the next turn.
+    if is_chat_visible(user_id, chat_id):
+        return
+    await _close_chat_agents(await Chat.get_by_id(chat_id))
+
+
 def _plain_message_text(content) -> str:
     if isinstance(content, list):
         return " ".join(
@@ -3092,6 +3135,10 @@ async def run_chat_task(
                 )
             except Exception:
                 logger.debug("[task %s] active-state emit failed", message_id[:8], exc_info=True)
+        try:
+            await _close_released_chat_agents(chat_id, user_id)
+        except Exception:
+            logger.debug("[task %s] closing released agents failed", message_id[:8], exc_info=True)
         try:
             await export_chat_to_file(request, chat_id)
         except Exception:

@@ -71,3 +71,17 @@ export const removeGrokAccount = (id: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/grok/accounts/${encodeURIComponent(id)}`, {
 		method: 'DELETE'
 	});
+
+/** Idle Grok processes chats keep between turns (Settings → General). */
+export interface GrokProcessSettings {
+	max_idle_processes: number;
+	idle_timeout_minutes: number;
+}
+
+export const getGrokProcessSettings = () => fetchJSON<GrokProcessSettings>('/api/grok/processes');
+
+export const updateGrokProcessSettings = (settings: Partial<GrokProcessSettings>) =>
+	fetchJSON<GrokProcessSettings>('/api/grok/processes', {
+		...jsonBody(settings),
+		method: 'PUT'
+	});

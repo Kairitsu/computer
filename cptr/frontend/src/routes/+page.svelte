@@ -23,7 +23,8 @@
 		moveHomeTabToNewSplit,
 		moveHomeTabToGroup,
 		setHomeSplitRatio,
-		homeChatRequest
+		homeChatRequest,
+		releaseClosedChatTab
 	} from '$lib/stores';
 	import type { Tab, EditorGroup, EditorLayout, SplitDirection, WorkspaceState } from '$lib/stores';
 	import { chatEnabled } from '$lib/stores/chat';
@@ -194,6 +195,7 @@
 		if (!tab || tab.permanent) return;
 		if (tab.type === 'terminal' && tab.sessionId) deleteSession(tab.sessionId);
 		if (tab.type === 'browser' && tab.browserSessionId) deleteBrowserSession(tab.browserSessionId);
+		releaseClosedChatTab(tab);
 		const tabs = group.tabs.filter((item) => item.id !== tabId);
 		const activeTabId =
 			group.activeTabId === tabId
