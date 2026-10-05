@@ -69,6 +69,11 @@
 	const supergrok = $derived(account?.supergrok ?? null);
 	const quota = $derived(isSuperGrokQuota(supergrok) ? supergrok : null);
 	const quotaError = $derived(supergrok && 'error' in supergrok ? supergrok.error : null);
+	/**
+	 * The access token's expiry passes routinely while the CLI keeps refreshing
+	 * it, so only flag it when the quota can't be read with it either.
+	 */
+	const credentialsExpired = $derived(signedIn && !!profile?.expired && !quota);
 	const planName = $derived(supergrok?.plan || (quota ? 'SuperGrok' : 'Grok Build'));
 	const usedPercent = $derived(quota ? Math.min(100, Math.max(0, quota.used_percent)) : null);
 	const products = $derived(
@@ -266,7 +271,7 @@
 						<span class="name">{accountLoading ? 'Grok' : displayName}</span>
 						{#if !accountLoading && !signedIn}
 							<span class="badge">{$t('grokAccount.signedOut')}</span>
-						{:else if profile?.expired}
+						{:else if credentialsExpired}
 							<span class="badge">{$t('grokAccount.expired')}</span>
 						{/if}
 					</div>
