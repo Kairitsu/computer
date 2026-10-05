@@ -59,6 +59,7 @@ export interface Tab {
 	filePath?: string;
 	edit?: boolean;
 	path?: string; // generic path (e.g. for chat)
+	workspace?: string; // Home chat tabs: the workspace the chat was started in
 	unsaved?: boolean;
 	permanent?: boolean;
 	badge?: number;
@@ -657,20 +658,29 @@ export async function loadPreferences(): Promise<void> {
 					]
 				};
 			}
-			// Start every session on a fresh chat in the Home slot.
-			const homeGroupId =
-				groups.find((group) => group.tabs.some((tab) => tab.type === 'home'))?.id ?? groups[0].id;
-			groups = groups.map((group) =>
-				group.id === homeGroupId
-					? {
-							...group,
-							activeTabId: 'home',
-							tabs: group.tabs.map((tab) =>
-								tab.type === 'home' ? { ...tab, path: undefined, label: 'New Chat' } : tab
-							)
-						}
-					: group
-			);
+			// Start every session on the Home tab's new chat. Only one Home tab is kept;
+			// copies made by older splits become ordinary chat tabs.
+			const homeGroup =
+				groups.find((group) => group.tabs.some((tab) => tab.type === 'home')) ?? groups[0];
+			const homeGroupId = homeGroup.id;
+			const homeTabId = homeGroup.tabs.find((tab) => tab.type === 'home')?.id;
+			groups = groups.map((group) => ({
+				...group,
+				activeTabId: group.id === homeGroupId && homeTabId ? homeTabId : group.activeTabId,
+				tabs: group.tabs.map(
+					(tab): Tab =>
+						tab.id === homeTabId
+							? { id: tab.id, type: 'home', label: 'New Chat', permanent: true }
+							: tab.type === 'home'
+								? {
+										...tab,
+										type: 'chat',
+										permanent: false,
+										path: tab.path ?? `new-${Date.now()}`
+									}
+								: tab
+				)
+			}));
 			homeState.set({
 				groups,
 				activeGroupId: homeGroupId,
@@ -1441,7 +1451,11 @@ export function splitHomeTab(direction?: SplitDirection): void {
 		const tab = group?.tabs.find((item) => item.id === group.activeTabId);
 		if (!group || !tab) return state;
 		const dir = direction ?? state.splitDirection;
-		const newTab: Tab = { ...tab, id: nextId(), permanent: false };
+		// There is only one Home tab, so splitting it opens a new chat instead.
+		const newTab: Tab =
+			tab.type === 'home'
+				? { id: nextId(), type: 'chat', label: 'New Chat', path: `new-${Date.now()}` }
+				: { ...tab, id: nextId(), permanent: false };
 		const newGroup: EditorGroup = { id: nextId(), tabs: [newTab], activeTabId: newTab.id };
 		return {
 			...state,
