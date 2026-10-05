@@ -51,7 +51,7 @@
 		];
 		if (isAdmin) tabs.push({ id: 'agents', label: tr('admin.agents'), icon: 'terminal' });
 		tabs.push(
-			{ id: 'keyboard', label: tr('settings.keyboard'), icon: 'terminal' },
+			{ id: 'keyboard', label: tr('settings.keyboard'), icon: 'keyboard' },
 			{ id: 'account', label: tr('settings.account'), icon: 'user' }
 		);
 		if (showPwaSettings) tabs.push({ id: 'pwa', label: 'PWA', icon: 'phone' });

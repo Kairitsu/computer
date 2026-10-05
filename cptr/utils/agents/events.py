@@ -70,6 +70,18 @@ class AgentContextUsage:
 
 
 @dataclass
+class AgentTurnStarted:
+    """The agent is about to send this turn's prompt into its session.
+
+    ``prompt_index`` is the prompt's position in the session (Grok's rewind point), so
+    the turn can later be rewound out of the agent's history.
+    """
+
+    session_id: str
+    prompt_index: int | None = None
+
+
+@dataclass
 class AgentDone:
     usage: dict[str, Any] | None = None
     resume_state: dict[str, Any] | None = None
@@ -88,6 +100,7 @@ AgentEvent = (
     | AgentAskUser
     | AgentPermissionRequest
     | AgentContextUsage
+    | AgentTurnStarted
     | AgentDone
     | AgentError
 )

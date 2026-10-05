@@ -6,6 +6,7 @@
 		resolveToolCall,
 		answerAskUser,
 		cancelTask,
+		retractMessage,
 		updateCurrentMessage,
 		updateMessage,
 		createMessage,
@@ -432,6 +433,12 @@
 
 		if (data.type === 'chat:tasks') {
 			setChatTasks(data.tasks ?? []);
+			return;
+		}
+
+		if (data.type === 'chat:reload') {
+			// Messages were removed elsewhere (e.g. retracted for editing in another tab).
+			loadChat(data.chat_id);
 			return;
 		}
 
@@ -1107,6 +1114,67 @@
 		}
 	}
 
+	/** Composer text for a sent message: file links become mention chips again. */
+	function composerText(content: string): string {
+		return content.replace(
+			/\[([^\]]+)\]\(file:\/\/([^)]+)\)/g,
+			(_: string, label: string, path: string) => `[@ id="${path}" label="${label}"]`
+		);
+	}
+
+	/**
+	 * Edit a user message in the composer. While its reply is still running, the reply
+	 * is stopped and both are taken back (also from the agent's memory); otherwise the
+	 * message stays and the edited text is sent as a new message.
+	 */
+	async function handleEditUserMessage(messageId: string) {
+		const msg = allMessages.find((m) => m.id === messageId);
+		if (!msg || !chatId) return;
+		const runningReply = allMessages.find(
+			(m) => m.role === 'assistant' && !m.done && m.parent_id === msg.id
+		);
+		let text = composerText(msg.content);
+		let result: Awaited<ReturnType<typeof retractMessage>> | null = null;
+		if (runningReply) {
+			// The stopped turn's `done` event needs no reload; the messages are gone.
+			cancelledMessageId = runningReply.id;
+			try {
+				result = await retractMessage(chatId, msg.id);
+			} catch (err: any) {
+				cancelledMessageId = null;
+				// 409: the reply finished meanwhile, so edit it like a finished one.
+				if (err?.status !== 409) {
+					toast.error(err?.message || $t('chat.retractFailed'));
+					await loadChat(chatId);
+					return;
+				}
+			}
+		}
+		if (result) {
+			const removed = new Set([msg.id]);
+			let grew = true;
+			while (grew) {
+				grew = false;
+				for (const m of allMessages) {
+					if (m.parent_id && removed.has(m.parent_id) && !removed.has(m.id)) {
+						removed.add(m.id);
+						grew = true;
+					}
+				}
+			}
+			allMessages = allMessages.filter((m) => !removed.has(m.id));
+			currentMessageId = result.parent_id;
+			if (result.queued.length) {
+				text = [text, ...result.queued.map(composerText)].join('\n\n');
+			}
+		}
+		inputText = text;
+		chatInputEl?.setUploads(Array.isArray(msg.meta?.files) ? msg.meta.files : []);
+		await tick();
+		chatInputEl?.focus();
+	}
+
+	/** Assistant message edits: save in place, or save as a copy (a sibling, no LLM). */
 	async function handleEditMessage(
 		messageId: string,
 		content: string,
@@ -1117,51 +1185,16 @@
 		if (!msg || !chatId) return;
 
 		if (!submit) {
-			// Save in-place
-			const updates: { content?: string; output?: any[] } = {};
-			if (msg.role === 'user') {
-				updates.content = content;
-			} else {
-				updates.content = content;
-				if (output) updates.output = output;
-			}
-			await updateMessage(chatId, messageId, updates);
+			await updateMessage(chatId, messageId, output ? { content, output } : { content });
 			await loadChat(chatId);
 			return;
 		}
 
-		if (msg.role === 'user') {
-			// Send: create new sibling user message + trigger LLM
-			try {
-				const result = await apiSendMessage(
-					content,
-					selectedModel,
-					workspace,
-					chatId,
-					msg.parent_id,
-					getChatSendParams()
-				);
-				if (result.user_message && result.assistant_message) {
-					allMessages = [...allMessages, result.user_message, result.assistant_message];
-					currentMessageId = result.message_id;
-				}
-			} catch (e) {
-				console.error('[chat] edit-send error', e);
-			}
-		} else {
-			// Save As Copy: create new sibling assistant message (no LLM)
-			try {
-				await createMessage(
-					chatId,
-					msg.parent_id ?? null,
-					'assistant',
-					content,
-					output ?? undefined
-				);
-				await loadChat(chatId);
-			} catch (e) {
-				console.error('[chat] save-as-copy error', e);
-			}
+		try {
+			await createMessage(chatId, msg.parent_id ?? null, 'assistant', content, output ?? undefined);
+			await loadChat(chatId);
+		} catch (e) {
+			console.error('[chat] save-as-copy error', e);
 		}
 	}
 
@@ -1309,7 +1342,9 @@
 								{siblingIndex}
 								siblingTotal={siblingIds.length}
 								onnavigate={(dir) => handleNavigate(msg.id, dir)}
-								onedit={(c, submit) => handleEditMessage(msg.id, c, null, submit)}
+								onedit={msg.id.startsWith('temp-')
+									? undefined
+									: () => handleEditUserMessage(msg.id)}
 							/>
 						{:else}
 							<AssistantMessage

@@ -396,10 +396,19 @@ async def acp_permission_events(
 
 
 def acp_text_from_update(params: dict[str, Any]) -> str | None:
+    return _chunk_text(params, "agent_message_chunk")
+
+
+def acp_thought_from_update(params: dict[str, Any]) -> str | None:
+    """Text of an `agent_thought_chunk`: the agent's reasoning, streamed as it thinks."""
+    return _chunk_text(params, "agent_thought_chunk")
+
+
+def _chunk_text(params: dict[str, Any], kind: str) -> str | None:
     update = params.get("update")
     if not isinstance(update, dict):
         return None
-    if update.get("sessionUpdate") != "agent_message_chunk":
+    if update.get("sessionUpdate") != kind:
         return None
     content = update.get("content")
     if isinstance(content, dict) and content.get("type") == "text":

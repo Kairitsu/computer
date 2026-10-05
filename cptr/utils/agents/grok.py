@@ -17,6 +17,7 @@ from cptr.utils.agents.acp import (
     acp_event_stream,
     acp_permission_events,
     acp_text_from_update,
+    acp_thought_from_update,
     acp_tool_from_update,
 )
 from cptr.utils.agents.events import (
@@ -25,8 +26,10 @@ from cptr.utils.agents.events import (
     AgentDone,
     AgentError,
     AgentEvent,
+    AgentReasoningDelta,
     AgentTextDelta,
     AgentToolUpdate,
+    AgentTurnStarted,
 )
 from cptr.utils.agents.prompts import turn_prompt_text
 from cptr.utils.identity import env_for, preexec_for
@@ -39,6 +42,10 @@ XAI_EXTENSION_REQUESTS = XAI_ASK_USER_QUESTION_METHODS | XAI_EXIT_PLAN_MODE_METH
 # Carries Grok's per-model-call usage and auto-compaction progress.
 XAI_SESSION_NOTIFICATIONS = frozenset({"_x.ai/session_notification", "x.ai/session_notification"})
 XAI_COMPACT_METHOD = "_x.ai/compact_conversation"
+# Rewind points are one per prompt, numbered from 0; rewinding to a point drops that
+# prompt and everything after it from Grok's history. Files are left as they are.
+XAI_REWIND_POINTS_METHOD = "_x.ai/rewind/points"
+XAI_REWIND_EXECUTE_METHOD = "_x.ai/rewind/execute"
 # Carries Grok's model catalog (same shape as session/new's `models`).
 XAI_MODELS_UPDATE_METHODS = frozenset({"_x.ai/models/update", "x.ai/models/update"})
 # How long session setup waits for Grok to push its model catalog.
@@ -643,6 +650,44 @@ async def _compact_if_full(
             await client.request(XAI_COMPACT_METHOD, {"sessionId": client.session_id})
 
 
+async def _next_prompt_index(client: AcpClient) -> int | None:
+    """The rewind point the next prompt will get: one per earlier prompt."""
+    try:
+        result = await client.request(XAI_REWIND_POINTS_METHOD, {"sessionId": client.session_id})
+    except Exception:
+        return None
+    points = result.get("rewind_points")
+    return len(points) if isinstance(points, list) else None
+
+
+async def _rewind_retracted_turn(client: AcpClient, resume_state: dict[str, Any] | None) -> bool:
+    """Drop a turn the user took back (see the chat retract endpoint) from Grok's history.
+
+    Returns True when Grok rewound the session.
+    """
+    rewind = (resume_state or {}).get("rewind")
+    if not isinstance(rewind, dict) or rewind.get("session_id") != client.session_id:
+        return False
+    index = rewind.get("prompt_index")
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        return False
+    try:
+        result = await client.request(
+            XAI_REWIND_EXECUTE_METHOD,
+            {
+                "sessionId": client.session_id,
+                "targetPromptIndex": index,
+                "mode": "conversation_only",
+                # Without it Grok only reports what a rewind would do.
+                "force": True,
+            },
+        )
+    except Exception:
+        # E.g. the prompt never reached Grok, so there is nothing to drop.
+        return False
+    return result.get("success") is True
+
+
 async def run_grok_agent(
     *,
     profile: dict[str, Any],
@@ -710,7 +755,9 @@ async def run_grok_agent(
         # A session Grok can no longer load (e.g. its files were cleaned up) starts over,
         # so the prompt carries the chat transcript instead.
         resumed = bool(session_id) and client.session_id == session_id
-        if resumed and not reused:
+        rewound = resumed and await _rewind_retracted_turn(client, resume_state)
+        if resumed and not reused and not rewound:
+            # After a rewind the stored context size no longer holds.
             await _compact_if_full(client, resume_state, context_window)
         context_tokens: int | None = None
 
@@ -719,6 +766,10 @@ async def run_grok_agent(
         images = [
             {"data": image.base64, "mimeType": image.mime_type} for image in attachments.images
         ]
+        if client.session_id:
+            yield AgentTurnStarted(
+                session_id=client.session_id, prompt_index=await _next_prompt_index(client)
+            )
         prompt_task = asyncio.create_task(client.prompt(prompt, images=images))
         try:
             async for event in acp_event_stream(client, prompt_task):
@@ -743,6 +794,10 @@ async def run_grok_agent(
                 text = acp_text_from_update(params)
                 if text:
                     yield AgentTextDelta(text)
+                # Subagents stream their reasoning on the same pipe; show only this session's.
+                thought = acp_thought_from_update(params)
+                if thought and params.get("sessionId") in (None, client.session_id):
+                    yield AgentReasoningDelta(thought)
                 tool = acp_tool_from_update(params)
                 if tool:
                     yield AgentToolUpdate(**tool)

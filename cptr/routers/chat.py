@@ -18,7 +18,7 @@ from cptr.models import Chat, ChatMessage, Config, is_internal_chat
 from cptr.utils.config import check_access, now_ms
 from cptr.utils.db import get_db
 from cptr.utils.chat_export import chat_directory
-from cptr.utils.runtime import Runtime, FileError
+from cptr.utils.runtime import Runtime
 
 log = logging.getLogger(__name__)
 
@@ -890,56 +890,15 @@ async def update_chat_settings(request: Request, chat_id: str, body: UpdateChatS
 
 @router.delete("/{chat_id}")
 async def delete_chat(request: Request, chat_id: str):
-    """Delete a chat and all its messages."""
+    """Delete a chat with its messages, files, uploads and agent sessions."""
     user_id = _get_user(request)
     chat = await Chat.get_by_id(chat_id)
     if not chat or chat.user_id != user_id:
         raise HTTPException(404, "chat not found")
 
-    # Remove the workspace chat file and durable internal children.
-    workspace = chat.meta.get("workspace") if chat.meta else None
-    chat_file = chat_directory(workspace) / f"{chat_id}.json"
-    if workspace:
-        try:
-            await Runtime.delete_item(request, str(chat_file))
-        except FileError:
-            pass
-    else:
-        await asyncio.to_thread(chat_file.unlink, True)  # missing_ok=True
-    children = await Chat.get_internal_descendants(chat_id)
-    for child in children:
-        child_workspace = (child.meta or {}).get("workspace")
-        child_file = chat_directory(child_workspace) / f"{child.id}.json"
-        if child_workspace:
-            try:
-                await Runtime.delete_item(request, str(child_file))
-            except FileError:
-                pass
-        else:
-            await asyncio.to_thread(child_file.unlink, True)
+    from cptr.utils.chat_retention import purge_chat
 
-    # Stop the Grok processes these chats kept between turns.
-    from cptr.utils.agents.grok import close_grok_session, grok_session_ids
-
-    for owner in (chat, *children):
-        for session_id in grok_session_ids(owner):
-            await close_grok_session(session_id)
-
-    await Chat.delete(chat_id)
-    from cptr.socket.main import emit_to_user
-    from cptr.utils.chat_task import get_active_chat_ids
-
-    unread_counts = await Chat.unread_counts_by_workspace(
-        user_id, [workspace or ""], get_active_chat_ids()
-    )
-    await emit_to_user(
-        user_id,
-        {
-            "chat_id": chat_id,
-            "workspace": workspace or "",
-            "workspace_unread_count": unread_counts.get(workspace or "", 0),
-        },
-    )
+    await purge_chat(request, chat)
     return {"ok": True}
 
 
@@ -997,6 +956,9 @@ async def fork_chat(request: Request, chat_id: str, body: ForkChatRequest | None
     branch.reverse()
 
     meta = deepcopy(chat.meta or {})
+    # The fork starts its own agent sessions (seeded with the copied transcript) so its
+    # turns, rewinds and deletion never touch the original chat's sessions.
+    meta.pop("agent_sessions", None)
     meta["forked_from"] = chat.id
     meta["forked_from_message_id"] = source_message.id
     now = now_ms()
@@ -1072,7 +1034,7 @@ async def send_message(request: Request, body: SendMessageRequest):
         if chat.meta.get("params") != body.params or chat.meta.get("last_model") != body.model_id:
             chat.meta["params"] = body.params
             chat.meta["last_model"] = body.model_id
-            await Chat.update_meta(chat.id, chat.meta)
+            await Chat.update_meta(chat.id, chat.meta, now_ms())
     else:
         workspace = body.workspace or None
         title = body.content[:50].strip() or "New Chat"
@@ -1373,6 +1335,116 @@ async def cancel_task_endpoint(request: Request, chat_id: str, message_id: str):
     await process_pending_chat_inputs(request, chat_id, user_id, workspace)
 
     return {"ok": True}
+
+
+# ── Retract a message whose reply is running ───────────────
+
+
+def _descendants(messages: list[ChatMessage], message_id: str) -> list[ChatMessage]:
+    children: dict[str, list[ChatMessage]] = {}
+    for message in messages:
+        if message.parent_id:
+            children.setdefault(message.parent_id, []).append(message)
+    found: list[ChatMessage] = []
+    pending = list(children.get(message_id, []))
+    while pending:
+        message = pending.pop()
+        found.append(message)
+        pending.extend(children.get(message.id, []))
+    return found
+
+
+@router.post("/{chat_id}/messages/{message_id}/retract")
+async def retract_message(request: Request, chat_id: str, message_id: str):
+    """Take back a user message while its reply is running, to edit and send it again.
+
+    Stops the reply, deletes the message with everything below it (the partial reply
+    and queued follow-ups), and has the agent drop the turn from its own history before
+    the chat's next turn. Uploaded files are kept so the composer can attach them again.
+    Returns the parent to show as the current message and the queued follow-up texts.
+    """
+    user_id = _get_user(request)
+    chat = await Chat.get_by_id(chat_id)
+    if not chat or chat.user_id != user_id:
+        raise HTTPException(404, "chat not found")
+
+    from cptr.socket.main import emit_to_user
+    from cptr.utils.chat_export import export_chat_to_file
+    from cptr.utils.chat_task import cancel_task, get_pending_input_lock, wait_task
+
+    lock = get_pending_input_lock(chat_id)
+    async with lock:
+        messages = await ChatMessage.get_all_by_chat(chat_id)
+        target = next((m for m in messages if m.id == message_id), None)
+        if not target or target.role != "user" or (target.meta or {}).get("queued"):
+            raise HTTPException(404, "message not found")
+        below = _descendants(messages, message_id)
+        if not any(
+            m.role == "assistant" and not m.done and m.parent_id == message_id for m in below
+        ):
+            raise HTTPException(409, "the reply to this message has already finished")
+        # Delete queued follow-ups first, so the stopped turn doesn't start them.
+        queued = sorted(
+            (m for m in below if m.role == "user" and (m.meta or {}).get("queued")),
+            key=lambda m: m.created_at,
+        )
+        for message in queued:
+            await ChatMessage.delete(message.id)
+
+    # Outside the lock: a stopping turn takes it to process queued input.
+    running = [m for m in below if m.role == "assistant" and not m.done]
+    for message in running:
+        await cancel_task(message.id)
+    for message in running:
+        await wait_task(message.id)
+
+    async with lock:
+        messages = await ChatMessage.get_all_by_chat(chat_id)
+        below = _descendants(messages, message_id)
+        turns = []
+        for message in below:
+            turn = (message.meta or {}).get("agent_turn") if message.role == "assistant" else None
+            if isinstance(turn, dict) and isinstance(turn.get("prompt_index"), int):
+                turns.append(turn)
+        for message in [*below, target]:
+            await ChatMessage.delete(message.id)
+        await Chat.update_current_message(chat_id, target.parent_id, now_ms())
+
+        # Rewind the agent session before its next turn (see run_grok_agent). Only the
+        # session the chat resumes matters; a turn sent to a new session is dropped with it.
+        chat = await Chat.get_by_id(chat_id)
+        meta = dict((chat.meta if chat else None) or {})
+        sessions = dict(meta.get("agent_sessions") or {})
+        for turn in turns:
+            entry = sessions.get(turn.get("profile_id"))
+            if not isinstance(entry, dict) or entry.get("session_id") != turn.get("session_id"):
+                continue
+            pending = entry.get("rewind")
+            if (
+                isinstance(pending, dict)
+                and pending.get("session_id") == turn["session_id"]
+                and isinstance(pending.get("prompt_index"), int)
+                and pending["prompt_index"] <= turn["prompt_index"]
+            ):
+                continue
+            sessions[turn["profile_id"]] = {
+                **entry,
+                "rewind": {"session_id": turn["session_id"], "prompt_index": turn["prompt_index"]},
+            }
+        if sessions != (meta.get("agent_sessions") or {}):
+            meta["agent_sessions"] = sessions
+            await Chat.update_meta(chat_id, meta, now_ms())
+
+    try:
+        await export_chat_to_file(request, chat_id)
+    except Exception:
+        log.exception("Failed to export chat %s", chat_id)
+    await emit_to_user(user_id, {"type": "chat:reload", "chat_id": chat_id})
+    return {
+        "ok": True,
+        "parent_id": target.parent_id,
+        "queued": [m.content for m in queued if m.content.strip()],
+    }
 
 
 # ── Update current branch pointer ──────────────────────────

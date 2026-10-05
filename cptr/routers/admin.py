@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+import asyncio
+
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
@@ -10,6 +12,14 @@ from cptr.models import Config
 from cptr.utils.config import AuthResult, check_access
 from cptr.utils.agents.detection import get_agent_status, invalidate_agent_detection_cache
 from cptr.utils.agents.models import save_agent_profiles
+from cptr.utils.chat_retention import (
+    CONFIG_KEY_RETENTION_DAYS,
+    MAX_RETENTION_DAYS,
+    expired_chats,
+    parse_retention_days,
+    retention_days,
+    sweep_expired_chats,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -49,6 +59,46 @@ async def put_config(request: Request, body: ConfigUpdateRequest):
     require_admin(request)
     await Config.upsert(body.config)
     return {"ok": True}
+
+
+# ── Chat history retention ──────────────────────────────────
+
+
+class ChatRetentionRequest(BaseModel):
+    days: int
+
+
+_retention_sweeps: set[asyncio.Task] = set()
+
+
+@router.get("/chat-retention")
+async def get_chat_retention(request: Request):
+    """Days of inactivity after which a chat is deleted; 0 keeps chats forever."""
+    require_admin(request)
+    return {"days": await retention_days(), "max_days": MAX_RETENTION_DAYS}
+
+
+@router.get("/chat-retention/preview")
+async def preview_chat_retention(
+    request: Request, days: int = Query(..., ge=0, le=MAX_RETENTION_DAYS)
+):
+    """How many chats a limit of ``days`` would delete right now."""
+    require_admin(request)
+    return {"count": len(await expired_chats(days))}
+
+
+@router.put("/chat-retention")
+async def put_chat_retention(request: Request, body: ChatRetentionRequest):
+    """Save the limit and delete the chats it puts out of range."""
+    require_admin(request)
+    days = parse_retention_days(body.days)
+    if days is None:
+        raise HTTPException(422, f"days must be between 0 and {MAX_RETENTION_DAYS}")
+    await Config.upsert({CONFIG_KEY_RETENTION_DAYS: days})
+    task = asyncio.create_task(sweep_expired_chats(request.app))
+    _retention_sweeps.add(task)
+    task.add_done_callback(_retention_sweeps.discard)
+    return {"days": days, "max_days": MAX_RETENTION_DAYS}
 
 
 # ── Agents ──────────────────────────────────────────────────

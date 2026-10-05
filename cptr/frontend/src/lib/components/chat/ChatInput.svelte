@@ -544,7 +544,8 @@
 			if (inputText === '') {
 				editor.commands.clearContent();
 			} else {
-				editor.commands.setContent(inputText);
+				// Markdown, like the initial content: keeps line breaks and file mentions.
+				editor.commands.setContent(inputText, { contentType: 'markdown' });
 			}
 		}
 	});
@@ -563,6 +564,13 @@
 
 	export function clearUploads() {
 		attachedUploads = [];
+	}
+
+	/** Attach files that were already uploaded, e.g. those of a message being edited. */
+	export function setUploads(files: { id: string; name: string; url: string; type: string }[]) {
+		attachedUploads = files
+			.filter((file) => file?.id)
+			.map(({ id, name, url, type }) => ({ id, name, url, type }));
 	}
 
 	function getSlashCommandIds(query: string) {

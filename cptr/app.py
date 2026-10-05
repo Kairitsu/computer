@@ -62,14 +62,20 @@ async def lifespan(app: FastAPI):
 
     app.state.scheduler_task = asyncio.create_task(scheduler_worker_loop(app))
 
+    # Delete chats past the history limit (Settings → General).
+    from cptr.utils.chat_retention import retention_loop
+
+    app.state.retention_task = asyncio.create_task(retention_loop(app))
+
     try:
         yield
     finally:
-        scheduler_task = getattr(app.state, "scheduler_task", None)
-        if scheduler_task:
-            scheduler_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await scheduler_task
+        for name in ("scheduler_task", "retention_task"):
+            task = getattr(app.state, name, None)
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
         # Stop the Grok processes chats keep between turns.
         try:
