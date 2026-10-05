@@ -39,29 +39,6 @@ def internal_status(meta: dict | None) -> str | None:
     return meta.get("status") or meta.get("timer_status")
 
 
-def is_subagent_result_message(meta: dict | None) -> bool:
-    """Whether a parent-chat message carries a subagent result."""
-    meta = meta or {}
-    return bool(
-        (meta.get("internal") is True and meta.get("type") == "subagent")
-        or meta.get("async_subagent_result")
-        or meta.get("async_subagent_pending")
-    )
-
-
-def is_pending_subagent_result_message(meta: dict | None) -> bool:
-    """Whether a subagent result is queued behind active parent work."""
-    meta = meta or {}
-    return bool(
-        (
-            meta.get("internal") is True
-            and meta.get("type") == "subagent"
-            and meta.get("status") == "pending"
-        )
-        or meta.get("async_subagent_pending")
-    )
-
-
 class Chat(Base):
     """A chat conversation. Workspace association lives in the filesystem."""
 
@@ -93,49 +70,6 @@ class Chat(Base):
         async with await get_db() as db:
             result = await db.execute(select(Chat).where(Chat.id.in_(chat_ids)))
             return list(result.scalars().all())
-
-    @staticmethod
-    async def get_due_timers(now_ns: int, limit: int = 10) -> list[Chat]:
-        """Return pending internal timer chats whose due time has arrived."""
-        async with await get_db() as db:
-            result = await db.execute(select(Chat).where(Chat.meta.is_not(None)))
-            timers = [
-                chat
-                for chat in result.scalars().all()
-                if (chat.meta or {}).get("internal") is True
-                and (chat.meta or {}).get("type") == "timer"
-                and internal_status(chat.meta) == "pending"
-                and int((chat.meta or {}).get("timer_at") or 0) <= now_ns
-            ]
-            timers.sort(key=lambda chat: int((chat.meta or {}).get("timer_at") or 0))
-            return timers[:limit]
-
-    @staticmethod
-    async def get_pending_timers(parent_chat_id: str) -> list[Chat]:
-        """Return pending timer children for a parent chat."""
-        async with await get_db() as db:
-            result = await db.execute(select(Chat).where(Chat.meta.is_not(None)))
-            return [
-                chat
-                for chat in result.scalars().all()
-                if (chat.meta or {}).get("internal") is True
-                and (chat.meta or {}).get("type") == "timer"
-                and (chat.meta or {}).get("parent_chat_id") == parent_chat_id
-                and internal_status(chat.meta) == "pending"
-            ]
-
-    @staticmethod
-    async def get_timers(status: str | None = None) -> list[Chat]:
-        """Return internal timer chats, optionally in one lifecycle state."""
-        async with await get_db() as db:
-            result = await db.execute(select(Chat).where(Chat.meta.is_not(None)))
-            return [
-                chat
-                for chat in result.scalars().all()
-                if (chat.meta or {}).get("internal") is True
-                and (chat.meta or {}).get("type") == "timer"
-                and (status is None or internal_status(chat.meta) == status)
-            ]
 
     @staticmethod
     async def get_internal_descendants(parent_chat_id: str) -> list[Chat]:

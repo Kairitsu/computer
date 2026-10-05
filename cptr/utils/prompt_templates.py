@@ -15,7 +15,6 @@ from fastapi import Request
 from cptr.models import Config
 from cptr.utils.identity import identity_for_user_id
 from cptr.utils.runtime import Runtime, FileError
-from cptr.utils.skills import build_catalog_xml, discover_skills
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,7 @@ DEFAULT_SYSTEM_PROMPT = (
     " Approach hard requests with initiative and persistence: make the best possible "
     "attempt, adapt as needed, and keep going unless a real constraint prevents progress."
     "\n\n{{CPTR_CONTEXT}}"
-    "\n\n{{MEMORY}}"
     "\n\n{{INSTRUCTIONS}}"
-    "\n\n{{SKILLS}}"
     "\n\nWorkspace: {{WORKSPACE_NAME}}"
     "\nFiles:\n{{FILE_TREE}}"
 )
@@ -41,8 +38,6 @@ HOME_SYSTEM_PROMPT = (
     "You are Computer (cptr), a helpful assistant in the user's computer interface. "
     "This is a general chat with no workspace open. Use the available tools directly and "
     "ask the user to open a workspace for project files or commands."
-    "\n\n{{MEMORY}}"
-    "\n\n{{SKILLS}}"
 )
 
 
@@ -253,8 +248,6 @@ def _render_system_template(template: str, variables: dict[str, str]) -> str:
 def _build_template_variables(
     workspace: str,
     model: str = "",
-    memory: str = "",
-    skills_enabled: bool = True,
     home: str | None = None,
     shell: str | None = None,
 ) -> dict[str, str]:
@@ -269,21 +262,16 @@ def _build_template_variables(
         instructions_block = (
             f"<instructions>\n{instructions}\n</instructions>"
             "\n\nThe above <instructions> were loaded from instruction files in the workspace root. "
-            "These files persist across sessions and are user-authored workspace instructions. "
-            "Managed memory is shown separately when available."
+            "These files persist across sessions and are user-authored workspace instructions."
         )
     else:
         instructions_block = ""
-
-    skills_block = build_catalog_xml(discover_skills(workspace)) if skills_enabled else ""
 
     return {
         "WORKSPACE_NAME": _workspace_name(ws_path),
         "WORKSPACE_PATH": str(ws_path) if ws_path else "",
         "FILE_TREE": _get_file_tree(workspace) if workspace else "",
         "INSTRUCTIONS": instructions_block,
-        "MEMORY": memory,
-        "SKILLS": skills_block,
         "CPTR_CONTEXT": _format_cptr_context(workspace, model, home, shell) if workspace else "",
         "RUNTIME_ENV": _runtime_label(),
         "HOSTNAME": _safe_hostname(),
@@ -303,9 +291,6 @@ async def load_system_prompt(
     workspace: str,
     model: str = "",
     user_id: str | None = None,
-    current_message: str = "",
-    recent_messages: list[dict] | None = None,
-    mentioned_files: list[str] | None = None,
 ) -> str:
     """Load and render the system prompt for a workspace/model.
 
@@ -350,30 +335,6 @@ async def load_system_prompt(
     if template is None:
         template = DEFAULT_SYSTEM_PROMPT if workspace else HOME_SYSTEM_PROMPT
 
-    memory = ""
-    if user_id:
-        try:
-            from cptr.utils.memory import build_memory_prompt
-
-            memory = await build_memory_prompt(
-                request,
-                user_id,
-                workspace,
-                current_message=current_message,
-                recent_messages=recent_messages or [],
-                mentioned_files=mentioned_files or [],
-            )
-        except Exception:
-            logger.debug("[memory] Failed to load managed memory", exc_info=True)
-
-    if memory and "{{MEMORY}}" not in template:
-        template = template.rstrip() + "\n\n{{MEMORY}}"
-
-    try:
-        skills_enabled = (await Config.get("skills.enabled")) not in (False, "false", "0")
-    except Exception:
-        skills_enabled = True
-
     home = None
     shell = None
     if user_id:
@@ -384,5 +345,5 @@ async def load_system_prompt(
         except Exception:
             logger.debug("[system_prompt] Failed to resolve user identity", exc_info=True)
 
-    variables = _build_template_variables(workspace, model, memory, skills_enabled, home, shell)
+    variables = _build_template_variables(workspace, model, home, shell)
     return _render_system_template(template, variables)

@@ -54,26 +54,6 @@
 	let editedContent = $state('');
 	let copied = $state(false);
 	let textareaEl: HTMLTextAreaElement;
-	let asyncExpanded = $state(false);
-	let timerExpanded = $state(false);
-	const isAsyncSubagentResult = $derived(
-		(meta?.internal === true && meta?.type === 'subagent') || meta?.async_subagent_result === true
-	);
-	const isTimer = $derived(meta?.internal === true && meta?.type === 'timer');
-	const delegationId = $derived(meta?.delegation_id || '');
-	const delegationIds = $derived(Array.isArray(meta?.delegation_ids) ? meta.delegation_ids : []);
-	const delegationLabel = $derived(
-		delegationId || (delegationIds.length > 1 ? `${delegationIds.length} tasks` : '')
-	);
-	const asyncSummary = $derived.by(() => {
-		const line = content
-			.split('\n')
-			.map((s) => s.trim())
-			.find((s) => s && !s.startsWith('['));
-		if (!line) return delegationLabel || '';
-		return line.length > 96 ? `${line.slice(0, 96)}...` : line;
-	});
-
 	async function startEdit() {
 		edit = true;
 		editedContent = content;
@@ -126,68 +106,7 @@
 </script>
 
 <div class="group">
-	{#if isTimer}
-		<div class="w-full min-w-0">
-			<button
-				type="button"
-				class="w-full min-w-0 flex items-center gap-2 text-left text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-				aria-expanded={timerExpanded}
-				onclick={() => (timerExpanded = !timerExpanded)}
-			>
-				<span class="text-[0.75rem] font-medium shrink-0">{$t('chat.timer')}</span>
-				<span class="text-[0.75rem] truncate min-w-0 flex-1">{content}</span>
-				<Icon
-					name="chevron-down"
-					size={12}
-					class="text-gray-400 dark:text-gray-600 shrink-0 transition-transform duration-150 {timerExpanded
-						? 'rotate-180'
-						: ''}"
-				/>
-			</button>
-			{#if timerExpanded}
-				<div
-					class="mt-2 ml-3 border-l border-gray-100 dark:border-white/8 pl-3 text-[0.78125rem] leading-relaxed text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words"
-				>
-					{content}
-				</div>
-			{/if}
-		</div>
-	{:else if isAsyncSubagentResult}
-		<div class="w-full min-w-0">
-			<button
-				type="button"
-				class="w-full min-w-0 flex items-center gap-2 text-left text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-				aria-expanded={asyncExpanded}
-				onclick={() => (asyncExpanded = !asyncExpanded)}
-			>
-				<span class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 shrink-0"></span>
-				<span class="text-[0.75rem] font-medium shrink-0">{$t('chat.asyncSubagentComplete')}</span>
-				{#if asyncSummary}
-					<span class="text-[0.75rem] truncate min-w-0 flex-1">{asyncSummary}</span>
-				{/if}
-				{#if delegationLabel}
-					<span
-						class="hidden sm:inline text-[0.6875rem] font-mono text-gray-400 dark:text-gray-600 shrink-0"
-						>{delegationLabel}</span
-					>
-				{/if}
-				<Icon
-					name="chevron-down"
-					size={12}
-					class="text-gray-400 dark:text-gray-600 shrink-0 transition-transform duration-150 {asyncExpanded
-						? 'rotate-180'
-						: ''}"
-				/>
-			</button>
-			{#if asyncExpanded}
-				<div
-					class="mt-2 ml-3 border-l border-gray-100 dark:border-white/8 pl-3 text-[0.78125rem] leading-relaxed text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words"
-				>
-					{content}
-				</div>
-			{/if}
-		</div>
-	{:else if edit}
+	{#if edit}{:else if edit}
 		<!-- Edit mode: full width -->
 		<div class="w-full">
 			<div class="app-subtle-surface rounded-xl border px-3.5 py-2.5">

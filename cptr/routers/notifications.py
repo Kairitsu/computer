@@ -10,7 +10,6 @@ from cptr.utils.notifications import (
     create_target,
     delete_target,
     get_notification_event_catalog,
-    get_bot_options,
     list_targets,
     set_default_target,
     test_target,
@@ -97,13 +96,3 @@ async def api_set_default_target(request: Request, target_id: str):
         return await set_default_target(_user_id(request), target_id)
     except NotificationError as exc:
         raise _error(exc) from exc
-
-
-@router.get("/bot-options")
-async def api_bot_options(request: Request):
-    return {
-        "bots": await get_bot_options(
-            _user_id(request),
-            bot_manager=getattr(request.app.state, "bot_manager", None),
-        )
-    }

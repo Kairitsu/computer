@@ -123,64 +123,12 @@ export const updateAgents = (profiles: AgentProfile[]): Promise<AgentsResponse> 
 export const refreshAgents = async (): Promise<AgentsResponse> =>
 	fetchJSON<AgentsResponse>('/api/admin/agents/refresh', { method: 'POST' });
 
-// ── Connections ─────────────────────────────────────────────
-
-export interface Connection {
-	id: string;
-	name: string;
-	provider: string;
-	api_type: string;
-	provider_type?: 'default' | 'llama.cpp' | null;
-	prefix_id: string | null;
-	base_url: string | null;
-	api_key: string | null;
-	enabled: boolean;
-	data: { models?: string[] };
-}
-
-export const listConnections = async (): Promise<Connection[]> => {
-	const data = await fetchJSON<{ connections: Connection[] }>('/api/admin/connections');
-	return data.connections;
-};
-
-export const createConnection = (conn: {
-	name: string;
-	provider: string;
-	api_type?: string;
-	provider_type?: 'default' | 'llama.cpp' | null;
-	prefix_id?: string | null;
-	base_url?: string | null;
-	api_key?: string | null;
-	enabled?: boolean;
-	models?: string[];
-}) => fetchJSON('/api/admin/connections', jsonBody(conn));
-
-export const updateConnection = (
-	id: string,
-	updates: Partial<Omit<Connection, 'id' | 'data'>> & { models?: string[] }
-) =>
-	fetchJSON(`/api/admin/connections/${id}`, {
-		...jsonBody(updates),
-		method: 'PUT'
-	});
-
-export const deleteConnection = (id: string) =>
-	fetchJSON(`/api/admin/connections/${id}`, { method: 'DELETE' });
-
-export const verifyConnection = (id: string) =>
-	fetchJSON<{ ok: boolean; message: string }>(`/api/admin/connections/${id}/verify`, {
-		method: 'POST'
-	});
-
 // ── Model Config ────────────────────────────────────────────
 
 export interface ModelConfigEntry {
 	is_active?: boolean;
 	params?: {
-		request_params?: Record<string, unknown>;
 		system_prompt?: string;
-		compact_token_threshold?: number;
-		builtin_tools?: Record<string, boolean> | null;
 	};
 }
 
@@ -190,7 +138,6 @@ export interface ModelConfigResponse {
 		id: string;
 		name: string;
 		provider: string;
-		connection_id: string;
 		agent_id?: string;
 		profile_id?: string;
 	}[];
@@ -210,67 +157,3 @@ export const updateModelConfig = (
 		...jsonBody(update),
 		method: 'PUT'
 	});
-
-// ── Tool Approval ───────────────────────────────────────────
-
-export type ToolApprovalPolicy = 'allow' | 'review';
-
-export interface ToolApprovalGroup {
-	id: string;
-	tools: {
-		name: string;
-		default_approval: ToolApprovalPolicy | null;
-	}[];
-}
-
-export interface ToolApprovalResponse {
-	default_approval: ToolApprovalPolicy;
-	overrides: Record<string, ToolApprovalPolicy>;
-	groups: ToolApprovalGroup[];
-}
-
-export const getToolApproval = async (): Promise<ToolApprovalResponse> =>
-	fetchJSON<ToolApprovalResponse>('/api/admin/tools/approval');
-
-// ── Tool Servers ────────────────────────────────────────────
-
-export interface ToolServer {
-	id: string;
-	type: 'openapi' | 'mcp' | 'mcp_stdio';
-	url: string;
-	path: string;
-	auth_type: string;
-	key: string;
-	name: string;
-	description: string;
-	headers: Record<string, string> | null;
-	enabled: boolean;
-	// Stdio MCP fields
-	command?: string;
-	args?: string[];
-	env?: Record<string, string> | null;
-	cwd?: string | null;
-}
-
-export const listToolServers = async (): Promise<ToolServer[]> => {
-	const data = await fetchJSON<{ servers: ToolServer[] }>('/api/admin/tools/servers');
-	return data.servers;
-};
-
-export const createToolServer = (server: Omit<ToolServer, 'id'>) =>
-	fetchJSON('/api/admin/tools/servers', jsonBody(server));
-
-export const updateToolServer = (id: string, updates: Partial<Omit<ToolServer, 'id'>>) =>
-	fetchJSON(`/api/admin/tools/servers/${id}`, {
-		...jsonBody(updates),
-		method: 'PUT'
-	});
-
-export const deleteToolServer = (id: string) =>
-	fetchJSON(`/api/admin/tools/servers/${id}`, { method: 'DELETE' });
-
-export const verifyToolServer = (id: string) =>
-	fetchJSON<{ ok: boolean; tools?: { name: string; description: string }[]; message?: string }>(
-		`/api/admin/tools/servers/${id}/verify`,
-		{ method: 'POST' }
-	);

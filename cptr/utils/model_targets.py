@@ -1,23 +1,14 @@
-"""Resolve selected model ids to API connections or agent profiles."""
+"""Resolve selected model ids to agent profiles."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
-from cptr.models import Config
 from cptr.utils.agents.detection import get_agent_status
 from cptr.utils.agents.models import parse_agent_model_id
-
-
-@dataclass(frozen=True)
-class ApiModelTarget:
-    kind: Literal["api"]
-    connection: dict[str, Any]
-    runtime_model: str
-    full_model_id: str
 
 
 @dataclass(frozen=True)
@@ -28,9 +19,6 @@ class AgentModelTarget:
     model: str
     full_model_id: str
     config: dict[str, Any]
-
-
-ModelTarget = Union[ApiModelTarget, AgentModelTarget]
 
 
 async def resolve_agent_model_target(model_id: str, app_state=None) -> AgentModelTarget:
@@ -63,43 +51,5 @@ async def resolve_agent_model_target(model_id: str, app_state=None) -> AgentMode
     )
 
 
-async def resolve_api_model_target(model_id: str, app_state=None) -> ApiModelTarget:
-    """Resolve an API-backed model id using the existing connection rules."""
-    from cptr.routers.chat import _resolve_connection
-
-    connection, runtime_model = await _resolve_connection(model_id, app_state)
-    return ApiModelTarget(
-        kind="api",
-        connection=connection,
-        runtime_model=runtime_model,
-        full_model_id=model_id,
-    )
-
-
-async def resolve_model_target(model_id: str, app_state=None) -> ModelTarget:
-    if parse_agent_model_id(model_id) is not None:
-        return await resolve_agent_model_target(model_id, app_state)
-    return await resolve_api_model_target(model_id, app_state)
-
-
-async def first_api_model_target(app_state=None) -> ApiModelTarget:
-    from cptr.routers.chat import _fetch_provider_models
-
-    connections = await Config.get("chat.connections") or []
-    for conn in connections:
-        if not conn.get("enabled", True):
-            continue
-        model_ids = conn.get("data", {}).get("models")
-        if not model_ids:
-            model_ids = await _fetch_provider_models(conn)
-        if model_ids:
-            prefix = (conn.get("prefix_id") or "").strip()
-            runtime_model = model_ids[0]
-            full = f"{prefix}/{runtime_model}" if prefix else runtime_model
-            return ApiModelTarget(
-                kind="api",
-                connection=conn,
-                runtime_model=runtime_model,
-                full_model_id=full,
-            )
-    raise HTTPException(503, "No API model connections configured.")
+async def resolve_model_target(model_id: str, app_state=None) -> AgentModelTarget:
+    return await resolve_agent_model_target(model_id, app_state)

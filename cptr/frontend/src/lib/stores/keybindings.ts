@@ -42,8 +42,7 @@ export const ACTION_IDS = [
 	'toggleSplit',
 	'toggleSidebar',
 	'approveToolCall',
-	'rejectToolCall',
-	'voiceMemo'
+	'rejectToolCall'
 ] as const;
 
 export type ActionId = (typeof ACTION_IDS)[number];
@@ -64,8 +63,7 @@ export const ACTION_LABELS: Record<ActionId, string> = {
 	toggleSplit: 'Toggle Split',
 	toggleSidebar: 'Toggle Sidebar',
 	approveToolCall: 'Approve Tool Call',
-	rejectToolCall: 'Reject Tool Call',
-	voiceMemo: 'Voice Memo'
+	rejectToolCall: 'Reject Tool Call'
 };
 
 // ── Default bindings (browser-safe) ─────────────────────────────
@@ -84,8 +82,7 @@ export const DEFAULT_KEYBINDINGS: Record<ActionId, string> = {
 	toggleSplit: 'Cmd+\\',
 	toggleSidebar: 'Cmd+Shift+S',
 	approveToolCall: 'Cmd+Shift+Enter',
-	rejectToolCall: 'Cmd+Shift+Backspace',
-	voiceMemo: 'Cmd+Shift+M'
+	rejectToolCall: 'Cmd+Shift+Backspace'
 };
 
 // ── Store ───────────────────────────────────────────────────────
@@ -248,7 +245,6 @@ export function executeAction(
 		toggleQuickOpen?: () => void;
 		toggleSettings?: () => void;
 		toggleSearch?: () => void;
-		toggleVoiceMemo?: () => void;
 		approveToolCall?: () => boolean;
 		rejectToolCall?: () => boolean;
 	}
@@ -355,10 +351,6 @@ export function executeAction(
 		case 'rejectToolCall': {
 			return callbacks?.rejectToolCall?.() ?? false;
 		}
-
-		case 'voiceMemo':
-			callbacks?.toggleVoiceMemo?.();
-			return true;
 
 		default:
 			return false;

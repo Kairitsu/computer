@@ -438,7 +438,7 @@
 	"admin.models": "Модели",
 	"models.defaultModel": "Модель по умолчанию",
 	"models.defaultModelNone": "Нет (использовать первую доступную)",
-	"models.defaultModelHint": "Предвыбранная модель для новых чатов и запросов gateway.",
+	"models.defaultModelHint": "Предвыбранная модель для новых чатов.",
 	"models.defaults": "Значения по умолчанию",
 	"models.noDefaults": "Нет глобальных значений по умолчанию",
 	"models.noParams": "Нет параметров",

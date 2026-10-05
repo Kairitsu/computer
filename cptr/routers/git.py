@@ -13,7 +13,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from cptr.models import UserStates
-from cptr.utils.ai import generate_text
 from cptr.utils.identity import (
     ExecutionIdentity,
     IdentityUnavailable,
@@ -21,7 +20,6 @@ from cptr.utils.identity import (
     identity_for_request,
 )
 from cptr.utils import gh
-from cptr.utils.json_parser import extract_json
 from cptr.utils.git import (
     GitError,
     _parse_diff,
@@ -47,7 +45,6 @@ from cptr.utils.git import (
     stash_list,
     stash_pop,
     stash_save,
-    staged_diff,
     status,
     uncommit,
     unstage,
@@ -306,29 +303,6 @@ class CommitRequest(BaseModel):
     message: str
 
 
-COMMIT_MESSAGE_PROMPT = """Write a conventional, concise Git commit message for this staged diff.
-Respond with ONLY JSON in this shape: {"summary":"...","description":"..."}.
-The summary must be imperative, under 72 characters, and have no trailing period.
-The description should be one short paragraph explaining the meaningful change. Do not invent details."""
-
-
-def _parse_commit_message_response(text: str) -> tuple[str, str]:
-    message = extract_json(text)
-    summary = str(message.get("summary", "")).strip() if isinstance(message, dict) else ""
-    description = str(message.get("description", "")).strip() if isinstance(message, dict) else ""
-    if summary:
-        return summary.splitlines()[0][:72], description
-
-    lines = [
-        line.strip()
-        for line in text.strip().splitlines()
-        if line.strip() and not line.strip().startswith("```")
-    ]
-    if not lines:
-        return "", ""
-    return lines[0][:72], "\n".join(lines[1:]).strip()
-
-
 class CheckoutRequest(BaseModel):
     root: str
     branch: str
@@ -359,10 +333,6 @@ class RenameBranchRequest(BaseModel):
 
 class RootRequest(BaseModel):
     root: str
-
-
-class CommitMessageRequest(RootRequest):
-    model_id: Optional[str] = None
 
 
 class PushRequest(BaseModel):
@@ -628,43 +598,6 @@ async def git_commit(request: Request, body: CommitRequest):
         return await commit(root, body.message, identity, await _commit_author_env(root, identity))
     except GitError as e:
         _handle_git_error(e)
-
-
-@router.post("/message")
-async def generate_commit_message(request: Request, body: CommitMessageRequest):
-    """Generate a commit summary and description from the staged diff."""
-    root, identity = await _root_identity(request, body.root)
-    await _require_repo(root, identity)
-    try:
-        patch = await staged_diff(root, identity=identity)
-    except GitError as e:
-        _handle_git_error(e)
-    if not patch:
-        raise HTTPException(status_code=400, detail="No staged changes")
-
-    message_model = body.model_id.strip() if isinstance(body.model_id, str) else None
-    if message_model is None:
-        from cptr.utils.utility_models import configured_utility_model
-
-        message_model = await configured_utility_model("git_commit_message_generation")
-    if not message_model:
-        from cptr.models import Config
-
-        default_model = await Config.get("chat.default_model")
-        message_model = default_model.strip() if isinstance(default_model, str) else None
-    text = await generate_text(
-        request,
-        model_id=message_model,
-        messages=[{"role": "user", "content": patch}],
-        system=COMMIT_MESSAGE_PROMPT,
-        max_tokens=180,
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail="Could not generate a commit message")
-    summary, description = _parse_commit_message_response(text)
-    if not summary:
-        raise HTTPException(status_code=502, detail="Could not generate a commit message")
-    return {"summary": summary, "description": description}
 
 
 @router.post("/checkout")

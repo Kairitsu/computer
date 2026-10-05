@@ -1,4 +1,4 @@
-"""Chat router: CRUD for chats + model aggregation."""
+"""Chat router: CRUD for chats + the agent model list."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from cptr.models import Chat, ChatMessage, Config, is_internal_chat
-from cptr.utils.config import check_access, now_ms, _get_jwt_secret
-from cptr.utils.crypto import decrypt_key
+from cptr.utils.config import check_access, now_ms
 from cptr.utils.db import get_db
 from cptr.utils.chat_export import chat_directory
 from cptr.utils.runtime import Runtime, FileError
@@ -244,85 +243,25 @@ async def list_chats(
 # NOTE: Must be declared before /{chat_id} to avoid 'models' being treated as a chat_id.
 
 
-async def _get_connections() -> list[dict]:
-    return await Config.get("chat.connections") or []
-
-
-# ── Model cache (app.state) ─────────────────────────────────
-
-
-async def _get_connection_models(conn: dict, app_state) -> list[str]:
-    """Get models for a connection: from stored data, cache, or auto-discover."""
-    stored = conn.get("data", {}).get("models")
-    if stored:
-        return stored
-
-    conn_id = conn.get("id", "")
-    cache = getattr(app_state, "MODELS", None)
-    if cache is None:
-        cache = {}
-        app_state.MODELS = cache
-
-    if conn_id in cache:
-        return cache[conn_id]
-
-    models = await _fetch_provider_models(conn)
-    if models is not None:
-        cache[conn_id] = models
-        return models
-    return cache.get(conn_id, [])
+# ── Model list ──────────────────────────────────────────────
 
 
 async def warm_model_cache(app_state) -> None:
-    """Pre-fetch chat model sources before the application accepts requests."""
-    connections = [c for c in await _get_connections() if c.get("enabled", True)]
-    tasks = [_get_connection_models(conn, app_state) for conn in connections]
-
+    """Pre-fetch the agents' model lists before the application accepts requests."""
     from cptr.utils.agents.detection import get_available_agent_model_entries
 
-    tasks.append(get_available_agent_model_entries(app_state))
-    await asyncio.gather(*tasks)
-
-
-def invalidate_model_cache(app_state):
-    """Clear cached models. Call after connection create/update/delete."""
-    app_state.MODELS = {}
+    await get_available_agent_model_entries(app_state)
 
 
 @router.get("/models")
 async def get_models(request: Request):
-    """Aggregate available models across all connections.
-
-    If a connection has data.models set, use those.
-    Otherwise, call the provider's /models endpoint to discover available models.
-    """
+    """List the models of the configured coding agents (Grok CLI)."""
     _get_user(request)
     from cptr.utils.context import resolve_compact_token_threshold
 
-    connections = [c for c in await _get_connections() if c.get("enabled", True)]
     chat_models_config = await Config.get("chat.models") or {}
     global_threshold = resolve_compact_token_threshold()
     models = []
-
-    for conn in connections:
-        model_ids = await _get_connection_models(conn, request.app.state)
-
-        prefix = (conn.get("prefix_id") or "").strip()
-        provider = conn.get("provider", "")
-
-        for model_id in model_ids or []:
-            prefixed_id = f"{prefix}/{model_id}" if prefix else model_id
-            models.append(
-                {
-                    "id": prefixed_id,
-                    "name": model_id,
-                    "provider": provider,
-                    "connection_id": conn["id"],
-                    # The Anthropic stream does not replay thinking blocks, so
-                    # reasoning effort is only offered on OpenAI-style APIs.
-                    "supports_reasoning_effort": provider != "anthropic",
-                }
-            )
 
     from cptr.utils.agents.detection import get_available_agent_model_entries
 
@@ -689,72 +628,6 @@ async def get_quota(
             "resets_at": int(resets_at.timestamp()),
         },
     }
-
-
-async def _fetch_provider_models(conn: dict) -> list[str] | None:
-    """Discover models from a provider's /models endpoint."""
-    import httpx
-
-    from cptr.utils.ai import _openrouter_headers
-
-    try:
-        secret = _get_jwt_secret()
-        api_key = decrypt_key(conn.get("api_key", ""), secret) if conn.get("api_key") else None
-        provider = conn.get("provider", "")
-        base_url = conn.get("base_url")
-
-        if provider == "anthropic":
-            url = (base_url or "https://api.anthropic.com/v1") + "/models"
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(
-                    url,
-                    headers={
-                        "x-api-key": api_key or "",
-                        "anthropic-version": "2023-06-01",
-                        **_openrouter_headers(url),
-                    },
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    models = [m["id"] for m in data.get("data", [])]
-                    log.info("Auto-discovered %d models from %s", len(models), url)
-                    return models
-                else:
-                    log.warning(
-                        "Model auto-discovery failed for %s: HTTP %d",
-                        url,
-                        r.status_code,
-                    )
-
-        elif provider == "openai":
-            url = (base_url or "https://api.openai.com/v1") + "/models"
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {api_key or ''}",
-                        **_openrouter_headers(url),
-                    },
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    models = [m["id"] for m in data.get("data", [])]
-                    log.info("Auto-discovered %d models from %s", len(models), url)
-                    return models
-                else:
-                    log.warning(
-                        "Model auto-discovery failed for %s: HTTP %d",
-                        url,
-                        r.status_code,
-                    )
-
-        else:
-            log.warning("Unknown provider '%s', skipping model auto-discovery", provider)
-
-    except Exception:
-        log.exception("Model auto-discovery error for connection %s", conn.get("id", "?"))
-
-    return None
 
 
 # ── Get a chat with all messages ────────────────────────────
@@ -1369,13 +1242,7 @@ async def resolve_ask_user(
     if timed_out and now_ms() < int(call.get("expires_at") or 0):
         raise AskUserNotPendingError("ask_user request has not timed out")
 
-    from cptr.utils.chat_task import (
-        ask_user_answers,
-        is_running,
-        resolve_agent_ask_user,
-        start_task,
-    )
-    from cptr.utils.model_targets import resolve_model_target
+    from cptr.utils.chat_task import is_running, resolve_agent_ask_user
     from cptr.socket.main import emit_to_user
 
     if call.get("native_agent"):
@@ -1391,37 +1258,8 @@ async def resolve_ask_user(
                 chat.user_id, {"chat_id": chat_id, "message_id": message_id, "output": call}
             )
         raise AskUserNotPendingError("the agent is no longer waiting for this answer")
-
-    result = ask_user_answers(call.get("arguments") or {}, None if timed_out else answers)
-    if timed_out:
-        result["timed_out"] = True
-    call["status"] = "completed"
-    call["timed_out"] = timed_out
-    output.append(
-        {"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)}
-    )
-    await ChatMessage.update(message_id, output=output, done=False)
-    await emit_to_user(chat.user_id, {"chat_id": chat_id, "message_id": message_id, "output": call})
-    await emit_to_user(
-        chat.user_id, {"chat_id": chat_id, "message_id": message_id, "output": output[-1]}
-    )
-    target = await resolve_model_target(msg.model or "", getattr(app, "state", None))
-    task_request = None
-    if app is not None:
-        try:
-            from cptr.utils.identity import internal_request_for_user
-
-            task_request = await internal_request_for_user(app, chat.user_id)
-        except Exception:
-            log.debug("[ask_user] internal request creation failed", exc_info=True)
-    start_task(
-        task_request,
-        message_id=message_id,
-        chat_id=chat_id,
-        user_id=chat.user_id,
-        workspace=(chat.meta or {}).get("workspace", ""),
-        target=target,
-    )
+    # Only an agent's own questions are ever pending.
+    raise AskUserNotPendingError("ask_user request is no longer pending")
 
 
 async def resolve_pending_tool_call(
@@ -1493,48 +1331,8 @@ async def resolve_pending_tool_call(
             )
         raise HTTPException(409, "the agent is no longer waiting for this approval")
 
-    model_id = msg.model or ""
-    workspace = chat.meta.get("workspace", "") if chat.meta else ""
-    from cptr.socket.main import emit_to_user
-
-    if body.action == "approve":
-        call["approved"] = True
-        call["status"] = "queued"
-        await ChatMessage.update(message_id, output=output, done=False)
-
-        await emit_to_user(user_id, {"chat_id": chat_id, "message_id": message_id, "output": call})
-    else:
-        call["status"] = "rejected"
-        result_item = {
-            "type": "function_call_output",
-            "call_id": body.call_id,
-            "output": "Error: tool call rejected by user.",
-        }
-        output.append(result_item)
-        await ChatMessage.update(message_id, output=output, done=False)
-        await emit_to_user(user_id, {"chat_id": chat_id, "message_id": message_id, "output": call})
-        await emit_to_user(
-            user_id,
-            {"chat_id": chat_id, "message_id": message_id, "output": result_item},
-        )
-
-    # Resolve model target and continue the saved tool-call queue.
-    from cptr.utils.model_targets import resolve_model_target
-
-    target = await resolve_model_target(model_id, request.app.state)
-
-    from cptr.utils.chat_task import start_task
-
-    start_task(
-        request,
-        message_id=message_id,
-        chat_id=chat_id,
-        user_id=user_id,
-        workspace=workspace,
-        target=target,
-    )
-
-    return {"ok": True}
+    # Only an agent's own questions and permission requests are ever pending.
+    raise HTTPException(409, "this tool call can no longer be resolved")
 
 
 @router.post("/{chat_id}/messages/{message_id}/resolve")
@@ -1747,35 +1545,3 @@ async def queue_delete(request: Request, chat_id: str, message_id: str):
 
     await ChatMessage.delete(message_id)
     return {"ok": True}
-
-
-async def _resolve_connection(model_id: str, app_state=None) -> tuple[dict, str]:
-    """Find connection for model.
-    'openrouter/gpt-4o' → connection with prefix_id='openrouter', runtime model='gpt-4o'
-    'claude-sonnet-4-20250514' → scan all connections for match
-    Raises 400 if not found.
-    """
-    connections = [c for c in await _get_connections() if c.get("enabled", True)]
-    if not connections:
-        raise HTTPException(400, "no connections configured")
-
-    # Try prefix match first
-    if "/" in model_id:
-        prefix, runtime_model = model_id.split("/", 1)
-        for conn in connections:
-            if (conn.get("prefix_id") or "").strip() == prefix:
-                return conn, runtime_model
-
-    # Scan all connections using cache
-    for conn in connections:
-        if app_state:
-            model_ids = await _get_connection_models(conn, app_state)
-        else:
-            model_ids = conn.get("data", {}).get("models") or await _fetch_provider_models(conn)
-        prefix = (conn.get("prefix_id") or "").strip()
-        for mid in model_ids:
-            prefixed = f"{prefix}/{mid}" if prefix else mid
-            if prefixed == model_id or mid == model_id:
-                return conn, mid
-
-    raise HTTPException(400, f"no connection found for model: {model_id}")

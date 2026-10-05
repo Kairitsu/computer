@@ -590,7 +590,7 @@
 	"admin.gitCommitMessageModelHint": "Drafts messages from staged changes.",
 	"models.defaultModel": "Default model",
 	"models.defaultModelNone": "None (use first available)",
-	"models.defaultModelHint": "Pre-selected model for new chats and gateway requests.",
+	"models.defaultModelHint": "Pre-selected model for new chats.",
 	"models.defaults": "Defaults",
 	"models.noDefaults": "No global defaults",
 	"models.noParams": "No parameters",

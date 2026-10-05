@@ -7,19 +7,11 @@
 	import Placeholder from '@tiptap/extension-placeholder';
 	import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 	import { all, createLowlight } from 'lowlight';
-	import { toast } from 'svelte-sonner';
 
 	import { createFileMention, extractMentionedFiles, type FileMentionAttrs } from './FileMention';
-	import {
-		createSkillMention,
-		extractMentionedSkills,
-		type SkillMentionAttrs
-	} from './SkillMention';
 	import { createSlashCommandMention } from './SlashCommandMention';
 	import FileSuggestionPopup from './FileSuggestionPopup.svelte';
-	import SkillSuggestionPopup from './SkillSuggestionPopup.svelte';
 	import { searchFiles } from '$lib/apis/files';
-	import { getSkills } from '$lib/apis/skills';
 	import { uploadFile } from '$lib/apis/files';
 	import type { ChatTask, ContextUsage, ReasoningEffort } from '$lib/apis/chat';
 	import ModelHubMenu from './ModelHubMenu.svelte';
@@ -36,37 +28,10 @@
 	import PlanApprovalCard from './PlanApprovalCard.svelte';
 	import Icon from '../Icon.svelte';
 	import type { ToolApprovalMode } from '$lib/apis/chat';
-	import {
-		sttConfigured,
-		ttsConfigured,
-		ttsEnabled,
-		unlockTtsAudioPlayback,
-		voiceModeSttMode
-	} from '$lib/stores/audio';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { t } from '$lib/i18n';
 	import { TAB_DRAG_MIME } from '$lib/constants';
 	import { tooltip } from '$lib/tooltip';
-
-	// Keep screen awake during voice mode conversations
-	let voiceWakeLock: WakeLockSentinel | null = null;
-
-	async function acquireVoiceWakeLock() {
-		if (voiceWakeLock) return;
-		try {
-			if ('wakeLock' in navigator) {
-				voiceWakeLock = await navigator.wakeLock.request('screen');
-				voiceWakeLock.addEventListener('release', () => {
-					voiceWakeLock = null;
-				});
-			}
-		} catch {}
-	}
-
-	function releaseVoiceWakeLock() {
-		voiceWakeLock?.release().catch(() => {});
-		voiceWakeLock = null;
-	}
 
 	interface Props {
 		inputText: string;
@@ -76,7 +41,6 @@
 		requestParams?: Record<string, unknown>;
 		reasoningEffort?: ReasoningEffort | null;
 		contextWindow?: number | null;
-		voiceModeEnabled?: boolean;
 		sending: boolean;
 		streaming?: boolean;
 		workspace?: string;
@@ -93,7 +57,6 @@
 		onfork?: () => void;
 		onplan?: () => void;
 		onstatus?: () => void;
-		onskillslist?: () => void;
 		oncancel?: () => void;
 		onaskuseranswer?: (
 			messageId: string,
@@ -117,7 +80,6 @@
 		requestParams = $bindable({}),
 		reasoningEffort = $bindable(null),
 		contextWindow = $bindable(null),
-		voiceModeEnabled = $bindable(false),
 		sending,
 		streaming = false,
 		workspace = '',
@@ -134,7 +96,6 @@
 		onfork,
 		onplan,
 		onstatus,
-		onskillslist,
 		oncancel,
 		onaskuseranswer,
 		onqueuesendnow,
@@ -147,17 +108,6 @@
 
 	let editorEl: HTMLDivElement | undefined = $state();
 	let editor: Editor | null = $state(null);
-	let voiceListening = $state(false);
-	let voiceWaitingForResponse = $state(false);
-	let voiceSawStreaming = $state(false);
-	let voiceRecognition: any = null;
-	let voiceRestartTimer = 0;
-	let voiceStopRequested = false;
-	let voiceRearming = $state(false);
-	let voiceCaptureRecorder: MediaRecorder | null = null;
-	let voiceCaptureStream: MediaStream | null = null;
-	let voiceCaptureChunks: Blob[] = [];
-	let voiceCaptureMimeType = 'audio/webm';
 	let selectedSlashCommandIndex = $state(0);
 	let modelSelector: ModelHubMenu | undefined = $state();
 	let workspaceChipEl: HTMLButtonElement | undefined = $state();
@@ -212,17 +162,6 @@
 		workspaceMenuOpen = false;
 		onworkspacechange?.(path);
 	}
-	const voiceModeAvailable = $derived(
-		$ttsEnabled && $ttsConfigured && ($voiceModeSttMode === 'browser' || $sttConfigured)
-	);
-	const voiceStatusLabel = $derived(
-		voiceWaitingForResponse || streaming || sending
-			? $t('chat.voiceWaiting')
-			: voiceListening || voiceRearming || voiceModeEnabled
-				? $t('chat.voiceListening')
-				: $t('chat.voiceModeOn')
-	);
-
 	function isMobileInput(): boolean {
 		return (
 			typeof window !== 'undefined' &&
@@ -453,172 +392,11 @@
 		}
 	}
 
-	// ── $skill mention suggestion ──────────────────────
-	let skillPopupEl: HTMLDivElement | null = null;
-	let skillPopupComponent: Record<string, any> | null = null;
-	let skillActiveClientRectFn: (() => DOMRect | null) | null = null;
-	let skillRepositionRafId: number | null = null;
-	let cachedSkills: SkillMentionAttrs[] | null = null;
-	let cachedSkillsWorkspace = '';
+	// ── /command suggestion state ───────────────────
 	let activeSlashRange = $state<{ from: number; to: number } | null>(null);
-	type SlashSuggestionItem =
-		| { kind: 'command'; id: string }
-		| { kind: 'skill'; id: string; skill: SkillMentionAttrs };
+	type SlashSuggestionItem = { kind: 'command'; id: string };
 	let slashSuggestionItems = $state<SlashSuggestionItem[]>([]);
 	let slashCommandsEl: HTMLDivElement | undefined = $state();
-
-	async function getCachedSkills(): Promise<SkillMentionAttrs[]> {
-		if (!cachedSkills || cachedSkillsWorkspace !== workspace) {
-			const data = await getSkills(workspace);
-			cachedSkills = data.map((s) => ({
-				id: s.name,
-				label: s.name,
-				description: s.description,
-				source: s.source
-			}));
-			cachedSkillsWorkspace = workspace;
-		}
-		return cachedSkills;
-	}
-
-	async function fetchSkillSuggestions({ query }: { query: string }): Promise<SkillMentionAttrs[]> {
-		try {
-			const skills = await getCachedSkills();
-			if (!query) return skills;
-			const q = query.toLowerCase();
-			return skills.filter(
-				(s) => s.label.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q)
-			);
-		} catch {
-			return [];
-		}
-	}
-
-	function mountSkillPopup(
-		items: SkillMentionAttrs[],
-		selectedIdx: number,
-		onselect: (i: number) => void
-	) {
-		if (skillPopupComponent) {
-			try {
-				unmount(skillPopupComponent);
-			} catch {}
-			skillPopupComponent = null;
-		}
-		if (!skillPopupEl) {
-			skillPopupEl = document.createElement('div');
-			document.body.appendChild(skillPopupEl);
-		}
-		skillPopupComponent = mount(SkillSuggestionPopup, {
-			target: skillPopupEl,
-			props: { items, selectedIndex: selectedIdx, onselect }
-		});
-	}
-
-	function startSkillRepositionLoop() {
-		stopSkillRepositionLoop();
-		function tick() {
-			if (skillActiveClientRectFn) {
-				updateSkillPopupPosition(skillActiveClientRectFn());
-				skillRepositionRafId = requestAnimationFrame(tick);
-			}
-		}
-		skillRepositionRafId = requestAnimationFrame(tick);
-	}
-
-	function stopSkillRepositionLoop() {
-		if (skillRepositionRafId !== null) {
-			cancelAnimationFrame(skillRepositionRafId);
-			skillRepositionRafId = null;
-		}
-	}
-
-	function createSkillSuggestionRenderer() {
-		let selectedIndex = 0;
-		let currentItems: SkillMentionAttrs[] = [];
-		let command: ((attrs: SkillMentionAttrs) => void) | null = null;
-
-		function doSelect(index: number) {
-			const item = currentItems[index];
-			if (item && command) command(item);
-		}
-
-		function remount() {
-			mountSkillPopup(currentItems, selectedIndex, doSelect);
-		}
-
-		return {
-			onStart(props: any) {
-				command = props.command;
-				currentItems = props.items;
-				selectedIndex = 0;
-				skillActiveClientRectFn = props.clientRect ?? null;
-				remount();
-				updateSkillPopupPosition(props.clientRect?.());
-				startSkillRepositionLoop();
-			},
-			onUpdate(props: any) {
-				command = props.command;
-				currentItems = props.items;
-				selectedIndex = 0;
-				skillActiveClientRectFn = props.clientRect ?? null;
-				remount();
-				updateSkillPopupPosition(props.clientRect?.());
-			},
-			onKeyDown({ event }: { event: KeyboardEvent }) {
-				if (event.key === 'ArrowDown') {
-					selectedIndex = (selectedIndex + 1) % Math.max(currentItems.length, 1);
-					remount();
-					return true;
-				}
-				if (event.key === 'ArrowUp') {
-					selectedIndex =
-						(selectedIndex - 1 + currentItems.length) % Math.max(currentItems.length, 1);
-					remount();
-					return true;
-				}
-				if (event.key === 'Enter') {
-					if (isMobileInput()) return false;
-					const item = currentItems[selectedIndex];
-					if (item && command) command(item);
-					return true;
-				}
-				if (event.key === 'Escape') {
-					destroySkillPopup();
-					return true;
-				}
-				return false;
-			},
-			onExit() {
-				destroySkillPopup();
-			}
-		};
-	}
-
-	function updateSkillPopupPosition(rect: DOMRect | null) {
-		if (!skillPopupEl || !rect) return;
-		const child = skillPopupEl.firstElementChild as HTMLElement | null;
-		if (!child) return;
-		const popupHeight = child.offsetHeight || 200;
-		child.style.position = 'fixed';
-		child.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 280))}px`;
-		child.style.top = `${rect.top - popupHeight - 8}px`;
-	}
-
-	function destroySkillPopup() {
-		stopSkillRepositionLoop();
-		skillActiveClientRectFn = null;
-		if (skillPopupComponent) {
-			try {
-				unmount(skillPopupComponent);
-			} catch {}
-			skillPopupComponent = null;
-		}
-		if (skillPopupEl) {
-			skillPopupEl.remove();
-			skillPopupEl = null;
-		}
-	}
 
 	// ── /command suggestion ─────────────────────────
 	function clearSlashSuggestionState() {
@@ -696,11 +474,6 @@
 			render: createSuggestionRenderer
 		});
 
-		const skillMention = createSkillMention({
-			items: fetchSkillSuggestions,
-			render: createSkillSuggestionRenderer
-		});
-
 		const slashCommandMention = createSlashCommandMention({
 			items: fetchSlashSuggestions,
 			render: createSlashSuggestionRenderer
@@ -717,7 +490,6 @@
 				Placeholder.configure({ placeholder }),
 				CodeBlockLowlight.configure({ lowlight }),
 				fileMention,
-				skillMention,
 				slashCommandMention
 			],
 			content: inputText || '',
@@ -733,7 +505,7 @@
 
 					if (event.key === 'Enter' && !event.shiftKey) {
 						// Don't send while suggestion popup is open — let it confirm selection
-						if (popupComponent || skillPopupComponent) return false;
+						if (popupComponent) return false;
 						const { state } = view;
 						const head = state.selection.$head;
 
@@ -761,11 +533,7 @@
 	});
 
 	onDestroy(() => {
-		stopVoiceRecognition();
-		if (voiceRestartTimer) clearTimeout(voiceRestartTimer);
-		releaseVoiceWakeLock();
 		destroyPopup();
-		destroySkillPopup();
 		editor?.destroy();
 		editor = null;
 	});
@@ -799,304 +567,6 @@
 		attachedUploads = [];
 	}
 
-	export function getSkillIds(): string[] {
-		if (!editor) return [];
-		return extractMentionedSkills(editor.getJSON());
-	}
-
-	function clearVoiceRestartTimer(resetRearming = true) {
-		if (voiceRestartTimer) {
-			clearTimeout(voiceRestartTimer);
-			voiceRestartTimer = 0;
-		}
-		if (resetRearming) voiceRearming = false;
-	}
-
-	function scheduleVoiceRestart(delay = 350) {
-		clearVoiceRestartTimer();
-		if (
-			!voiceModeAvailable ||
-			!voiceModeEnabled ||
-			voiceWaitingForResponse ||
-			voiceListening ||
-			voiceRecognition ||
-			streaming ||
-			sending ||
-			inputText.trim()
-		)
-			return;
-		voiceRearming = true;
-		voiceRestartTimer = window.setTimeout(() => {
-			voiceRestartTimer = 0;
-			voiceRearming = false;
-			startVoiceRecognition();
-		}, delay);
-	}
-
-	function stopVoiceRecognition(stopCapture = true) {
-		clearVoiceRestartTimer();
-		const recognition = voiceRecognition;
-		voiceRecognition = null;
-		voiceStopRequested = true;
-		if (stopCapture) stopVoiceCapture();
-		try {
-			recognition?.stop();
-		} catch {}
-		voiceListening = false;
-	}
-
-	function chooseVoiceCaptureMimeType() {
-		if (typeof MediaRecorder === 'undefined') return 'audio/webm';
-		if (MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
-		if (MediaRecorder.isTypeSupported?.('audio/webm')) return 'audio/webm';
-		if (MediaRecorder.isTypeSupported?.('audio/mp4')) return 'audio/mp4';
-		return '';
-	}
-
-	async function startVoiceCapture() {
-		if (!workspace || voiceCaptureRecorder || typeof MediaRecorder === 'undefined') return;
-		try {
-			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			if (!voiceRecognition || !voiceListening) {
-				stream.getTracks().forEach((track) => track.stop());
-				return;
-			}
-			const mimeType = chooseVoiceCaptureMimeType();
-			const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-			voiceCaptureStream = stream;
-			voiceCaptureRecorder = recorder;
-			voiceCaptureChunks = [];
-			voiceCaptureMimeType = recorder.mimeType || mimeType || 'audio/webm';
-			recorder.ondataavailable = (event) => {
-				if (event.data.size > 0) voiceCaptureChunks.push(event.data);
-			};
-			recorder.start();
-		} catch {
-			voiceCaptureRecorder = null;
-			voiceCaptureStream = null;
-			voiceCaptureChunks = [];
-		}
-	}
-
-	async function stopVoiceCapture(): Promise<{
-		blob: Blob;
-		filename: string;
-		contentType: string;
-	} | null> {
-		const recorder = voiceCaptureRecorder;
-		const stream = voiceCaptureStream;
-		const chunks = voiceCaptureChunks;
-		const contentType = voiceCaptureMimeType || 'audio/webm';
-		voiceCaptureRecorder = null;
-		voiceCaptureStream = null;
-
-		if (!recorder) {
-			voiceCaptureChunks = [];
-			stream?.getTracks().forEach((track) => track.stop());
-			return null;
-		}
-
-		await new Promise<void>((resolve) => {
-			recorder.onstop = () => resolve();
-			try {
-				if (recorder.state !== 'inactive') recorder.stop();
-				else resolve();
-			} catch {
-				resolve();
-			}
-		});
-		stream?.getTracks().forEach((track) => track.stop());
-		voiceCaptureChunks = [];
-		if (!chunks.length) return null;
-		const ext = contentType.includes('mp4') ? 'm4a' : 'webm';
-		return {
-			blob: new Blob(chunks, { type: contentType }),
-			filename: `voice-mode.${ext}`,
-			contentType
-		};
-	}
-
-	async function saveVoiceModeSttCapture(
-		capture: { blob: Blob; filename: string; contentType: string },
-		text: string
-	) {
-		// Browser STT does not need provider transcription, but the captured audio still
-		// matters. Sending audio plus transcript through the normal transcribe route keeps
-		// browser and provider voice samples in one STT cache for the data flywheel.
-		if (!workspace || !text.trim()) return;
-		const form = new FormData();
-		form.append('file', capture.blob, capture.filename);
-		form.append('text', text.trim());
-		form.append('workspace', workspace);
-		form.append('source', 'voice_mode');
-		form.append('language', navigator.language || 'en-US');
-		try {
-			await fetch('/api/audio/transcribe', { method: 'POST', body: form });
-		} catch {}
-	}
-
-	async function transcribeVoiceModeCapture(capture: {
-		blob: Blob;
-		filename: string;
-		contentType: string;
-	}): Promise<string> {
-		const form = new FormData();
-		form.append('file', capture.blob, capture.filename);
-		form.append('workspace', workspace);
-		const res = await fetch('/api/audio/transcribe', { method: 'POST', body: form });
-		if (!res.ok) {
-			let detail = `${res.status}`;
-			try {
-				const data = await res.json();
-				detail = data?.detail || data?.error || detail;
-			} catch {}
-			throw new Error(detail);
-		}
-		const data = await res.json();
-		return (data?.text || '').trim();
-	}
-
-	function startVoiceRecognition() {
-		clearVoiceRestartTimer(false);
-		if (
-			!voiceModeAvailable ||
-			!voiceModeEnabled ||
-			voiceWaitingForResponse ||
-			voiceListening ||
-			voiceRecognition ||
-			streaming ||
-			sending ||
-			inputText.trim()
-		) {
-			voiceRearming = false;
-			return;
-		}
-
-		const SpeechRecognition =
-			(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-		if (!SpeechRecognition) {
-			alert($t('chat.dictate.unsupported'));
-			voiceModeEnabled = false;
-			voiceRearming = false;
-			return;
-		}
-
-		const recognition = new SpeechRecognition();
-		voiceRecognition = recognition;
-		voiceStopRequested = false;
-		recognition.continuous = true;
-		recognition.interimResults = true;
-		recognition.lang = navigator.language || 'en-US';
-
-		recognition.onresult = async (event: any) => {
-			let browserText = '';
-			for (let i = event.resultIndex; i < event.results.length; i++) {
-				const result = event.results[i];
-				if (result?.isFinal) browserText += ` ${result[0]?.transcript || ''}`;
-			}
-			browserText = browserText.trim();
-			if (!browserText) return;
-			voiceWaitingForResponse = true;
-			voiceSawStreaming = false;
-			const capturePromise = stopVoiceCapture();
-			stopVoiceRecognition(false);
-			const capture = await capturePromise;
-			let text = browserText;
-			if ($voiceModeSttMode === 'provider' && capture) {
-				try {
-					text = (await transcribeVoiceModeCapture(capture)) || browserText;
-				} catch (err: any) {
-					const detail = err?.message ? ` ${err.message}` : '';
-					toast.error(`${$t('chat.voiceProviderSttFallback')}${detail}`);
-					text = browserText;
-				}
-			} else if ($voiceModeSttMode === 'provider') {
-				toast.error($t('chat.voiceProviderSttNoAudio'));
-			} else if (capture) {
-				void saveVoiceModeSttCapture(capture, browserText);
-			}
-			if (!text.trim()) {
-				voiceWaitingForResponse = false;
-				scheduleVoiceRestart(500);
-				return;
-			}
-			inputText = text;
-			await tick();
-			handleSubmit();
-		};
-
-		recognition.onerror = (event: any) => {
-			voiceListening = false;
-			if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
-				voiceModeEnabled = false;
-				stopVoiceRecognition();
-			}
-		};
-
-		recognition.onend = () => {
-			if (voiceRecognition !== recognition) return;
-			voiceRecognition = null;
-			voiceListening = false;
-			stopVoiceCapture();
-			if (!voiceStopRequested) scheduleVoiceRestart(1200);
-			voiceStopRequested = false;
-		};
-
-		try {
-			recognition.start();
-			voiceListening = true;
-			voiceRearming = false;
-			void startVoiceCapture();
-		} catch {
-			voiceRecognition = null;
-			voiceListening = false;
-			voiceRearming = false;
-			scheduleVoiceRestart(1500);
-		}
-	}
-
-	function toggleVoiceMode() {
-		if (!voiceModeAvailable) {
-			alert($t('chat.ttsNotConfigured'));
-			return;
-		}
-		const next = !voiceModeEnabled;
-		voiceModeEnabled = next;
-		onsettingschange?.();
-		if (next) {
-			void unlockTtsAudioPlayback();
-			void acquireVoiceWakeLock();
-			voiceWaitingForResponse = false;
-			voiceSawStreaming = false;
-			startVoiceRecognition();
-		} else {
-			releaseVoiceWakeLock();
-			voiceWaitingForResponse = false;
-			voiceSawStreaming = false;
-			stopVoiceRecognition();
-		}
-	}
-
-	$effect(() => {
-		if (!voiceModeAvailable && voiceModeEnabled) {
-			voiceModeEnabled = false;
-			stopVoiceRecognition();
-		}
-		if (!voiceModeEnabled) return;
-		if (streaming) voiceSawStreaming = true;
-		if (voiceSawStreaming && !streaming && !sending) {
-			voiceWaitingForResponse = false;
-			voiceSawStreaming = false;
-			scheduleVoiceRestart(500);
-		}
-	});
-
-	$effect(() => {
-		if (voiceModeEnabled && inputText.trim()) {
-			stopVoiceRecognition();
-		}
-	});
-
 	function getSlashCommandIds(query: string) {
 		const slashCommandQuery = `/${query}`.toLowerCase();
 		const ids: string[] = [];
@@ -1104,9 +574,6 @@
 		if (hasChatContent && onfork && '/fork'.startsWith(slashCommandQuery)) ids.push('fork');
 		if (hasChatContent && onstatus && '/status'.startsWith(slashCommandQuery)) ids.push('status');
 		if ('/model'.startsWith(slashCommandQuery)) ids.push('model');
-		if (hasChatContent && onskillslist && '/skills:list'.startsWith(slashCommandQuery))
-			ids.push('skills:list');
-		if (hasChatContent && '/skills:create'.startsWith(slashCommandQuery)) ids.push('skills:create');
 		return ids;
 	}
 
@@ -1116,26 +583,11 @@
 		query: string;
 	}): Promise<SlashSuggestionItem[]> {
 		if (/\s/.test(query)) return [];
-		const commands = getSlashCommandIds(query).map((id) => ({ kind: 'command' as const, id }));
-		const skills = (await fetchSkillSuggestions({ query })).slice(0, 5).map((skill) => ({
-			kind: 'skill' as const,
-			id: skill.id,
-			skill
-		}));
-		return [...commands, ...skills];
+		return getSlashCommandIds(query).map((id) => ({ kind: 'command' as const, id }));
 	}
 
-	const slashCommandIds = $derived.by(() => {
-		return slashSuggestionItems.filter((item) => item.kind === 'command').map((item) => item.id);
-	});
-	const slashSkillSuggestions = $derived.by(() => {
-		return slashSuggestionItems.filter((item) => item.kind === 'skill').map((item) => item.skill);
-	});
-	const slashSuggestionIds = $derived([
-		...slashSuggestionItems.map((item) =>
-			item.kind === 'command' ? `command:${item.id}` : `skill:${item.id}`
-		)
-	]);
+	const slashCommandIds = $derived(slashSuggestionItems.map((item) => item.id));
+	const slashSuggestionIds = $derived(slashSuggestionItems.map((item) => `command:${item.id}`));
 	const showSlashCommands = $derived(slashSuggestionIds.length > 0);
 
 	$effect(() => {
@@ -1150,65 +602,12 @@
 		selectSlashIndex(slashSuggestionIds.indexOf(`command:${commandId}`));
 	}
 
-	function selectedSlashSkill(skillId: string) {
-		return slashSuggestionIds[selectedSlashCommandIndex] === `skill:${skillId}`;
-	}
-
-	function selectSlashSkill(skillId: string) {
-		selectSlashIndex(slashSuggestionIds.indexOf(`skill:${skillId}`));
-	}
-
 	function runSlashSuggestion(suggestionId: string | undefined) {
-		const item = slashSuggestionItems.find((item) =>
-			item.kind === 'command'
-				? `command:${item.id}` === suggestionId
-				: `skill:${item.id}` === suggestionId
-		);
-		if (item) {
-			runSlashSuggestionItem(item);
-			return;
-		}
-		if (suggestionId?.startsWith('skill:')) {
-			const skillId = suggestionId.slice('skill:'.length);
-			const skill = slashSkillSuggestions.find((item) => item.id === skillId);
-			runSlashSkill(skill ?? { id: skillId, label: skillId });
-			return;
-		}
 		runSlashCommand(suggestionId?.replace(/^command:/, ''));
 	}
 
 	function runSlashSuggestionItem(item: SlashSuggestionItem | undefined) {
-		if (!item) return;
-		if (item.kind === 'skill') {
-			runSlashSkill(item.skill);
-			return;
-		}
-		runSlashCommand(item.id);
-	}
-
-	function runSlashSkill(skill: SkillMentionAttrs) {
-		if (!editor || editor.isDestroyed) {
-			inputText = inputText.replace(/(^|\s)\/\S*$/, `$1$${skill.label} `);
-			clearSlashSuggestionState();
-			return;
-		}
-		const chain = editor.chain().focus();
-		if (activeSlashRange) chain.deleteRange(activeSlashRange);
-		chain
-			.insertContent([
-				{
-					type: 'skillMention',
-					attrs: {
-						id: skill.id,
-						label: skill.label,
-						description: skill.description,
-						source: skill.source
-					}
-				},
-				{ type: 'text', text: ' ' }
-			])
-			.run();
-		clearSlashSuggestionState();
+		if (item) runSlashCommand(item.id);
 	}
 
 	function removeSlashCommandToken() {
@@ -1240,17 +639,6 @@
 		if (commandId === 'model') {
 			removeSlashCommandToken();
 			void modelSelector?.openSelector();
-			return;
-		}
-		if (commandId === 'skills:list' && onskillslist) {
-			removeSlashCommandToken();
-			onskillslist();
-			return;
-		}
-		if (commandId === 'skills:create') {
-			removeSlashCommandToken();
-			inputText = '/skills:create';
-			void tick().then(onsend);
 			return;
 		}
 		onsend();
@@ -1474,88 +862,6 @@
 					</span>
 				</button>
 			{/if}
-			{#if slashCommandIds.includes('skills:list')}
-				<button
-					type="button"
-					aria-label={`${$t('chat.commandListSkills')}: ${$t('chat.commandListSkillsDesc')}`}
-					use:tooltip={{
-						content: $t('chat.commandListSkillsDesc'),
-						placement: 'top'
-					}}
-					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-						{selectedSlashCommand('skills:list') ? 'app-interactive-active' : ''}"
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => {
-						runSlashCommand('skills:list');
-					}}
-					onmouseenter={() => selectSlashCommand('skills:list')}
-				>
-					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
-						<Icon name="list" size={14} />
-					</span>
-					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-						<span class="truncate">{$t('chat.commandListSkills')}</span>
-						<span class="app-muted text-[0.625rem] truncate shrink-0">/skills:list</span>
-					</span>
-				</button>
-			{/if}
-			{#if slashCommandIds.includes('skills:create')}
-				<button
-					type="button"
-					aria-label={`${$t('chat.commandCreateSkill')}: ${$t('chat.commandCreateSkillDesc')}`}
-					use:tooltip={{
-						content: $t('chat.commandCreateSkillDesc'),
-						placement: 'top'
-					}}
-					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-						{selectedSlashCommand('skills:create') ? 'app-interactive-active' : ''}"
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => {
-						runSlashCommand('skills:create');
-					}}
-					onmouseenter={() => selectSlashCommand('skills:create')}
-				>
-					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
-						<Icon name="plus" size={14} />
-					</span>
-					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-						<span class="truncate">{$t('chat.commandCreateSkill')}</span>
-						<span class="app-muted text-[0.625rem] truncate shrink-0">/skills:create</span>
-					</span>
-				</button>
-			{/if}
-			{#if slashSkillSuggestions.length > 0}
-				<div class="app-muted mb-0.5 px-2 pt-1 pb-0.5 text-[0.625rem] leading-none">
-					{$t('chat.skills')}
-				</div>
-				{#each slashSkillSuggestions as skill (skill.id)}
-					<button
-						type="button"
-						aria-label={`${$t('chat.useSkill')}: ${skill.label}`}
-						use:tooltip={{
-							content: skill.label,
-							placement: 'top'
-						}}
-						class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-							{selectedSlashSkill(skill.id) ? 'app-interactive-active' : ''}"
-						onmousedown={(e) => e.preventDefault()}
-						onclick={() => {
-							runSlashSkill(skill);
-						}}
-						onmouseenter={() => selectSlashSkill(skill.id)}
-					>
-						<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
-							<Icon name="spark" size={13} strokeWidth={1.7} />
-						</span>
-						<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-							<span class="truncate">{skill.label}</span>
-							{#if skill.source && skill.source !== 'workspace'}
-								<span class="app-muted text-[0.625rem] truncate shrink-0">{skill.source}</span>
-							{/if}
-						</span>
-					</button>
-				{/each}
-			{/if}
 		</div>
 	{/if}
 
@@ -1686,19 +992,6 @@
 		{/if}
 		<!-- Editor area -->
 		<div class="px-2.5">
-			{#if voiceModeEnabled}
-				<div class="app-muted pt-2 flex items-center gap-2 text-[0.6875rem] font-medium">
-					<span class="relative flex size-2">
-						<span
-							class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70 {voiceListening
-								? 'animate-ping'
-								: ''}"
-						></span>
-						<span class="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
-					</span>
-					<span>{voiceStatusLabel}</span>
-				</div>
-			{/if}
 			<div
 				bind:this={editorEl}
 				class="chat-editor-mount scrollbar-hidden"
@@ -1804,14 +1097,7 @@
 				{/if}
 			</div>
 			<div class="self-end mr-1 flex items-center gap-2">
-				<SendButton
-					{canSend}
-					{streaming}
-					onsend={handleSubmit}
-					{oncancel}
-					onvoice={voiceModeAvailable ? toggleVoiceMode : undefined}
-					voiceActive={voiceModeEnabled || voiceListening}
-				/>
+				<SendButton {canSend} {streaming} onsend={handleSubmit} {oncancel} />
 			</div>
 		</div>
 	</div>

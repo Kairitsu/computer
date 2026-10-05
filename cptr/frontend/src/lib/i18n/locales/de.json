@@ -438,7 +438,7 @@
 	"admin.models": "Modelle",
 	"models.defaultModel": "Standardmodell",
 	"models.defaultModelNone": "Keines (erstes verfügbares verwenden)",
-	"models.defaultModelHint": "Vorausgewähltes Modell für neue Chats und Gateway-Anfragen.",
+	"models.defaultModelHint": "Vorausgewähltes Modell für neue Chats.",
 	"models.defaults": "Standardwerte",
 	"models.noDefaults": "Keine globalen Standardwerte",
 	"models.noParams": "Keine Parameter",

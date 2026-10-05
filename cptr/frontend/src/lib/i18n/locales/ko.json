@@ -438,7 +438,7 @@
 	"admin.models": "모델",
 	"models.defaultModel": "기본 모델",
 	"models.defaultModelNone": "없음(첫 번째 사용 가능 항목 사용)",
-	"models.defaultModelHint": "새 채팅과 게이트웨이 요청에 미리 선택되는 모델입니다.",
+	"models.defaultModelHint": "새 채팅에 미리 선택되는 모델입니다.",
 	"models.defaults": "기본값",
 	"models.noDefaults": "글로벌 기본값 없음",
 	"models.noParams": "파라미터 없음",

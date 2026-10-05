@@ -9,7 +9,6 @@
 	import ReasoningCollapsible from './ReasoningCollapsible.svelte';
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
 	import { currentWorkspace, openFileTab } from '$lib/stores';
-	import { ttsConfigured, ttsEnabled } from '$lib/stores/audio';
 	import { tooltip } from '$lib/tooltip';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import Icon from '../Icon.svelte';
@@ -26,13 +25,11 @@
 		createdAt?: number | null;
 		siblingIndex?: number;
 		siblingTotal?: number;
-		speaking?: boolean;
 		onapprove: (messageId: string, callId: string, approved: boolean) => void;
 		onnavigate?: (direction: -1 | 1) => void;
 		onfork?: () => void;
 		onregenerate?: () => void;
 		onedit?: (content: string, output: any[] | null, submit: boolean) => void;
-		onspeak?: () => void;
 	}
 	let {
 		content,
@@ -45,13 +42,11 @@
 		createdAt = null,
 		siblingIndex = 0,
 		siblingTotal = 1,
-		speaking = false,
 		onapprove,
 		onnavigate,
 		onfork,
 		onregenerate,
-		onedit,
-		onspeak
+		onedit
 	}: Props = $props();
 
 	let edit = $state(false);
@@ -704,19 +699,6 @@
 								/></svg
 							>
 						{/if}
-					</button>
-				{/if}
-				{#if done && $ttsEnabled && $ttsConfigured}
-					<button
-						class="p-0.5 rounded transition-colors duration-100
-							{speaking
-							? 'text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-white/10'
-							: 'text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300'}"
-						onclick={onspeak}
-						aria-label={speaking ? $t('chat.stopSpeaking') : $t('chat.speakResponses')}
-						use:tooltip={speaking ? $t('chat.stopSpeaking') : $t('chat.speakResponses')}
-					>
-						<Icon name="speaker" size={14} />
 					</button>
 				{/if}
 				{#if done && onregenerate}

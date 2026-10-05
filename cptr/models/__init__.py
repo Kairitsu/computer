@@ -10,8 +10,6 @@ from cptr.models.chats import (
     ChatMessage,
     internal_status,
     is_internal_chat,
-    is_pending_subagent_result_message,
-    is_subagent_result_message,
 )
 from cptr.models.automations import Automation, AutomationRun
 
@@ -27,8 +25,6 @@ __all__ = [
     "ChatMessage",
     "internal_status",
     "is_internal_chat",
-    "is_pending_subagent_result_message",
-    "is_subagent_result_message",
     "Automation",
     "AutomationRun",
 ]

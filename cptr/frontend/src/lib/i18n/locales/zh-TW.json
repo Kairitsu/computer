@@ -512,7 +512,7 @@
 	"admin.models": "模型",
 	"models.defaultModel": "預設模型",
 	"models.defaultModelNone": "無（使用第一個可用模型）",
-	"models.defaultModelHint": "新聊天和閘道請求的預選模型。",
+	"models.defaultModelHint": "新聊天的預選模型。",
 	"models.defaults": "預設值",
 	"models.noDefaults": "沒有全域預設值",
 	"models.noParams": "沒有參數",

@@ -26,8 +26,7 @@
 		toggleSplit: $t('keyboard.toggleSplit'),
 		toggleSidebar: $t('keyboard.toggleSidebar'),
 		approveToolCall: $t('keyboard.approveToolCall'),
-		rejectToolCall: $t('keyboard.rejectToolCall'),
-		voiceMemo: $t('keyboard.voiceMemo')
+		rejectToolCall: $t('keyboard.rejectToolCall')
 	});
 
 	/** Translated action labels for display. */
@@ -45,8 +44,7 @@
 		toggleSplit: $t('keyboard.action.toggleSplit'),
 		toggleSidebar: $t('keyboard.action.toggleSidebar'),
 		approveToolCall: $t('keyboard.action.approveToolCall'),
-		rejectToolCall: $t('keyboard.action.rejectToolCall'),
-		voiceMemo: $t('keyboard.action.voiceMemo')
+		rejectToolCall: $t('keyboard.action.rejectToolCall')
 	});
 
 	let recordingAction = $state<ActionId | null>(null);

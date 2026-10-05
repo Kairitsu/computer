@@ -287,7 +287,6 @@ export interface ChatModel {
 	id: string;
 	name: string;
 	provider: string;
-	connection_id: string;
 	agent_id?: string;
 	/** Whether the composer's reasoning effort reaches this model. */
 	supports_reasoning_effort?: boolean;

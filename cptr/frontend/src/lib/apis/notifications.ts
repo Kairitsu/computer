@@ -8,7 +8,7 @@ export const CHAT_NOTIFICATION_EVENTS = {
 export type ChatNotificationEvent =
 	(typeof CHAT_NOTIFICATION_EVENTS)[keyof typeof CHAT_NOTIFICATION_EVENTS];
 export type NotificationDelivery = 'away' | 'always';
-export type NotificationTargetType = 'webhook' | 'bot';
+export type NotificationTargetType = 'webhook';
 
 export interface NotificationEventOption {
 	event: ChatNotificationEvent;
@@ -25,19 +25,9 @@ export interface NotificationTarget {
 	delivery: NotificationDelivery;
 	config: {
 		url_masked?: string;
-		bot_id?: string;
-		destination_chat_id?: string;
 	};
 	created_at: number;
 	updated_at: number;
-}
-
-export interface BotOption {
-	id: string;
-	name: string;
-	platform: string;
-	is_active: boolean;
-	is_running: boolean;
 }
 
 export interface NotificationTargetPayload {
@@ -80,9 +70,4 @@ export function testNotificationTarget(id: string) {
 
 export function setDefaultNotificationTarget(id: string) {
 	return fetchJSON<NotificationTarget>(`/api/notifications/targets/${id}/default`, { method: 'PUT' });
-}
-
-export async function listNotificationBotOptions(): Promise<BotOption[]> {
-	const data = await fetchJSON<{ bots: BotOption[] }>('/api/notifications/bot-options');
-	return data.bots;
 }

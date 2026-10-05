@@ -275,7 +275,11 @@ export const gitPrClose = (
 	root: string,
 	number: number,
 	{ comment = '', delete_branch = false }: { comment?: string; delete_branch?: boolean } = {}
-) => fetchJSON<GitOperationResult>('/api/git/pr/close', jsonBody({ root, number, comment, delete_branch }));
+) =>
+	fetchJSON<GitOperationResult>(
+		'/api/git/pr/close',
+		jsonBody({ root, number, comment, delete_branch })
+	);
 
 export const gitPrReopen = (root: string, number: number) =>
 	fetchJSON<GitOperationResult>('/api/git/pr/reopen', jsonBody({ root, number }));
@@ -316,12 +320,6 @@ export const discardChanges = (root: string, files: string[]) =>
 
 export const gitCommit = (root: string, message: string) =>
 	fetchJSON('/api/git/commit', jsonBody({ root, message }));
-
-export const generateGitCommitMessage = (root: string, modelId?: string) =>
-	fetchJSON<{ summary: string; description: string }>(
-		'/api/git/message',
-		jsonBody({ root, model_id: modelId || undefined })
-	);
 
 export const gitPull = (root: string) =>
 	fetchJSON<GitOperationResult>('/api/git/pull', jsonBody({ root }));
