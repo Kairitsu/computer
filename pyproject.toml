@@ -21,6 +21,7 @@ dependencies = [
     "python-dateutil>=2.8",
     "truststore>=0.10",
     "pywinpty>=2.0; sys_platform == 'win32'",
+    "pillow>=11",
 ]
 
 [project.optional-dependencies]

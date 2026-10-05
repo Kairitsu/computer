@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
+import math
 import os
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+from PIL import Image
+
 from cptr.models import Config
-from cptr.utils.agents.attachments import PreparedAgentAttachments
+from cptr.utils.agents.attachments import AgentAttachment, PreparedAgentAttachments
 from cptr.utils.agents.acp import (
     ACP_PERMISSION_METHOD,
     AcpClient,
@@ -52,6 +57,8 @@ XAI_MODELS_UPDATE_METHODS = frozenset({"_x.ai/models/update", "x.ai/models/updat
 GROK_MODEL_CATALOG_WAIT_SECONDS = 5
 # Grok's default `[session] auto_compact_threshold_percent`.
 GROK_AUTO_COMPACT_PERCENT = 85
+# Grok drops prompt images with fewer pixels than this before the model sees them.
+GROK_MIN_IMAGE_PIXELS = 512
 
 PLAN_APPROVE_LABEL = "Approve"
 PLAN_KEEP_PLANNING_LABEL = "Keep planning"
@@ -650,6 +657,30 @@ async def _compact_if_full(
             await client.request(XAI_COMPACT_METHOD, {"sessionId": client.session_id})
 
 
+def _grok_image_block(image: AgentAttachment) -> dict[str, str]:
+    """The ACP image block for an attachment, scaled up if Grok would drop it as too small.
+
+    A 16×16 icon has 256 pixels, under Grok's minimum; repeating each pixel keeps it
+    exactly as it was. Large images are left to Grok, which downscales them itself.
+    """
+    block = {"data": image.base64, "mimeType": image.mime_type}
+    try:
+        with Image.open(io.BytesIO(base64.b64decode(image.base64))) as source:
+            width, height = source.size
+            if width * height >= GROK_MIN_IMAGE_PIXELS:
+                return block
+            scale = math.ceil(math.sqrt(GROK_MIN_IMAGE_PIXELS / (width * height)))
+            scaled = source.convert("RGBA").resize(
+                (width * scale, height * scale), Image.Resampling.NEAREST
+            )
+    except Exception:
+        # Not an image Pillow reads; Grok decides what to do with it.
+        return block
+    buffer = io.BytesIO()
+    scaled.save(buffer, format="PNG")
+    return {"data": base64.b64encode(buffer.getvalue()).decode(), "mimeType": "image/png"}
+
+
 async def _next_prompt_index(client: AcpClient) -> int | None:
     """The rewind point the next prompt will get: one per earlier prompt."""
     try:
@@ -763,9 +794,7 @@ async def run_grok_agent(
 
         prompt = turn_prompt_text(messages, system_prompt, resumed=resumed)
 
-        images = [
-            {"data": image.base64, "mimeType": image.mime_type} for image in attachments.images
-        ]
+        images = [_grok_image_block(image) for image in attachments.images]
         if client.session_id:
             yield AgentTurnStarted(
                 session_id=client.session_id, prompt_index=await _next_prompt_index(client)
@@ -791,12 +820,15 @@ async def run_grok_agent(
                             context_tokens = tokens
                             yield AgentContextUsage(tokens=tokens, window=context_window)
                     continue
+                # Subagents stream their own replies and reasoning on the same pipe, under
+                # their own session ids; only this session's belong in the chat's reply. The
+                # parent gets a subagent's result through its spawn_subagent tool call.
+                own_session = params.get("sessionId") in (None, client.session_id)
                 text = acp_text_from_update(params)
-                if text:
+                if text and own_session:
                     yield AgentTextDelta(text)
-                # Subagents stream their reasoning on the same pipe; show only this session's.
                 thought = acp_thought_from_update(params)
-                if thought and params.get("sessionId") in (None, client.session_id):
+                if thought and own_session:
                     yield AgentReasoningDelta(thought)
                 tool = acp_tool_from_update(params)
                 if tool:

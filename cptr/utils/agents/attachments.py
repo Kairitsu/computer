@@ -98,4 +98,9 @@ async def prepare_agent_attachments(
     if staged_files:
         lines = "\n".join(f"- {item.path}" for item in staged_files)
         suffix = f"\n\nAttached files staged in the workspace:\n{lines}"
+    if images:
+        # The images also go into the prompt; their paths let the agent work on the
+        # files (e.g. edit an image) and find them if an image could not be shown.
+        lines = "\n".join(f"- {item.path}" for item in images)
+        suffix += f"\n\nThe attached images are also saved in the workspace:\n{lines}"
     return PreparedAgentAttachments(images=images, files=staged_files, prompt_suffix=suffix)
