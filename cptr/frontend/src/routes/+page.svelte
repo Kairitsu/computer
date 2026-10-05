@@ -47,10 +47,8 @@
 	let pendingIntent = $state<LaunchIntent | null>(null);
 	let folderPickerIntent = $state<LaunchIntent | null>(null);
 	let folderPickerWorkspace = $state<string | null>(null);
-	// The permanent Home tab is a chat slot: a new chat until sent, then that chat.
-	// Bumping the key remounts it for a different chat or a fresh one.
-	let homeChatKey = $state(0);
-	let homeChatWorkspace = $state('');
+	// The permanent Home tab is always a new chat. Chats open in tabs of their own,
+	// including the one Home starts when its first message is sent.
 	const activeHomeGroup = $derived(
 		$homeState.groups.find((group) => group.id === $homeState.activeGroupId) ?? $homeState.groups[0]
 	);
@@ -95,51 +93,42 @@
 		}
 	}
 
-	function homeSlotGroupId(): string | undefined {
-		return (
-			$homeState.groups.find((group) => group.tabs.some((tab) => tab.type === 'home'))?.id ??
-			$homeState.groups[0]?.id
-		);
+	let homeTabCount = 0;
+	function newHomeTabId(): string {
+		return `home-${Date.now()}-${++homeTabCount}`;
 	}
 
-	/** Load a chat (or a fresh new chat) into the Home tab's chat slot. */
-	function loadHomeSlot(chatId?: string) {
-		const groupId = homeSlotGroupId();
-		const group = $homeState.groups.find((item) => item.id === groupId);
-		const homeTab = group?.tabs.find((tab) => tab.type === 'home');
-		if (!groupId || !homeTab) return;
-		const unchanged = homeTab.path === chatId;
-		updateHomeTabs(groupId, (tabs) => ({
-			tabs: tabs.map((tab) =>
-				tab.id === homeTab.id
-					? { ...tab, path: chatId, label: unchanged ? tab.label : chatId ? 'Chat' : 'New Chat' }
-					: tab
-			),
-			activeTabId: homeTab.id
-		}));
-		if (unchanged) return;
-		homeChatWorkspace = '';
-		homeChatKey += 1;
-	}
-
-	function openHomeChat(chatId?: string) {
-		if (!chatId) return loadHomeSlot();
+	/** Sidebar "new chat": switch back to the Home tab, leaving every other tab open. */
+	function focusHomeTab() {
 		for (const group of $homeState.groups) {
-			const existing = group.tabs.find(
-				(tab) => (tab.type === 'chat' || tab.type === 'home') && tab.path === chatId
-			);
+			const homeTab = group.tabs.find((tab) => tab.type === 'home');
+			if (homeTab) {
+				updateHomeTabs(group.id, (tabs) => ({ tabs, activeTabId: homeTab.id }));
+				return;
+			}
+		}
+	}
+
+	/** Open a chat in a tab of its own, or switch to the tab already showing it. */
+	function openHomeChat(chatId?: string) {
+		if (!chatId) return focusHomeTab();
+		for (const group of $homeState.groups) {
+			const existing = group.tabs.find((tab) => tab.type === 'chat' && tab.path === chatId);
 			if (existing) {
 				updateHomeTabs(group.id, (tabs) => ({ tabs, activeTabId: existing.id }));
 				return;
 			}
 		}
-		loadHomeSlot(chatId);
+		const groupId = activeHomeGroup?.id;
+		if (!groupId) return;
+		const tab: Tab = { id: newHomeTabId(), type: 'chat', label: 'Chat', path: chatId };
+		updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
 	}
 
-	/** Tab bar "+ → New chat": a separate chat tab next to the Home slot. */
+	/** Tab bar "+ → New chat": a separate chat tab next to the Home tab. */
 	function openHomeChatTab(groupId = $homeState.activeGroupId) {
 		const tab: Tab = {
-			id: `home-${Date.now()}`,
+			id: newHomeTabId(),
 			type: 'chat',
 			label: 'New Chat',
 			path: `new-${Date.now()}`
@@ -163,17 +152,44 @@
 		if (!tabs.length) closeHomeGroup(groupId);
 	}
 
-	function updateHomeChatTab(
-		tabId: string,
-		chatId: string,
-		label: string,
-		groupId = $homeState.activeGroupId
-	) {
-		const group = $homeState.groups.find((item) => item.id === groupId);
-		if (!group) return;
-		updateHomeTabs(groupId, (tabs) => ({
-			tabs: tabs.map((tab) => (tab.id === tabId ? { ...tab, path: chatId, label } : tab)),
-			activeTabId: group.activeTabId
+	function updateHomeChatTab(tabId: string, chatId: string, label: string) {
+		homeState.update((state) => ({
+			...state,
+			groups: state.groups.map((group) => {
+				const tab = group.tabs.find((item) => item.id === tabId);
+				if (!tab) return group;
+				if (tab.type !== 'home') {
+					return {
+						...group,
+						tabs: group.tabs.map((item) =>
+							item.id === tabId ? { ...item, path: chatId, label } : item
+						)
+					};
+				}
+				// Home just sent its first message. The chat keeps this tab (and its live
+				// panel) as an ordinary chat tab at the end; a fresh Home tab takes its place.
+				const homeTab: Tab = {
+					id: newHomeTabId(),
+					type: 'home',
+					label: 'New Chat',
+					permanent: true
+				};
+				const chatTab: Tab = { ...tab, type: 'chat', permanent: false, path: chatId, label };
+				return {
+					...group,
+					tabs: [...group.tabs.map((item) => (item.id === tabId ? homeTab : item)), chatTab]
+				};
+			})
+		}));
+	}
+
+	function setHomeTabWorkspace(tabId: string, workspace: string) {
+		homeState.update((state) => ({
+			...state,
+			groups: state.groups.map((group) => ({
+				...group,
+				tabs: group.tabs.map((tab) => (tab.id === tabId ? { ...tab, workspace } : tab))
+			}))
 		}));
 	}
 
@@ -778,32 +794,20 @@
 				}}
 			/>
 			<div class="pane-content">
-				{#each homePane.tabs.filter((tab) => tab.type === 'home') as tab (tab.id)}
-					<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== homePane.activeTabId}>
-						{#key homeChatKey}
-							<ChatPanel
-								chatId={tab.path?.startsWith('pending-') ? undefined : tab.path}
-								tabId={tab.id}
-								workspace={homeChatWorkspace}
-								active={tab.id === homePane.activeTabId}
-								onworkspacechange={tab.path ? undefined : (path) => (homeChatWorkspace = path)}
-								ontabupdate={(tabId, chatId, label) =>
-									updateHomeChatTab(tabId, chatId, label, homePane.id)}
-								onopenchat={(chatId) => openHomeChat(chatId)}
-							/>
-						{/key}
-					</div>
-				{/each}
-				{#each homePane.tabs.filter((tab) => tab.type === 'chat') as tab (tab.id)}
+				<!-- One keyed list, so the Home tab's panel lives on when it becomes a chat tab. -->
+				{#each homePane.tabs.filter((tab) => tab.type === 'home' || tab.type === 'chat') as tab (tab.id)}
 					<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== homePane.activeTabId}>
 						<ChatPanel
 							chatId={tab.path?.startsWith('new-') || tab.path?.startsWith('pending-')
 								? undefined
 								: tab.path}
 							tabId={tab.id}
+							workspace={tab.workspace ?? ''}
 							active={tab.id === homePane.activeTabId}
-							ontabupdate={(tabId, chatId, label) =>
-								updateHomeChatTab(tabId, chatId, label, homePane.id)}
+							onworkspacechange={tab.type === 'home'
+								? (path) => setHomeTabWorkspace(tab.id, path)
+								: undefined}
+							ontabupdate={updateHomeChatTab}
 							onopenchat={(chatId) => openHomeChat(chatId)}
 						/>
 					</div>
