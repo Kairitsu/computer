@@ -67,6 +67,8 @@ class AgentContextUsage:
 
     tokens: int
     window: int | None = None
+    # How often the agent has compacted this session, when it says.
+    compactions: int | None = None
 
 
 @dataclass

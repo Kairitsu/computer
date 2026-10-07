@@ -47,6 +47,8 @@ XAI_EXTENSION_REQUESTS = XAI_ASK_USER_QUESTION_METHODS | XAI_EXIT_PLAN_MODE_METH
 # Carries Grok's per-model-call usage and auto-compaction progress.
 XAI_SESSION_NOTIFICATIONS = frozenset({"_x.ai/session_notification", "x.ai/session_notification"})
 XAI_COMPACT_METHOD = "_x.ai/compact_conversation"
+# Reports Grok's own count of the session's context, the one its auto-compaction checks.
+XAI_SESSION_INFO_METHOD = "_x.ai/session/info"
 # Rewind points are one per prompt, numbered from 0; rewinding to a point drops that
 # prompt and everything after it from Grok's history. Files are left as they are.
 XAI_REWIND_POINTS_METHOD = "_x.ai/rewind/points"
@@ -55,8 +57,8 @@ XAI_REWIND_EXECUTE_METHOD = "_x.ai/rewind/execute"
 XAI_MODELS_UPDATE_METHODS = frozenset({"_x.ai/models/update", "x.ai/models/update"})
 # How long session setup waits for Grok to push its model catalog.
 GROK_MODEL_CATALOG_WAIT_SECONDS = 5
-# Grok's default `[session] auto_compact_threshold_percent`.
-GROK_AUTO_COMPACT_PERCENT = 85
+# Grok's default `[session] auto_compact_threshold_percent`; session/info reports the one in use.
+GROK_AUTO_COMPACT_PERCENT = 80
 # Grok drops prompt images with fewer pixels than this before the model sees them.
 GROK_MIN_IMAGE_PIXELS = 512
 
@@ -236,6 +238,7 @@ def _context_update(update: Any) -> tuple[int | None, int | None]:
 
     `response_completed` reports each model call: its prompt (`input_tokens` excludes
     the cached part) plus its reply is what the conversation holds after the call.
+    That holds only for calls without xAI's own tools (see _is_backend_tool).
     Auto-compaction reports the size it shrank the conversation to.
     """
     if not isinstance(update, dict):
@@ -258,6 +261,44 @@ def _context_update(update: Any) -> tuple[int | None, int | None]:
     if kind == "auto_compact_completed":
         return _positive_int(update.get("tokens_after")), None
     return None, None
+
+
+def _is_backend_tool(update: Any) -> bool:
+    """A tool xAI runs on its side within one model call, such as web search.
+
+    xAI bills each round of such a call, so the call's usage sums several prompts and
+    can exceed the context window; it says nothing about how full the context is.
+    """
+    if not isinstance(update, dict) or update.get("sessionUpdate") != "tool_call":
+        return False
+    meta = update.get("_meta")
+    return isinstance(meta, dict) and meta.get("backend") is True
+
+
+async def _session_context(client: AcpClient) -> dict[str, int]:
+    """Grok's own count of the session's context, and how often it compacted the session.
+
+    It is what Grok's auto-compaction compares with its threshold. After session/load and
+    until the next model call, it is the count Grok saved as the last turn ended.
+    """
+    try:
+        result = await client.request(XAI_SESSION_INFO_METHOD, {"sessionId": client.session_id})
+    except Exception:
+        return {}
+    info = result.get("result") if isinstance(result.get("result"), dict) else result
+    context = info.get("context")
+    if not isinstance(context, dict):
+        return {}
+    compactions = context.get("compactionCount")
+    values = {
+        "tokens": _positive_int(context.get("used")),
+        "window": _positive_int(context.get("total")),
+        "compact_percent": _positive_int(context.get("autoCompactThresholdPercent")),
+        "compactions": compactions
+        if isinstance(compactions, int) and not isinstance(compactions, bool) and compactions >= 0
+        else None,
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _turn_usage(
@@ -552,6 +593,20 @@ def grok_session_ids(chat: Any) -> list[str]:
     ]
 
 
+def grok_compactions(chat: Any) -> int:
+    """How often Grok compacted the session a chat continues in."""
+    sessions = ((getattr(chat, "meta", None) or {}).get("agent_sessions")) or {}
+    if not isinstance(sessions, dict):
+        return 0
+    return sum(
+        session["compactions"]
+        for session in sessions.values()
+        if isinstance(session, dict)
+        and session.get("agent") == "grok"
+        and isinstance(session.get("compactions"), int)
+    )
+
+
 async def close_all_grok_sessions() -> None:
     for session_id, live in list(_live_sessions.items()):
         await _close_live(session_id, live)
@@ -648,13 +703,40 @@ async def _compact_if_full(
 ) -> None:
     """Compact a reloaded session that ended its last turn past Grok's threshold.
 
-    A reloaded session's context count starts near zero, so Grok would not compact
-    before this turn's first model call on its own.
+    A reloaded session starts from the context count Grok saved as the last turn ended,
+    which can leave out that turn's last model call, so Grok may not compact before this
+    turn's first model call on its own.
     """
-    tokens = _positive_int((resume_state or {}).get("context_tokens"))
-    if tokens and context_window and tokens * 100 >= context_window * GROK_AUTO_COMPACT_PERCENT:
+    state = resume_state or {}
+    # Counts saved before context_exact existed summed xAI's web-search rounds.
+    if not state.get("context_exact"):
+        return
+    tokens = _positive_int(state.get("context_tokens"))
+    percent = _positive_int(state.get("compact_percent")) or GROK_AUTO_COMPACT_PERCENT
+    if tokens and context_window and tokens * 100 >= context_window * percent:
         with suppress(Exception):
             await client.request(XAI_COMPACT_METHOD, {"sessionId": client.session_id})
+
+
+def _saved_context(
+    resume_state: dict[str, Any] | None,
+    context_tokens: int | None,
+    grok_context: dict[str, int],
+) -> dict[str, Any]:
+    """The context count a later process that reloads the session goes by."""
+    state = resume_state or {}
+    # Nothing new this turn: keep what the session had.
+    saved = {
+        key: state[key]
+        for key in ("context_tokens", "context_exact", "compact_percent")
+        if key in state
+    }
+    if context_tokens:
+        # Grok's count or a model call without xAI's own tools, so not a sum of rounds.
+        saved.update(context_tokens=context_tokens, context_exact=True)
+    if "compact_percent" in grok_context:
+        saved["compact_percent"] = grok_context["compact_percent"]
+    return saved
 
 
 def _grok_image_block(image: AgentAttachment) -> dict[str, str]:
@@ -791,6 +873,11 @@ async def run_grok_agent(
             # After a rewind the stored context size no longer holds.
             await _compact_if_full(client, resume_state, context_window)
         context_tokens: int | None = None
+        # Compactions so far: Grok's count as of the last turn, plus the ones seen since.
+        compactions = (resume_state or {}).get("compactions") if resumed else None
+        compactions = compactions if isinstance(compactions, int) else 0
+        # Whether the model call under way has run one of xAI's own tools.
+        backend_call = False
 
         prompt = turn_prompt_text(messages, system_prompt, resumed=resumed)
 
@@ -814,16 +901,30 @@ async def run_grok_agent(
                 if event.get("method") in XAI_SESSION_NOTIFICATIONS:
                     # Subagents run in their own sessions; only this one fills the chat's window.
                     if params.get("sessionId") == client.session_id:
-                        tokens, window = _context_update(params.get("update"))
+                        update = params.get("update")
+                        kind = update.get("sessionUpdate") if isinstance(update, dict) else None
+                        tokens, window = _context_update(update)
+                        if kind == "response_completed":
+                            if backend_call:
+                                # Several prompts summed; Grok's count comes at turn end.
+                                tokens = None
+                            backend_call = False
+                        elif kind == "auto_compact_completed":
+                            # cptr's own compact_conversation call reports this too.
+                            compactions += 1
                         context_window = window or context_window
                         if tokens:
                             context_tokens = tokens
-                            yield AgentContextUsage(tokens=tokens, window=context_window)
+                            yield AgentContextUsage(
+                                tokens=tokens, window=context_window, compactions=compactions
+                            )
                     continue
                 # Subagents stream their own replies and reasoning on the same pipe, under
                 # their own session ids; only this session's belong in the chat's reply. The
                 # parent gets a subagent's result through its spawn_subagent tool call.
                 own_session = params.get("sessionId") in (None, client.session_id)
+                if own_session and _is_backend_tool(params.get("update")):
+                    backend_call = True
                 text = acp_text_from_update(params)
                 if text and own_session:
                     yield AgentTextDelta(text)
@@ -840,6 +941,18 @@ async def run_grok_agent(
                 with suppress(asyncio.CancelledError):
                     await prompt_task
 
+        # Grok's own count is right after web searches too, and it is the one Grok's
+        # auto-compaction goes by.
+        grok_context = await _session_context(client) if client.session_id else {}
+        if "tokens" in grok_context:
+            context_tokens = grok_context["tokens"]
+            context_window = grok_context.get("window") or context_window
+        compactions = grok_context.get("compactions", compactions)
+        if context_tokens:
+            yield AgentContextUsage(
+                tokens=context_tokens, window=context_window, compactions=compactions
+            )
+
         usage = _turn_usage(prompt_result, context_tokens, context_window)
         # Checked in before AgentDone: the consumer stops reading at AgentDone.
         if client.session_id:
@@ -853,9 +966,9 @@ async def run_grok_agent(
                 "workspace": workspace,
                 "model": model,
                 # For a later process that reloads the session; see _compact_if_full.
-                "context_tokens": context_tokens
-                or (_positive_int((resume_state or {}).get("context_tokens")) if resumed else None),
+                **_saved_context(resume_state if resumed else None, context_tokens, grok_context),
                 "context_window": context_window,
+                "compactions": compactions,
             },
         )
     except asyncio.CancelledError:

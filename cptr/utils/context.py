@@ -30,16 +30,24 @@ def estimate_messages_tokens(messages: list[dict]) -> int:
     return total
 
 
-def build_context_usage(tokens: int, *, threshold: int | None = None) -> dict:
-    """Return context fullness stats for estimated token counts."""
+def build_context_usage(
+    tokens: int, *, threshold: int | None = None, compactions: int | None = None
+) -> dict:
+    """Return context fullness stats for estimated token counts.
+
+    ``compactions`` is how often the agent compacted the chat's session, when known.
+    """
     resolved_threshold = threshold or _get_threshold()
     percent = round((tokens / resolved_threshold) * 100) if resolved_threshold > 0 else 0
-    return {
+    usage = {
         "tokens": tokens,
         "estimated_tokens": tokens,
         "threshold": resolved_threshold,
         "percent": max(0, percent),
     }
+    if compactions is not None:
+        usage["compactions"] = compactions
+    return usage
 
 
 def normalize_usage(usage: dict | None) -> dict | None:

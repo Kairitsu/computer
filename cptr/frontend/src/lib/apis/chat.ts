@@ -34,6 +34,8 @@ export interface ContextUsage {
 	estimated_tokens: number;
 	threshold: number;
 	percent: number;
+	/** How often the agent compacted the chat's session, when known. */
+	compactions?: number;
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';

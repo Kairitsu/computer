@@ -1440,6 +1440,7 @@ async def run_chat_task(
                     context_usage=build_context_usage(
                         event.tokens,
                         threshold=event.window or chat_context_window(chat_params),
+                        compactions=event.compactions,
                     )
                 )
             elif isinstance(event, AgentError):
