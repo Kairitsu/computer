@@ -42,3 +42,16 @@ export const deleteWorkspace = (path: string) =>
 // ── Welcome page ────────────────────────────────────────────────
 
 export const getWelcome = () => fetchJSON<Record<string, unknown>>('/api/state/welcome');
+
+// ── System info ─────────────────────────────────────────────────
+
+/** This host's IPv4 address and the country it geolocates to. */
+export interface HostNetwork {
+	ipv4: string | null;
+	/** ISO 3166-1 alpha-2 code, e.g. "US"; null when the lookup failed. */
+	region: string | null;
+	/** False when only a private address could be found. */
+	public: boolean;
+}
+
+export const getHostNetwork = () => fetchJSON<HostNetwork>('/api/state/network');

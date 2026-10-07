@@ -8,9 +8,13 @@ Three layers:
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import os
+import time
 from pathlib import Path, PureWindowsPath
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, Query
 from cptr.env import DATA_DIR
 from cptr.models import Chat, UserStates, Workspace
@@ -231,8 +235,6 @@ async def delete_workspace(request: Request, path: str = Query(...)):
 @router.get("/welcome")
 async def get_welcome(request: Request):
     """Return data for the welcome/landing page."""
-    import asyncio
-
     try:
         identity = await identity_for_request(request)
         user_home = Path(identity.home)
@@ -262,6 +264,153 @@ async def get_welcome(request: Request):
     return system_info
 
 
+# How many processes the server sends for each sort key (CPU and memory).
+# The system info panel shows the first six and expands to the rest.
+_PROCESS_LIMIT = 15
+
+_PUBLIC_NETWORK_TTL = 3600
+_PUBLIC_NETWORK_RETRY = 300
+_public_network: tuple[float, dict] | None = None
+_public_network_lock = asyncio.Lock()
+
+
+def _cloudflare_trace(response: httpx.Response) -> tuple[str | None, str | None]:
+    fields = dict(line.split("=", 1) for line in response.text.splitlines() if "=" in line)
+    return fields.get("ip"), fields.get("loc")
+
+
+# Each source answers with the caller's address and the country it maps to.
+# Asking 1.1.1.1 by address, and ip.sb on its IPv4-only host, keeps dual-stack
+# hosts on IPv4.
+_PUBLIC_IP_SOURCES = (
+    ("https://1.1.1.1/cdn-cgi/trace", _cloudflare_trace),
+    (
+        "https://api-ipv4.ip.sb/geoip",
+        lambda response: (response.json().get("ip"), response.json().get("country_code")),
+    ),
+    (
+        "https://ipinfo.io/json",
+        lambda response: (response.json().get("ip"), response.json().get("country")),
+    ),
+)
+
+
+@router.get("/network")
+async def get_network():
+    """Return this host's public IPv4 address and the country it is located in.
+
+    Falls back to the address of the default route when no lookup service
+    answers. Cached, since the answer rarely changes and each lookup leaves
+    the machine.
+    """
+    global _public_network
+    async with _public_network_lock:
+        now = time.monotonic()
+        if _public_network and _public_network[0] > now:
+            return _public_network[1]
+        info = await _lookup_public_network()
+        ttl = _PUBLIC_NETWORK_TTL
+        if info is None:
+            ipv4 = _local_ipv4()
+            info = {
+                "ipv4": ipv4,
+                "region": None,
+                "public": bool(ipv4) and ipaddress.ip_address(ipv4).is_global,
+            }
+            ttl = _PUBLIC_NETWORK_RETRY
+        _public_network = (now + ttl, info)
+        return info
+
+
+async def _lookup_public_network() -> dict | None:
+    # Skip proxy settings: the address wanted is this machine's, not a proxy's.
+    async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+        for url, parse in _PUBLIC_IP_SOURCES:
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                ip, region = parse(response)
+                address = ipaddress.ip_address((ip or "").strip())
+            except (httpx.HTTPError, ValueError, AttributeError):
+                continue
+            if address.version != 4:
+                continue
+            region = (region or "").strip().upper()
+            if len(region) != 2 or not region.isalpha() or region == "XX":
+                region = None
+            return {"ipv4": str(address), "region": region, "public": address.is_global}
+    return None
+
+
+def _local_ipv4() -> str | None:
+    """The address this host sends from by default. Connecting a UDP socket sends nothing."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("1.1.1.1", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _cpu_info() -> dict:
+    """CPU model name, and whether it runs under a hypervisor (None when unknown)."""
+    import platform
+    import subprocess
+
+    model = ""
+    virtual = None
+    try:
+        if platform.system() == "Linux":
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    key, _, value = line.partition(":")
+                    key = key.strip()
+                    if key == "model name" and not model:
+                        model = value
+                    elif key == "flags" and virtual is None:
+                        virtual = "hypervisor" in value.split()
+            if not model:
+                # ARM kernels leave "model name" out of /proc/cpuinfo
+                result = subprocess.run(
+                    ["lscpu"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                for line in result.stdout.splitlines():
+                    if line.startswith("Model name:"):
+                        model = line.split(":", 1)[1]
+                        break
+        elif platform.system() == "Darwin":
+            result = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            model = result.stdout
+            result = subprocess.run(
+                ["sysctl", "-n", "kern.hv_vmm_present"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.stdout.strip() in ("0", "1"):
+                virtual = result.stdout.strip() == "1"
+        elif platform.system() == "Windows":
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            ) as key:
+                model = winreg.QueryValueEx(key, "ProcessorNameString")[0]
+    except Exception:
+        pass
+    return {"cpu_model": " ".join(model.split()) or None, "cpu_virtual": virtual}
+
+
 def _collect_system_info(user_home: Path) -> dict:
     """Gather all system info synchronously. Called via asyncio.to_thread()."""
     import platform
@@ -284,6 +433,7 @@ def _collect_system_info(user_home: Path) -> dict:
         "arch": platform.machine(),
         "python": platform.python_version(),
         "cpu_count": os.cpu_count() or 0,
+        **_cpu_info(),
     }
 
     # Memory (cross-platform)
@@ -412,94 +562,42 @@ def _collect_system_info(user_home: Path) -> dict:
     except Exception:
         pass
 
-    # Network interfaces
-    try:
-        interfaces = []
-        if platform.system() == "Darwin":
-            result = subprocess.run(
-                ["ifconfig"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            current_iface = ""
-            for line in result.stdout.split("\n"):
-                if line and not line.startswith("\t") and not line.startswith(" "):
-                    current_iface = line.split(":")[0]
-                if "inet " in line and "127.0.0.1" not in line:
-                    ip = line.strip().split()[1]
-                    interfaces.append({"name": current_iface, "ip": ip})
-        elif platform.system() == "Linux":
-            result = subprocess.run(
-                ["ip", "-4", "-o", "addr", "show"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            for line in result.stdout.strip().split("\n"):
-                parts = line.split()
-                if len(parts) >= 4 and "127.0.0.1" not in parts[3]:
-                    interfaces.append({"name": parts[1], "ip": parts[3].split("/")[0]})
-        elif platform.system() == "Windows":
-            result = subprocess.run(
-                ["ipconfig"],
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-            current_iface = ""
-            for line in result.stdout.splitlines():
-                stripped = line.strip()
-                if line and not line.startswith(" ") and ":" in line:
-                    current_iface = line.split(":")[0].strip()
-                elif "IPv4" in stripped and ":" in stripped:
-                    ip = stripped.rsplit(":", 1)[1].strip()
-                    if ip != "127.0.0.1":
-                        interfaces.append({"name": current_iface, "ip": ip})
-        if interfaces:
-            system["network"] = interfaces
-    except Exception:
-        pass
-
-    # Top processes (by CPU)
+    # Busiest processes by CPU and by memory, so the client can sort either way
     processes = []
     try:
-        if platform.system() == "Darwin":
+        entries = []
+        if platform.system() in ("Darwin", "Linux"):
+            command = (
+                ["ps", "-Aco", "pid,ppid,pcpu,pmem,comm"]
+                if platform.system() == "Darwin"
+                else ["ps", "-eo", "pid,ppid,pcpu,pmem,comm", "--no-headers"]
+            )
             result = subprocess.run(
-                ["ps", "-Arco", "pid,pcpu,pmem,comm"],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=3,
             )
-            for line in result.stdout.strip().split("\n")[1:6]:
-                parts = line.split(None, 3)
-                if len(parts) >= 4:
-                    processes.append(
-                        {
-                            "pid": int(parts[0]),
-                            "cpu": float(parts[1]),
-                            "mem": float(parts[2]),
-                            "name": parts[3],
-                        }
-                    )
-        elif platform.system() == "Linux":
-            result = subprocess.run(
-                ["ps", "-eo", "pid,pcpu,pmem,comm", "--sort=-pcpu", "--no-headers"],
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-            for line in result.stdout.strip().split("\n")[:5]:
-                parts = line.split(None, 3)
-                if len(parts) >= 4:
-                    processes.append(
-                        {
-                            "pid": int(parts[0]),
-                            "cpu": float(parts[1]),
-                            "mem": float(parts[2]),
-                            "name": parts[3],
-                        }
-                    )
+            lines = result.stdout.strip().split("\n")
+            if platform.system() == "Darwin":
+                lines = lines[1:]
+            for line in lines:
+                parts = line.split(None, 4)
+                if len(parts) >= 5:
+                    # Skip the ps run above; a process that short-lived reads as busy
+                    if parts[4] == "ps" and parts[1] == str(os.getpid()):
+                        continue
+                    try:
+                        entries.append(
+                            {
+                                "pid": int(parts[0]),
+                                "cpu": float(parts[2]),
+                                "mem": float(parts[3]),
+                                "name": parts[4],
+                            }
+                        )
+                    except ValueError:
+                        pass
         elif platform.system() == "Windows":
             result = subprocess.run(
                 ["tasklist", "/FO", "CSV", "/NH"],
@@ -512,7 +610,6 @@ def _collect_system_info(user_home: Path) -> dict:
 
             reader = csv.reader(StringIO(result.stdout))
             mem_total = system.get("memory_total", 1)
-            entries = []
             for row in reader:
                 if len(row) >= 5:
                     try:
@@ -528,16 +625,14 @@ def _collect_system_info(user_home: Path) -> dict:
                                 if mem_total
                                 else 0,
                                 "name": row[0],
-                                "_mem_kb": mem_kb,
                             }
                         )
                     except (ValueError, IndexError):
                         pass
-            # Sort by memory usage (best we can do without psutil)
-            entries.sort(key=lambda e: e.get("_mem_kb", 0), reverse=True)
-            for e in entries[:5]:
-                e.pop("_mem_kb", None)
-                processes.append(e)
+        by_cpu = sorted(entries, key=lambda e: e["cpu"], reverse=True)
+        by_mem = sorted(entries, key=lambda e: e["mem"], reverse=True)
+        picked = {e["pid"]: e for e in by_cpu[:_PROCESS_LIMIT] + by_mem[:_PROCESS_LIMIT]}
+        processes = sorted(picked.values(), key=lambda e: e["cpu"], reverse=True)
     except Exception:
         pass
 
