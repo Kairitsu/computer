@@ -723,6 +723,7 @@ async def _get_chat_context_usage(
     if not message_id:
         return None
 
+    from cptr.utils.agents.grok import grok_compactions
     from cptr.utils.chat_task import _load_message_history, _load_system_prompt
     from cptr.utils.context import (
         build_context_usage,
@@ -746,6 +747,7 @@ async def _get_chat_context_usage(
     if existing_summary:
         system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"
 
+    compactions = grok_compactions(chat)
     usage_checkpoint = await _get_latest_usage_checkpoint(chat.id, message_id)
     if usage_checkpoint:
         trailing_messages, usage = usage_checkpoint
@@ -755,9 +757,13 @@ async def _get_chat_context_usage(
                 tokens += estimate_messages_tokens(
                     [{"role": m.role, "content": m.content or ""} for m in trailing_messages]
                 )
-            return build_context_usage(tokens, threshold=compact_token_threshold)
+            return build_context_usage(
+                tokens, threshold=compact_token_threshold, compactions=compactions
+            )
 
-    return estimate_context_usage(messages, system, threshold=compact_token_threshold)
+    usage = estimate_context_usage(messages, system, threshold=compact_token_threshold)
+    usage["compactions"] = compactions
+    return usage
 
 
 async def _infer_chat_model(chat_id: str) -> str:

@@ -113,6 +113,13 @@
 						{$t('usageIndicator.contextNone')}
 					{/if}
 				</p>
+				{#if contextUsage?.compactions != null}
+					<p class="usage-meta tabular-nums">
+						{contextUsage.compactions > 0
+							? $t('usageIndicator.compactions', { count: contextUsage.compactions })
+							: $t('usageIndicator.compactionsNone')}
+					</p>
+				{/if}
 				<p class="usage-meta">{$t('usageIndicator.contextHint')}</p>
 			</section>
 
