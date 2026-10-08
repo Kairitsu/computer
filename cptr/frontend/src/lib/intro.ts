@@ -1,5 +1,5 @@
 /**
- * Opening animation, after Grok App: the boot splash in app.html (the Grok logo)
+ * Opening animation, after Grok App: the boot splash in app.html (the OI mark)
  * hands over to the app shell, whose regions then rise in one after another
  * while `html.cptr-intro` is set. The timeline lives in app.css; elements opt in
  * with `data-intro` / `data-intro-row`. Plays once per page load.

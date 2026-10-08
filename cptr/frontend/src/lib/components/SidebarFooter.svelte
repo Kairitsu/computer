@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { appVersion, showChangelog } from '$lib/stores';
+	import { appVersion, showChangelog, showUpdateModal, updateAvailable } from '$lib/stores';
 	import { session, clearSession } from '$lib/session';
 	import { t } from '$lib/i18n';
 	import { keybindings, formatChord } from '$lib/stores/keybindings';
@@ -16,7 +16,6 @@
 	let { onsettings, onsysteminfo }: Props = $props();
 	let showMenu = $state(false);
 	let menuButtonEl: HTMLButtonElement | undefined = $state();
-	const FEATURE_REQUEST_URL = 'https://github.com/open-webui/computer/issues/new/choose';
 
 	function openSettings(tab?: string) {
 		showMenu = false;
@@ -26,6 +25,11 @@
 	function openSystemInfo() {
 		showMenu = false;
 		onsysteminfo();
+	}
+
+	function openUpdates() {
+		showMenu = false;
+		showUpdateModal.set(true);
 	}
 </script>
 
@@ -104,11 +108,15 @@
 				icon: 'info',
 				onclick: openSystemInfo
 			},
-			{
-				label: $t('sidebar.suggestFeature'),
-				icon: 'external-link',
-				onclick: () => window.open(FEATURE_REQUEST_URL, '_blank', 'noopener,noreferrer')
-			},
+			...($session?.role === 'admin'
+				? [
+						{
+							label: $updateAvailable ? $t('sidebar.updateAvailable') : $t('sidebar.checkUpdates'),
+							icon: 'refresh',
+							onclick: openUpdates
+						}
+					]
+				: []),
 			{ divider: true, label: '', onclick: () => {} },
 			{ label: $t('sidebar.logOut'), icon: 'log-out', onclick: clearSession }
 		]}

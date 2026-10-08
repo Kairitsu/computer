@@ -5,7 +5,8 @@
 		streamingBehavior,
 		showUpdateToastPref,
 		updateAvailable,
-		latestVersion
+		updateCheck,
+		showUpdateModal
 	} from '$lib/stores';
 	import type { StreamingBehavior } from '$lib/stores';
 	import { t, locale, changeLocale, supportedLocales } from '$lib/i18n';
@@ -210,14 +211,12 @@
 						>v{$appVersion}</button
 					>
 				{/if}
-				{#if $updateAvailable}
+				{#if $updateAvailable && $updateCheck?.latest}
 					<span class="text-[0.6875rem] text-gray-300 dark:text-gray-600">·</span>
-					<a
-						href="https://github.com/open-webui/computer/releases"
-						target="_blank"
-						rel="noopener noreferrer"
-						class="text-[0.6875rem] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-						>{$t('about.updateAvailable', { version: $latestVersion })}</a
+					<button
+						onclick={() => showUpdateModal.set(true)}
+						class="text-[0.6875rem] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
+						>{$t('about.updateAvailable', { version: $updateCheck.latest.version })}</button
 					>
 				{/if}
 			</div>
@@ -285,6 +284,16 @@
 
 		{#if $session?.role === 'admin'}
 			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.updates')}</h3>
+			<div class="flex items-center justify-between mb-2.5">
+				<span class="text-xs text-gray-600 dark:text-gray-400">
+					{$t('general.checkUpdatesDesc')}
+				</span>
+				<button
+					class="app-muted app-interactive h-7 shrink-0 rounded-lg border px-2.5 text-xs font-medium transition-colors duration-75"
+					style="border-color: var(--app-border);"
+					onclick={() => showUpdateModal.set(true)}>{$t('sidebar.checkUpdates')}</button
+				>
+			</div>
 			<label class="flex items-center justify-between cursor-pointer">
 				<span class="text-xs text-gray-600 dark:text-gray-400"
 					>{$t('general.updateNotifications')}</span

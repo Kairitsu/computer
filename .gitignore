@@ -26,3 +26,8 @@ cptr/frontend/.svelte-kit/
 Thumbs.db
 
 .cptr
+
+# install.sh / in-app updates
+.tools/
+cptr/frontend/build.next/
+cptr/frontend/build.old/

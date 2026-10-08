@@ -12,6 +12,7 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import UpdateToast from '$lib/components/UpdateToast.svelte';
+	import UpdateModal from '$lib/components/UpdateModal.svelte';
 	import { Toaster, toast } from 'svelte-sonner';
 	import {
 		activeTab,
@@ -25,7 +26,7 @@
 		closeGroup,
 		appVersion,
 		lastSeenVersion,
-		latestVersion,
+		updateCheck,
 		updateAvailable,
 		showChangelog,
 		showSearch,
@@ -36,7 +37,7 @@
 	import { socketStore } from '$lib/stores/socket.svelte';
 	import { setSession, clearSession, session } from '$lib/session';
 	import { getSession, getConfig } from '$lib/apis/auth';
-	import { fetchJSON } from '$lib/apis';
+	import { checkForUpdate } from '$lib/apis/update';
 	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
 	import { t } from '$lib/i18n';
 	import {
@@ -256,10 +257,10 @@
 				if (elapsed < 24 * 60 * 60 * 1000) return;
 			}
 
-			const data = await fetchJSON<{ current: string; latest: string }>('/api/version/updates');
-			latestVersion.set(data.latest);
+			const data = await checkForUpdate();
+			updateCheck.set(data);
 			// Show toast if update is available (reactive via $updateAvailable)
-			if (data.current !== data.latest) {
+			if (data.available) {
 				showUpdateToast = true;
 			}
 		} catch {
@@ -498,6 +499,7 @@
 		/>
 	{/if}
 	<ChangelogModal />
+	<UpdateModal />
 	{#if $updateAvailable && showUpdateToast}
 		<UpdateToast
 			onclose={() => {

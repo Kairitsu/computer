@@ -50,8 +50,7 @@
 	import StatusModal from './StatusModal.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Icon from '../Icon.svelte';
-	import SuperGrokMark from '../brand/SuperGrokMark.svelte';
-	import { quotaData } from '$lib/stores/quota';
+	import OiMark from '../brand/OiMark.svelte';
 	import { tooltip } from '$lib/tooltip';
 	import { toast } from 'svelte-sonner';
 	import { t } from '$lib/i18n';
@@ -299,7 +298,6 @@
 	const streaming = $derived(allMessages.some((m) => m.role === 'assistant' && !m.done));
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
 	/** Landing wordmark follows the Grok CLI plan, like Grok App. */
-	const landingPlan = $derived($quotaData?.supergrok?.plan ?? '');
 	const landingTitle = $derived($t('chat.landingTitle'));
 	// In plan mode, a finished reply is a plan waiting for approval.
 	const planApprovalMessageId = $derived.by(() => {
@@ -1271,12 +1269,16 @@
 	{/if}
 
 	{#if isLanding}
-		<!-- Landing: Grok-style new chat -->
+		<!-- Landing: new chat under the OI mark -->
 		<div class="flex-1 overflow-y-auto flex flex-col">
 			<div class="max-w-3xl w-full mx-auto px-4 flex flex-col my-auto pt-6 pb-16">
 				<div class="landing-mark mb-10" data-intro-landing>
-					<div class="landing-brand text-gray-900 dark:text-white">
-						<SuperGrokMark heavy={/heavy/i.test(landingPlan)} title={landingPlan || undefined} />
+					<div class="landing-brand">
+						<OiMark size={56} class="landing-logo" />
+						<p class="landing-wordmark">
+							<span class="text-gray-400 dark:text-gray-500">Open WebUI</span>
+							<span class="text-gray-900 dark:text-white">Computer</span>
+						</p>
 					</div>
 					<h1
 						class="landing-prompt text-gray-900 dark:text-white"
@@ -1448,16 +1450,16 @@
 {/if}
 
 <style>
-	/* Landing, after Grok App: the wordmark rises out of a mask, then the
-	 * prompt types in. Plays whenever a new chat opens; on first load it waits
-	 * for the sidebar (html.cptr-intro, see app.css). */
+	/* Landing: the OI tile and wordmark rise in, then the prompt types in. Plays
+	 * whenever a new chat opens; on first load it waits for the sidebar
+	 * (html.cptr-intro, see app.css). */
 	.landing-mark {
 		--brand-delay: 60ms;
 		--prompt-delay: 520ms;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.875rem;
+		gap: 1.375rem;
 		text-align: center;
 		user-select: none;
 	}
@@ -1469,14 +1471,28 @@
 
 	.landing-brand {
 		display: flex;
-		justify-content: center;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.875rem;
 		max-width: 100%;
-		overflow: hidden;
-		padding: 0.25rem 0.5rem;
 	}
 
-	.landing-brand :global(svg) {
-		animation: landing-brand-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) var(--brand-delay) backwards;
+	.landing-brand :global(.landing-logo) {
+		animation: landing-brand-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) var(--brand-delay) backwards;
+	}
+
+	.landing-wordmark {
+		margin: 0;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		line-height: 1.2;
+		letter-spacing: 0.01em;
+		animation: landing-wordmark-rise 560ms cubic-bezier(0.22, 1, 0.36, 1)
+			calc(var(--brand-delay) + 90ms) backwards;
+	}
+
+	.landing-wordmark span:first-child {
+		font-weight: 500;
 	}
 
 	.landing-prompt {
@@ -1494,7 +1510,14 @@
 	@keyframes landing-brand-rise {
 		from {
 			opacity: 0;
-			transform: translate3d(0, calc(100% + 0.75rem), 0);
+			transform: translate3d(0, 0.75rem, 0) scale(0.9);
+		}
+	}
+
+	@keyframes landing-wordmark-rise {
+		from {
+			opacity: 0;
+			transform: translate3d(0, 0.5rem, 0);
 		}
 	}
 
@@ -1508,7 +1531,8 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.landing-brand :global(svg),
+		.landing-brand :global(.landing-logo),
+		.landing-wordmark,
 		.landing-prompt {
 			animation: none;
 		}

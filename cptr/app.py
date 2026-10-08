@@ -18,6 +18,7 @@ from cptr.routers import (
     git_router,
     search_router,
     state_router,
+    update_router,
     workspace_router,
 )
 from cptr.utils.config import check_access, load_config
@@ -244,6 +245,7 @@ app.include_router(grok_router)
 app.include_router(git_router)
 app.include_router(search_router)
 app.include_router(state_router)
+app.include_router(update_router)
 app.include_router(workspace_router)
 
 
@@ -252,7 +254,12 @@ app.include_router(workspace_router)
 async def health():
     import os
 
-    return {"status": "ok", "uptime_seconds": int(time.time() - START_TIME), "pid": os.getpid()}
+    return {
+        "status": "ok",
+        "uptime_seconds": int(time.time() - START_TIME),
+        "started_at": START_TIME,
+        "pid": os.getpid(),
+    }
 
 
 @app.get("/api/changelog")
@@ -261,35 +268,6 @@ async def get_changelog():
     from cptr.utils.changelog import CHANGELOG
 
     return {key: CHANGELOG[key] for idx, key in enumerate(CHANGELOG) if idx < 5}
-
-
-@app.get("/api/version/updates")
-async def get_version_updates(request: Request):
-    """Check GitHub for the latest release. Admin-only."""
-    from cptr.routers.admin import require_admin
-    from importlib.metadata import version as pkg_version
-
-    require_admin(request)
-
-    try:
-        current = pkg_version("cptr")
-    except Exception:
-        current = "dev"
-
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(
-                "https://api.github.com/repos/open-webui/computer/releases/latest",
-                headers={"Accept": "application/vnd.github+json"},
-            )
-            r.raise_for_status()
-            tag = r.json().get("tag_name", "")
-            latest = tag.lstrip("v") if tag else current
-            return {"current": current, "latest": latest}
-    except Exception:
-        return {"current": current, "latest": current}
 
 
 # PWA manifest (backend-driven so each instance has its own identity)

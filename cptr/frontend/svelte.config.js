@@ -8,6 +8,9 @@ const config = {
 	},
 	kit: {
 		adapter: adapter({
+			// In-app updates build into a staging directory, then swap it in.
+			pages: process.env.CPTR_FRONTEND_OUT || 'build',
+			assets: process.env.CPTR_FRONTEND_OUT || 'build',
 			fallback: 'index.html'
 		}),
 		paths: {

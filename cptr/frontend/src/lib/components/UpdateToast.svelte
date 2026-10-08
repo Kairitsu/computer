@@ -1,26 +1,31 @@
 <script lang="ts">
 	import { t } from '$lib/i18n';
-	import { latestVersion } from '$lib/stores';
+	import { showUpdateModal, updateCheck } from '$lib/stores';
 	import Icon from './Icon.svelte';
 	import { fade } from 'svelte/transition';
 
 	let { onclose }: { onclose: () => void } = $props();
+
+	const latest = $derived($updateCheck?.latest);
+	const newVersion = $derived(
+		latest && $updateCheck && latest.version !== $updateCheck.current.version ? latest.version : ''
+	);
+
+	function view() {
+		showUpdateModal.set(true);
+		onclose();
+	}
 </script>
 
 <div class="fixed bottom-4 right-4 z-50" in:fade={{ duration: 100 }} out:fade={{ duration: 75 }}>
 	<div class="app-theme app-surface flex items-center gap-2 rounded-lg border px-3 py-2">
 		<span class="app-muted text-[0.6875rem]">
-			{$t('update.available', { version: $latestVersion })}
+			{newVersion ? $t('update.available', { version: newVersion }) : $t('update.availableCommits')}
 		</span>
 
-		<a
-			href="https://github.com/open-webui/computer/releases"
-			target="_blank"
-			rel="noopener noreferrer"
-			class="text-[0.6875rem] hover:underline font-medium"
-		>
-			{$t('update.viewRelease')}
-		</a>
+		<button class="text-[0.6875rem] hover:underline font-medium" onclick={view}>
+			{$t('update.view')}
+		</button>
 
 		<button
 			onclick={onclose}

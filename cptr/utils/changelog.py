@@ -35,7 +35,11 @@ def parse_changelog(path: Path | None = None) -> dict:
         content = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
+    return parse_changelog_text(content)
 
+
+def parse_changelog_text(content: str) -> dict:
+    """Parse CHANGELOG.md text; see parse_changelog for the shape."""
     changelog: dict = {}
     current_version: str | None = None
     current_section: str | None = None

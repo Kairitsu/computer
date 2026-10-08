@@ -25,6 +25,7 @@ import {
 	saveWorkspaceState
 } from '$lib/apis/state';
 import { releaseChat } from '$lib/apis/chat';
+import type { UpdateCheck } from '$lib/apis/update';
 import { changeLocale, i18next } from '$lib/i18n';
 import { requestConfirm } from '$lib/stores/confirm';
 import { streamingChatTabs } from '$lib/stores/chat';
@@ -340,17 +341,10 @@ export function requestHomeChat(chatId?: string): void {
 }
 export const appVersion = writable('');
 export const lastSeenVersion = writable('');
-export const latestVersion = writable('');
-export const updateAvailable = derived([appVersion, latestVersion], ([$app, $latest]) => {
-	if (!$app || !$latest || $app === 'dev' || $app === '0.0.0') return false;
-	return (
-		$app.localeCompare($latest, undefined, {
-			numeric: true,
-			sensitivity: 'case',
-			caseFirst: 'upper'
-		}) < 0
-	);
-});
+/** Last in-app update check (admins only); see UpdateModal. */
+export const updateCheck = writable<UpdateCheck | null>(null);
+export const updateAvailable = derived(updateCheck, ($check) => !!$check?.available);
+export const showUpdateModal = writable(false);
 export const showChangelog = writable(false);
 export const showUpdateToastPref = writable(true);
 export const showSearch = writable(false);

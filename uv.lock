@@ -285,7 +285,7 @@ wheels = [
 
 [[package]]
 name = "cptr"
-version = "0.9.21"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

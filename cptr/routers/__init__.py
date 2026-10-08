@@ -10,6 +10,7 @@ from cptr.routers.files import router as files_router
 from cptr.routers.git import router as git_router
 from cptr.routers.search import router as search_router
 from cptr.routers.state import router as state_router
+from cptr.routers.update import router as update_router
 from cptr.routers.workspace import router as workspace_router
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "git_router",
     "search_router",
     "state_router",
+    "update_router",
     "workspace_router",
 ]

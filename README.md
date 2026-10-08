@@ -6,7 +6,7 @@
 
 ![首页](docs/images/home.png)
 
-<sub>首页。截图时服务器上的 Grok CLI 还没有登录，所以右上角显示“没有可用模型”；登录之后，这里会换成 Grok 的模型、思考强度和上下文长度选项。</sub>
+<sub>首页。截图用的是一台演示实例，Grok CLI 还没准备好，所以右上角显示“没有可用模型”；登录之后，这里会换成 Grok 的模型、思考强度和上下文长度选项。</sub>
 
 ## 为什么会有这个项目
 
@@ -14,7 +14,7 @@
 
 Grok 网页版只给了“快速”和“专家”两个档位。想让它多想一会儿，或者给它更长的上下文，都找不到地方调。其实这些能力在 Grok CLI 里都有：模型、思考强度、上下文长度都能选，它还能直接读写文件、执行命令。问题在于它只有命令行。习惯终端的人觉得无所谓，可要让不写代码的朋友去敲命令、记参数，基本就等于把他们挡在了门外。
 
-市面上也有给 Grok CLI 做图形界面的应用，比如 Grok App。但它们大多是给本机上的 Grok CLI 套一层壳：Grok 装在哪台电脑上，你就得守着哪台电脑。电脑性能一般的话，Agent 一跑起来风扇就开始叫；人在外面、电脑没带、手边只有手机或平板的时候，干脆就用不了。
+市面上也有给 Grok CLI 做图形界面的应用，比如 [Grok App](https://github.com/RongleCat/grok-app)。但它们大多是给本机上的 Grok CLI 套一层壳：Grok 装在哪台电脑上，你就得守着哪台电脑。电脑性能一般的话，Agent 一跑起来风扇就开始叫；人在外面、电脑没带、手边只有手机或平板的时候，干脆就用不了。
 
 能在云端跑的方案倒也有，比如 T3 Code，但它们基本都是 IDE 的样子：文件树、编辑器、终端，一切围绕写代码来设计。我想要的不只是写代码的工具，而是一个什么事都能交给它的通用 Agent。整理资料、写周报、规划一次旅行、顺手改个脚本，都可以找它。
 
@@ -34,6 +34,7 @@ Grok 网页版只给了“快速”和“专家”两个档位。想让它多想
 - **在网页上登录 Grok。** “设置 → 用量”里可以用浏览器或设备码登录 Grok CLI，也能切换账号、退出登录，不用再 SSH 到服务器上敲 `grok login`。
 - **额度和用量一目了然。** 同一个页面会显示 SuperGrok 套餐的剩余额度和重置时间，还有一张按天统计 token 用量的活动热力图。
 - **界面参照 Grok App 重新设计。** 打开就是新对话；历史对话按项目归在侧边栏里，每个对话在自己的标签页中打开。另外加了六套配色皮肤，以及字号调节。
+- **一条命令装好，点一下更新。** 安装只需要一行命令；以后有新版本，在网页左下角的菜单里点「检查更新」，看过更新内容就能一键升级，服务会自己重启。
 
 ### 删掉的东西
 
@@ -58,21 +59,104 @@ Grok 网页版只给了“快速”和“专家”两个档位。想让它多想
 ### 准备工作
 
 - 一台能长期开着的服务器或电脑，Linux 或 macOS 都可以。家里闲置的主机、云服务器都行。
-- Python 3.10 及以上；Node.js 22，用来构建前端；推荐装上 [uv](https://docs.astral.sh/uv/)，装依赖会省事很多。
+- 系统里要有 git 和 curl。Python 和 Node.js 不用提前准备：安装脚本会用 [uv](https://docs.astral.sh/uv/) 准备 Python；系统里的 Node.js 版本不够新的话，它会另外下载一份 Node.js 22，只给这个项目用，不影响系统里原有的。
 - 一个能用 Grok CLI 的 xAI 账号，或者一个 xAI API key。登录方式和额度规则以 xAI 官方为准。
+- 用一个普通用户来装，不要用 root，原因见下面的[安全提醒](#安全提醒)。
 
-### 第一步：在服务器上装好 Grok CLI
+### 一键安装
+
+在服务器上运行这一行：
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash
-grok --version
+curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh | bash
 ```
 
-安装脚本默认把 `grok` 放在 `~/.local/bin`。装好后不用急着登录，后面可以直接在网页里登。如果更习惯命令行，现在就运行 `grok login` 也可以；服务器上没有浏览器的话，用 `grok login --device-auth`。
+它会依次做完这些事：
 
-### 第二步：下载并安装这个项目
+1. 检查 uv 和 Node.js，缺什么补什么；
+2. 服务器上还没有 Grok CLI 的话，用 xAI 官方的脚本装好；
+3. 把代码下载到 `~/.local/share/computer`，构建前端，安装后端依赖；
+4. 注册成后台服务并启动：Linux 上是名为 `computer` 的 systemd 服务，macOS 上交给 launchd，开机后都会自动运行；
+5. 打印第一次访问用的地址。
+
+一般几分钟就能装完，终端最后会显示类似这样的内容：
+
+```
+==> 安装完成（v1.0.0）
+    第一次访问请打开下面的地址，创建管理员账号：
+      http://192.168.1.20:8000/?token=3f9c…
+```
+
+用浏览器打开这个地址（从外网访问的话，把 IP 换成服务器的公网 IP 或域名），创建管理员账号，以后用账号密码登录就行。带 token 的链接只在首次设置时有用，服务每次重启都会换一个新的。
+
+创建系统服务要用 sudo，脚本到这一步会请你输入密码；当前用户没有 sudo 权限的话，它会改装成当前用户自己的 systemd 服务。所有数据（数据库、设置、保存的 Grok 账号）都放在 `~/.cptr`，想换位置，运行安装命令前设置好环境变量 `CPTR_DATA_DIR`。
+
+注意别直接 `pip install cptr`。PyPI 上的 `cptr` 是原版 Open WebUI Computer，不包含这里的任何修改。
+
+#### 改端口、换位置
+
+需要调整的时候，在命令末尾用 `bash -s --` 带上参数。比如改用 8080 端口：
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh | bash -s -- --port 8080
+```
+
+| 参数 | 作用 |
+| --- | --- |
+| `--port 8080` | 换一个端口，默认是 8000 |
+| `--host 127.0.0.1` | 只允许本机访问，适合前面已经有 Nginx 或 Caddy 反向代理的情况；默认是 `0.0.0.0`，局域网里的设备都能访问 |
+| `--dir 路径` | 换一个安装位置，默认是 `~/.local/share/computer` |
+| `--no-service` | 不创建后台服务，装好以后自己用命令启动 |
+| `--no-grok` | 不安装 Grok CLI |
+
+端口、监听地址和要不要后台服务这几项会被记下来，以后更新时自动沿用。
+
+### 在网页里登录 Grok
+
+打开“设置 → 用量”，就能看到 Grok 的登录卡片。如果你就坐在服务器前，用“浏览器登录”；如果是从手机或别的电脑访问，用“设备码登录”：点“打开登录页面”，在 xAI 的页面里输入卡片上的设备码，完成授权后回到这里就好。
+
+![在网页里用设备码登录 Grok CLI](docs/images/grok-login.png)
+
+<sub>设备码登录。网页会在服务器上运行 `grok login`，再把登录链接和设备码显示出来（截图里的设备码已打码）。</sub>
+
+登录成功后，输入框上方的“没有可用模型”会换成 Grok 的模型列表，接下来就可以开始对话了。
+
+如果你用的是 xAI API key，让服务启动时带上环境变量 `XAI_API_KEY` 就行，Grok CLI 会直接用它认证。用 systemd 的话，可以运行 `sudo systemctl edit computer`，加上一行 `Environment=XAI_API_KEY=你的key`，再重启服务。
+
+### 从手机或其他设备访问
+
+安装脚本默认监听 `0.0.0.0:8000`，同一网络里的设备访问 `http://服务器IP:8000` 就能打开。界面是按手机屏幕设计的，竖着拿也很好用。
+
+不在同一个网络时，推荐用 [Tailscale](https://tailscale.com) 把手机和服务器连进同一个私有网络，简单又安全。如果想用域名访问，可以在前面加一层 Nginx 或 Caddy 反向代理，并且一定要开 HTTPS；反向代理记得同时转发 WebSocket，否则对话没法实时更新。
+
+不建议把它不加任何保护地直接暴露在公网上，原因见下面的[安全提醒](#安全提醒)。
+
+<p align="center"><img src="docs/images/mobile.png" alt="手机上的首页" width="280"></p>
+
+<p align="center"><sub>在手机上打开的首页。</sub></p>
+
+### 管理后台服务
+
+```bash
+sudo systemctl status computer     # 查看运行状态
+sudo systemctl restart computer    # 重启
+sudo systemctl stop computer       # 停止
+journalctl -u computer -f          # 查看日志
+```
+
+如果装的是当前用户自己的服务，把 `sudo systemctl` 换成 `systemctl --user`，`journalctl` 后面也加上 `--user`。macOS 上的日志在 `~/.cptr/logs/service.log`。
+
+### 手动安装
+
+<details>
+<summary>不想用安装脚本的话，也可以一步步手动来</summary>
+
+需要提前装好 git、Node.js 22 和 [uv](https://docs.astral.sh/uv/)。
+
+```bash
+# Grok CLI（默认装在 ~/.local/bin）
+curl -fsSL https://x.ai/cli/install.sh | bash
+
 git clone https://github.com/Kairitsu/computer.git
 cd computer
 
@@ -84,54 +168,12 @@ cd ../..
 
 # 安装后端依赖（会在项目目录里创建 .venv）
 uv sync --extra all
-```
 
-没有 uv 的话，用 Python 自带的 venv 也行：
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install '.[all]'
-```
-
-注意别直接 `pip install cptr`。PyPI 上的 `cptr` 是原版 Open WebUI Computer，不包含这里的任何修改。
-
-### 第三步：启动
-
-```bash
+# 启动
 .venv/bin/cptr run --host 0.0.0.0 --port 8000 --headless
 ```
 
-启动后，终端会打印一个带 token 的地址，比如 `http://localhost:8000/?token=…`。第一次访问一定要用这个地址（把 `localhost` 换成服务器的 IP 或域名），打开后创建管理员账号，以后用账号密码登录就行。这个 token 每次启动都会重新生成，只在首次设置时用到。
-
-所有数据（数据库、设置、保存的 Grok 账号）默认放在 `~/.cptr`，想换位置可以设置环境变量 `CPTR_DATA_DIR`。
-
-### 第四步：在网页里登录 Grok
-
-打开“设置 → 用量”，就能看到 Grok 的登录卡片。如果你就坐在服务器前，用“浏览器登录”；如果是从手机或别的电脑访问，用“设备码登录”：点“打开登录页面”，在 xAI 的页面里输入卡片上的设备码，完成授权后回到这里就好。
-
-![在网页里用设备码登录 Grok CLI](docs/images/grok-login.png)
-
-<sub>设备码登录。网页会在服务器上运行 `grok login`，再把登录链接和设备码显示出来（截图里的设备码已打码）。</sub>
-
-登录成功后，输入框上方的“没有可用模型”会换成 Grok 的模型列表，接下来就可以开始对话了。
-
-如果你用的是 xAI API key，在启动前设置好环境变量 `XAI_API_KEY` 就行，Grok CLI 会直接用它认证。
-
-### 第五步：从手机或其他设备访问
-
-用 `--host 0.0.0.0` 启动后，同一网络里的设备访问 `http://服务器IP:8000` 就能打开。界面是按手机屏幕设计的，竖着拿也很好用。
-
-不在同一个网络时，推荐用 [Tailscale](https://tailscale.com) 把手机和服务器连进同一个私有网络，简单又安全。如果想用域名访问，可以在前面加一层 Nginx 或 Caddy 反向代理，并且一定要开 HTTPS；反向代理记得同时转发 WebSocket，否则对话没法实时更新。
-
-不建议把它不加任何保护地直接暴露在公网上，原因见下面的[安全提醒](#安全提醒)。
-
-<p align="center"><img src="docs/images/mobile.png" alt="手机上的首页" width="280"></p>
-
-<p align="center"><sub>在手机上打开的首页。</sub></p>
-
-### 让它一直在后台运行
-
-在 Linux 上可以交给 systemd 管理。新建 `/etc/systemd/system/computer.service`，把里面的用户名和路径换成你自己的：
+启动后终端会打印一个带 token 的地址，第一次访问用它创建管理员账号。想让它常驻后台，可以写一个 systemd 服务，把里面的用户名和路径换成你自己的：
 
 ```ini
 [Unit]
@@ -141,7 +183,7 @@ After=network.target
 [Service]
 User=alice
 WorkingDirectory=/home/alice/computer
-# PATH 里要包含 grok 所在的目录，否则找不到 Grok CLI
+# PATH 里要包含 grok、uv 和 node 所在的目录
 Environment=PATH=/home/alice/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/alice/computer/.venv/bin/cptr run --host 0.0.0.0 --port 8000 --headless
 Restart=on-failure
@@ -150,20 +192,38 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+这样用 git 克隆、`uv sync` 装好的，同样可以在网页里更新。
+
+</details>
+
+## 更新
+
+### 在网页里更新
+
+点左下角的头像打开菜单，选「检查更新」，程序会去 GitHub 上看看有没有新代码：
+
+- 已经是最新的，它会直接告诉你；
+- 有新版本时，先列出这次的更新说明和新增的提交，看完再决定要不要更新；
+- 点「立即更新」后，它会拉取代码、安装依赖、重新构建前端，然后自己重启。一般一两分钟就好，页面会自动刷新，并弹出这次的更新记录。
+
+另外几点：
+
+- 这个入口只有管理员能看到。打开网页时如果发现有新版本，右下角也会弹出提示，不想看的话可以在“设置 → 通用 → 更新”里关掉。
+- 更新完会重启服务，正在进行的对话会被打断。如果有对话还在运行，点更新前它会先提醒你。
+- 中途任何一步出错，代码都会退回到更新前的版本，服务照常运行。具体原因可以在对话框里点「查看日志」看。
+- 如果你在服务器上直接改过代码又没有提交，为了不覆盖这些改动，更新会先停下来，并列出改过的文件。
+
+### 用命令行更新
+
+再运行一次安装命令就行。脚本发现已经装过，就只拉取新代码、重新构建，然后重启服务：
+
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now computer
-journalctl -u computer -f   # 第一次启动时，在这里找带 token 的地址
+curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh | bash
 ```
 
-### 更新
+安装时设置过的端口等参数会自动沿用；只有用 `--dir` 换过安装位置的，这里要带上同样的 `--dir`。
 
-```bash
-git pull
-cd cptr/frontend && npm ci && npm run build && cd ../..
-uv sync --extra all
-sudo systemctl restart computer   # 没用 systemd 的话，手动重启 cptr 即可
-```
+1.0.0 之前照旧版说明手动安装的，先用原来的办法更新一次（`git pull`、重新构建前端、`uv sync`、重启服务），之后就能直接在网页里更新了。
 
 ## 用起来的几个建议
 
@@ -187,6 +247,10 @@ sudo systemctl restart computer   # 没用 systemd 的话，手动重启 cptr �
 
 多半是 Grok CLI 还没登录，去“设置 → 用量”登录一下。如果还是不行，打开“设置 → 代理”，看看 Grok 的检测状态。找不到 `grok` 命令的话，可以在那里手动填写它的完整路径，比如 `/home/alice/.local/bin/grok`。
 
+**点「检查更新」时提示无法在应用内更新？**
+
+应用内更新要求代码目录是一个 git 仓库，并且程序是从这个目录里装的（一键安装和上面的手动安装都是这样）。如果是用 wheel 包或者 `pip install .` 装的，用一键安装脚本重新装一次就好，`~/.cptr` 里的数据不受影响。
+
 **能用 Docker 部署吗？**
 
 仓库里的 `Dockerfile` 是原版留下来的，镜像里没有 Grok CLI，暂时不建议用。
@@ -202,7 +266,7 @@ sudo systemctl restart computer   # 没用 systemd 的话，手动重启 cptr �
 ## 法律声明
 
 - **原项目与版权。** 本项目基于 [Open WebUI Computer](https://github.com/open-webui/computer) 修改而来。原项目 Copyright © 2026 Open WebUI, Inc.，保留所有权利，按 Open Use License 授权。该许可证完整纳入了 Elastic License 2.0（ELv2），并附加了“署名保留”条款，全文见 [LICENSE](LICENSE)。本仓库的全部内容，包括我的修改，同样按照这份许可证提供。应用内“设置 → 通用”中保留了原项目的许可证与版权信息。
-- **修改说明。** 本仓库相对原版做了大量修改，主要内容见上文[和原版有什么不同](#和原版有什么不同)，完整记录见 git 提交历史。修改者：Kairitsu。
+- **修改说明。** 本仓库相对原版做了大量修改，主要内容见上文[和原版有什么不同](#和原版有什么不同)，各版本的变化见 [CHANGELOG.md](CHANGELOG.md)，完整记录见 git 提交历史。修改者：Kairitsu。
 - **使用限制。** 按照许可证的规定，不得把本软件作为托管服务（hosted or managed service）提供给第三方；不得删除、修改、遮盖或替换软件中的任何署名元素（包括标志、产品名称、版权声明等）；商业、组织或生产环境的使用，需要遵守 [Open WebUI 的商业条款](https://openwebui.com/terms)，或者另外取得 Open WebUI, Inc. 的书面许可。个人自用之外的场景，请先仔细阅读 LICENSE。
 - **商标。** Open WebUI 是 Open WebUI, Inc. 的商标；Grok、SuperGrok、xAI 及相关标志属于 xAI。界面中出现的 Grok 名称和标志，只用来表明本项目连接的是哪个服务。本项目与 Open WebUI, Inc.、xAI 均无关联，也没有得到它们的认可或支持。
 - **Grok 的使用。** 通过本项目使用 Grok CLI 时，你仍然需要遵守 xAI 的服务条款和订阅规则。本项目不提供任何 Grok 账号、API key 或额度。
@@ -210,4 +274,6 @@ sudo systemctl restart computer   # 没用 systemd 的话，手动重启 cptr �
 
 ## 致谢
 
-感谢 Open WebUI 团队和 Tim Baek 做出了 Open WebUI Computer，这个项目的大部分功劳属于他们；也感谢 xAI 提供了 Grok CLI。
+- 感谢 Open WebUI 团队和 Tim Baek 做出了 Open WebUI Computer，这个项目的大部分功劳属于他们。
+- 感谢 [RongleCat/grok-app](https://github.com/RongleCat/grok-app)。本项目的 UI 设计参考了这个开源的 Grok 桌面客户端：首页、输入框、侧边栏、开场动画和用量页的布局都借鉴了它的做法，用量页上的 Grok 标志图形也取自这个项目。
+- 感谢 xAI 提供了 Grok CLI。
