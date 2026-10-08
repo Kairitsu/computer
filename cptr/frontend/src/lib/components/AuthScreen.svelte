@@ -23,20 +23,35 @@
 	let password = $state('');
 	let loading = $state(false);
 	let isSignup = $state(false);
+	// Second step for accounts with two-step sign-in: the password was right, now a code.
+	let needsCode = $state(false);
+	let code = $state('');
+	let useRecovery = $state(false);
 
 	const isSetup = mode === 'password' && needsSetup;
 
 	const subtitle = $derived(
-		isSetup || isSignup
-			? $t('auth.createAccountHint')
-			: mode === 'pam'
-				? $t('auth.signInSystemHint')
-				: $t('app.tagline')
+		needsCode
+			? useRecovery
+				? $t('auth.recoveryHint')
+				: $t('auth.totpHint')
+			: isSetup || isSignup
+				? $t('auth.createAccountHint')
+				: mode === 'pam'
+					? $t('auth.signInSystemHint')
+					: $t('app.tagline')
 	);
 
 	// The button draws its own arrow, so drop the one in the translation.
 	const submitLabel = $derived(
-		(isSetup ? $t('auth.createAccountBtn') : isSignup ? $t('auth.signUpBtn') : $t('auth.signInBtn'))
+		(needsCode
+			? $t('auth.verifyBtn')
+			: isSetup
+				? $t('auth.createAccountBtn')
+				: isSignup
+					? $t('auth.signUpBtn')
+					: $t('auth.signInBtn')
+		)
 			.replace(/\s*→\s*$/, '')
 			.trim()
 	);
@@ -51,7 +66,38 @@
 		};
 	});
 
+	function backToPassword() {
+		needsCode = false;
+		useRecovery = false;
+		code = '';
+		password = '';
+	}
+
+	async function submitCode() {
+		if (!code.trim()) {
+			toast.error($t('auth.codeRequired'));
+			return;
+		}
+		loading = true;
+		try {
+			await login(username.trim(), password, code.trim());
+			onauth();
+		} catch (e) {
+			const msg =
+				e instanceof ApiError
+					? e.message === 'invalid code'
+						? $t('auth.codeInvalid')
+						: e.message
+					: $t('auth.connectionFailed');
+			toast.error(msg);
+			code = '';
+		} finally {
+			loading = false;
+		}
+	}
+
 	async function submit() {
+		if (needsCode) return submitCode();
 		if (isSetup && password.length < 6) {
 			toast.error($t('auth.minChars'));
 			return;
@@ -81,8 +127,12 @@
 					onauth();
 				}
 			} else {
-				await login(username.trim(), password);
-				onauth();
+				const result = await login(username.trim(), password);
+				if (result.totp_required) {
+					needsCode = true;
+				} else {
+					onauth();
+				}
 			}
 		} catch (e) {
 			const msg = e instanceof ApiError ? e.message : $t('auth.connectionFailed');
@@ -113,29 +163,62 @@
 		</header>
 
 		<form class="auth-form" onsubmit={handleSubmit} action="javascript:void(0)">
-			<label class="auth-field">
-				<span class="auth-label">{$t('auth.username')}</span>
-				<input
-					type="text"
-					class="auth-input"
-					bind:value={username}
-					autofocus
-					autocomplete="username"
-					autocapitalize="off"
-					spellcheck="false"
-				/>
-			</label>
-			<label class="auth-field">
-				<span class="auth-label">{$t('auth.password')}</span>
-				<input
-					type="password"
-					class="auth-input"
-					bind:value={password}
-					autocomplete={isSetup || isSignup ? 'new-password' : 'current-password'}
-				/>
-			</label>
+			{#if needsCode}
+				<label class="auth-field">
+					<span class="auth-label">{useRecovery ? $t('auth.recoveryCode') : $t('auth.code')}</span>
+					{#if useRecovery}
+						<input
+							type="text"
+							class="auth-input"
+							bind:value={code}
+							autofocus
+							autocomplete="off"
+							autocapitalize="off"
+							spellcheck="false"
+							placeholder="xxxxx-xxxxx"
+						/>
+					{:else}
+						<input
+							type="text"
+							class="auth-input auth-code"
+							bind:value={code}
+							autofocus
+							inputmode="numeric"
+							autocomplete="one-time-code"
+							maxlength="7"
+							placeholder="123456"
+						/>
+					{/if}
+				</label>
+			{:else}
+				<label class="auth-field">
+					<span class="auth-label">{$t('auth.username')}</span>
+					<input
+						type="text"
+						class="auth-input"
+						bind:value={username}
+						autofocus
+						autocomplete="username"
+						autocapitalize="off"
+						spellcheck="false"
+					/>
+				</label>
+				<label class="auth-field">
+					<span class="auth-label">{$t('auth.password')}</span>
+					<input
+						type="password"
+						class="auth-input"
+						bind:value={password}
+						autocomplete={isSetup || isSignup ? 'new-password' : 'current-password'}
+					/>
+				</label>
+			{/if}
 
-			<button type="submit" class="auth-submit" disabled={loading || !password || !username.trim()}>
+			<button
+				type="submit"
+				class="auth-submit"
+				disabled={loading || (needsCode ? !code.trim() : !password || !username.trim())}
+			>
 				{#if loading}
 					<Spinner size={18} />
 				{:else}
@@ -153,7 +236,19 @@
 			</button>
 		</form>
 
-		{#if !isSetup && signupEnabled && mode === 'password'}
+		{#if needsCode}
+			<p class="auth-switch">
+				<button
+					type="button"
+					onclick={() => {
+						useRecovery = !useRecovery;
+						code = '';
+					}}>{useRecovery ? $t('auth.useAuthenticator') : $t('auth.useRecoveryCode')}</button
+				>
+				<span class="auth-switch-sep" aria-hidden="true">·</span>
+				<button type="button" onclick={backToPassword}>{$t('auth.back')}</button>
+			</p>
+		{:else if !isSetup && signupEnabled && mode === 'password'}
 			<p class="auth-switch">
 				{#if isSignup}
 					{$t('auth.alreadyHaveAccount')}
@@ -426,6 +521,16 @@
 
 	.auth-switch button:hover {
 		text-decoration-color: currentColor;
+	}
+
+	.auth-switch-sep {
+		margin: 0 0.5em;
+		color: var(--auth-line-strong);
+	}
+
+	.auth-code {
+		font-variant-numeric: tabular-nums;
+		letter-spacing: 0.3em;
 	}
 
 	@media (max-width: 480px) {

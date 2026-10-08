@@ -58,6 +58,11 @@ EVENT_CATALOG_SET = set(EVENT_CATALOG)
 SENSITIVE_KEYS = {
     "password",
     "hashed_password",
+    "current_password",
+    "new_password",
+    "code",
+    "recovery_codes",
+    "otpauth_uri",
     "token",
     "access_token",
     "refresh_token",

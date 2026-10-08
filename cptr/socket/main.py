@@ -116,6 +116,15 @@ async def on_chat_read(sid, data):
         )
 
 
+async def disconnect_user(user_id: str):
+    """Drop every live socket of this user (their sessions were revoked).
+
+    Browsers reconnect on their own and get back in only with a still-valid cookie.
+    """
+    for sid in list(_user_sids.get(user_id, set())):
+        await sio.disconnect(sid)
+
+
 async def emit_to_user(user_id: str, data: dict):
     """Send events:chat to all of a user's connected tabs/windows."""
     for sid in list(_user_sids.get(user_id, set())):

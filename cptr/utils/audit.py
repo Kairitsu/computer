@@ -23,6 +23,12 @@ class AuditLevel(str, Enum):
 
 _SENSITIVE_KEYS = {
     "password",
+    "current_password",
+    "new_password",
+    "code",
+    "totp_secret",
+    "recovery_codes",
+    "otpauth_uri",
     "api_key",
     "token",
     "authorization",

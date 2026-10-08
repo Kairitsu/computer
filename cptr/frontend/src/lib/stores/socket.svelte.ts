@@ -34,8 +34,12 @@ function connect() {
 		_connected = true;
 	});
 
-	socket.on('disconnect', () => {
+	socket.on('disconnect', (reason) => {
 		_connected = false;
+		// The server drops sockets when it signs a user out of other sessions (password or
+		// two-step sign-in changed). Socket.IO won't retry that on its own; this browser's
+		// fresh cookie gets it back in, while a signed-out device is refused.
+		if (reason === 'io server disconnect') setTimeout(() => socket?.connect(), 1000);
 	});
 
 	bindRegisteredListeners(socket);

@@ -21,27 +21,58 @@ from cptr.utils.config import (
     now_ms,
     pam_authenticate,
     record_attempt,
+    revoke_sessions,
     verify_password,
 )
 from cptr.models import User, Auth, Config
+from cptr.utils import totp
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 COOKIE_NAME = "cptr_session"
 
 
-def _ok_with_cookie(jwt_token: str, data: dict | None = None) -> JSONResponse:
+def _ok_with_cookie(request: Request, jwt_token: str, data: dict | None = None) -> JSONResponse:
     """Return a JSONResponse with the session cookie set."""
     resp = JSONResponse(data or {"ok": True})
     resp.set_cookie(
         key=COOKIE_NAME,
         value=jwt_token,
         httponly=True,
+        # The scheme the browser used, from X-Forwarded-Proto behind a proxy.
+        secure=request.url.scheme == "https",
         samesite="lax",
         path="/",
         max_age=SESSION_MAX_AGE,
     )
     return resp
+
+
+def _password_ok(auth: Auth, password: str) -> bool:
+    if auth.password:
+        return verify_password(password, auth.password)
+    return get_auth_mode() == AuthMode.PAM and pam_authenticate(auth.username, password)
+
+
+async def _check_code(auth: Auth, code: str) -> bool:
+    """Accept a current authenticator code (each only once) or an unused recovery code."""
+    digits = "".join(code.split())
+    if digits.isdigit() and len(digits) == totp.DIGITS:
+        last = auth.totp_last_step if auth.totp_last_step is not None else -1
+        step = totp.match_step(auth.totp_secret, digits, after_step=last)
+        return step is not None and await Auth.claim_totp_step(auth.user_id, step)
+    return await Auth.claim_recovery_code(auth, totp.hash_recovery_code(code))
+
+
+async def _second_factor(auth: Auth | None, code: str | None) -> JSONResponse | None:
+    """The error to return when the password was right but two-step sign-in isn't done."""
+    if auth is None or not auth.totp_enabled:
+        return None
+    if not code or not code.strip():
+        return JSONResponse({"error": "code required", "totp_required": True}, 401)
+    if not await _check_code(auth, code):
+        return JSONResponse({"error": "invalid code", "totp_required": True}, 401)
+    return None
 
 
 @router.get("")
@@ -89,7 +120,7 @@ async def get_auth(request: Request):
         remaining = auth.exp - time.time()
         if remote_user or remaining < SESSION_MAX_AGE / 2:
             new_token = create_token(auth.user_id, auth.username, user.role)
-            return _ok_with_cookie(new_token, data)
+            return _ok_with_cookie(request, new_token, data)
 
         return data
 
@@ -119,7 +150,7 @@ async def setup(request: Request, body: SetupRequest):
         created_at=now_ms(),
     )
 
-    return _ok_with_cookie(create_token(user_id, body.username.strip(), role="admin"))
+    return _ok_with_cookie(request, create_token(user_id, body.username.strip(), role="admin"))
 
 
 @router.post("/login")
@@ -141,7 +172,9 @@ async def login(request: Request, body: LoginRequest):
         auth, user = result
         if user.role == "pending":
             return JSONResponse({"error": "account pending approval"}, 403)
-        return _ok_with_cookie(create_token(auth.user_id, auth.username, role=user.role))
+        if denied := await _second_factor(auth, body.code):
+            return denied
+        return _ok_with_cookie(request, create_token(auth.user_id, auth.username, role=user.role))
 
     if mode == AuthMode.PAM:
         if not body.username:
@@ -149,6 +182,8 @@ async def login(request: Request, body: LoginRequest):
         if not pam_authenticate(body.username, body.password):
             return JSONResponse({"error": "incorrect credentials"}, 401)
         user_id = await get_or_create_user(body.username)
+        if denied := await _second_factor(await Auth.get_by_user_id(user_id), body.code):
+            return denied
         user = await User.get_by_id(user_id)
         if user and user.role == "pending":
             role = (
@@ -157,6 +192,7 @@ async def login(request: Request, body: LoginRequest):
             await User.update_role(user_id, role)
             user.role = role
         return _ok_with_cookie(
+            request,
             create_token(user_id, body.username, role=user.role if user else "user"),
             {"ok": True, "username": body.username},
         )
@@ -182,6 +218,10 @@ async def update_password(request: Request, body: UpdatePasswordRequest):
     )
     if auth_info is None:
         return JSONResponse({"error": "not authenticated"}, 401)
+    ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(ip):
+        return JSONResponse({"error": "too many attempts"}, 429)
+    record_attempt(ip)
 
     if len(body.new_password.strip()) < 6:
         return JSONResponse({"error": "min 6 characters"}, 400)
@@ -195,7 +235,109 @@ async def update_password(request: Request, body: UpdatePasswordRequest):
         return JSONResponse({"error": "incorrect current password"}, 401)
 
     await Auth.update_password(auth_info.user_id, hash_password(body.new_password.strip()))
-    return {"ok": True}
+    # Sign out everywhere else; this browser gets a fresh session.
+    return await _resign_in(request, auth_info.user_id, auth.username)
+
+
+async def _resign_in(request: Request, user_id: str, username: str, data: dict | None = None):
+    """Revoke every session of this user, then sign this browser back in."""
+    await revoke_sessions(user_id)
+    user = await User.get_by_id(user_id)
+    role = user.role if user else "user"
+    return _ok_with_cookie(request, create_token(user_id, username, role=role), data)
+
+
+# ── Two-step sign-in (TOTP) ──────────────────────────────────
+
+
+async def _totp_request(request: Request) -> tuple[Auth | None, JSONResponse | None]:
+    """The signed-in user's Auth row, rate-limited (these endpoints check secrets)."""
+    auth_info = check_access(
+        client_host=request.client.host if request.client else "127.0.0.1",
+        jwt_token=request.cookies.get(COOKIE_NAME),
+    )
+    if auth_info is None or not auth_info.user_id:
+        return None, JSONResponse({"error": "not authenticated"}, 401)
+    ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(ip):
+        return None, JSONResponse({"error": "too many attempts"}, 429)
+    record_attempt(ip)
+    auth = await Auth.get_by_user_id(auth_info.user_id)
+    if auth is None:
+        return None, JSONResponse({"error": "user not found"}, 404)
+    return auth, None
+
+
+@router.get("/totp")
+async def totp_status(request: Request):
+    """Whether two-step sign-in is on, and how many recovery codes are left."""
+    auth_info = check_access(
+        client_host=request.client.host if request.client else "127.0.0.1",
+        jwt_token=request.cookies.get(COOKIE_NAME),
+    )
+    if auth_info is None or not auth_info.user_id:
+        return JSONResponse({"error": "not authenticated"}, 401)
+    auth = await Auth.get_by_user_id(auth_info.user_id)
+    enabled = bool(auth and auth.totp_enabled)
+    return {
+        "enabled": enabled,
+        "recovery_codes_left": len(auth.recovery_code_hashes) if enabled else 0,
+    }
+
+
+@router.post("/totp/setup")
+async def totp_setup(request: Request, body: TotpSetupRequest):
+    """Start setup: a new secret and its QR code. Needs the password again."""
+    auth, error = await _totp_request(request)
+    if error:
+        return error
+    if auth.totp_enabled:
+        return JSONResponse({"error": "two-step sign-in is already on"}, 409)
+    if not _password_ok(auth, body.password):
+        return JSONResponse({"error": "incorrect password"}, 401)
+
+    secret = totp.new_secret()
+    await Auth.start_totp_setup(auth.user_id, secret)
+    uri = totp.otpauth_uri(secret, auth.username)
+    return {"secret": secret, "otpauth_uri": uri, "qr_svg": totp.qr_svg(uri)}
+
+
+@router.post("/totp/enable")
+async def totp_enable(request: Request, body: TotpEnableRequest):
+    """Finish setup with a code from the app. Returns the recovery codes, once."""
+    auth, error = await _totp_request(request)
+    if error:
+        return error
+    if auth.totp_enabled:
+        return JSONResponse({"error": "two-step sign-in is already on"}, 409)
+    if not auth.totp_secret:
+        return JSONResponse({"error": "start setup first"}, 400)
+    step = totp.match_step(auth.totp_secret, body.code)
+    if step is None:
+        return JSONResponse({"error": "invalid code"}, 400)
+
+    codes = totp.new_recovery_codes()
+    await Auth.enable_totp(auth.user_id, step, [totp.hash_recovery_code(c) for c in codes])
+    return await _resign_in(
+        request, auth.user_id, auth.username, {"ok": True, "recovery_codes": codes}
+    )
+
+
+@router.post("/totp/disable")
+async def totp_disable(request: Request, body: TotpDisableRequest):
+    """Turn two-step sign-in off. Needs the password and a code (or a recovery code)."""
+    auth, error = await _totp_request(request)
+    if error:
+        return error
+    if not auth.totp_enabled:
+        return JSONResponse({"error": "two-step sign-in is off"}, 400)
+    if not _password_ok(auth, body.password):
+        return JSONResponse({"error": "incorrect password"}, 401)
+    if not await _check_code(auth, body.code):
+        return JSONResponse({"error": "invalid code"}, 401)
+
+    await Auth.clear_totp(auth.user_id)
+    return await _resign_in(request, auth.user_id, auth.username)
 
 
 @router.post("/signup")
@@ -229,6 +371,7 @@ async def signup(request: Request, body: SignupRequest):
 class LoginRequest(BaseModel):
     username: Optional[str] = None
     password: str
+    code: Optional[str] = None  # authenticator or recovery code, when two-step sign-in is on
 
 
 class SetupRequest(BaseModel):
@@ -246,6 +389,19 @@ class SignupRequest(BaseModel):
 class UpdatePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class TotpSetupRequest(BaseModel):
+    password: str
+
+
+class TotpEnableRequest(BaseModel):
+    code: str
+
+
+class TotpDisableRequest(BaseModel):
+    password: str
+    code: str
 
 
 class UpdateProfileRequest(BaseModel):

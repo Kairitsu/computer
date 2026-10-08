@@ -58,6 +58,26 @@ def run(host: str, port: int, reload: bool, headless: bool):
         raise SystemExit(3)
 
 
+@cli.command("reset-2fa")
+@click.argument("username")
+def reset_2fa(username: str):
+    """Turn off two-step sign-in for USERNAME (lost authenticator and recovery codes)."""
+    import asyncio
+
+    async def _reset() -> bool:
+        from cptr.models import Auth
+
+        auth = await Auth.get_by_username_any(username)
+        if auth is None:
+            return False
+        await Auth.clear_totp(auth.user_id)
+        return True
+
+    if not asyncio.run(_reset()):
+        raise click.ClickException(f"no user named {username!r}")
+    click.echo(f"Two-step sign-in is off for {username}. Sign in with the password alone.")
+
+
 def _save_startup_token(token: str) -> None:
     """Keep this run's setup token where install.sh can find it for the first-run URL."""
     import os

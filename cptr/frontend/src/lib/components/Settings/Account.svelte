@@ -1,10 +1,17 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
 		updatePassword as apiUpdatePassword,
 		uploadAvatar,
 		deleteAvatar,
-		updateProfile
+		updateProfile,
+		getTotpStatus,
+		setupTotp,
+		enableTotp,
+		disableTotp,
+		type TotpStatus,
+		type TotpSetup
 	} from '$lib/apis/auth';
 	import { ApiError } from '$lib/apis';
 	import { session, setSession } from '$lib/session';
@@ -19,6 +26,98 @@
 	let savingProfile = $state(false);
 
 	let avatarUrl = $derived($session?.profile_image_url);
+
+	// Two-step sign-in
+	let totpStatus = $state<TotpStatus | null>(null);
+	let totpSetup = $state<TotpSetup | null>(null);
+	let recoveryCodes = $state<string[] | null>(null);
+	let disablingTotp = $state(false);
+	let totpPassword = $state('');
+	let totpCode = $state('');
+	let totpBusy = $state(false);
+
+	// The secret in groups of four, for typing it into an app by hand.
+	const groupedSecret = $derived(totpSetup?.secret.match(/.{1,4}/g)?.join(' ') ?? '');
+
+	onMount(loadTotpStatus);
+
+	async function loadTotpStatus() {
+		try {
+			totpStatus = await getTotpStatus();
+		} catch {
+			totpStatus = null;
+		}
+	}
+
+	function totpError(e: unknown) {
+		toast.error(
+			e instanceof ApiError
+				? e.message === 'invalid code'
+					? $t('auth.codeInvalid')
+					: e.message
+				: $t('auth.connectionFailed')
+		);
+	}
+
+	function cancelTotp() {
+		totpSetup = null;
+		disablingTotp = false;
+		totpPassword = '';
+		totpCode = '';
+	}
+
+	async function startTotpSetup() {
+		totpBusy = true;
+		try {
+			totpSetup = await setupTotp(totpPassword);
+			totpPassword = '';
+		} catch (e) {
+			totpError(e);
+		} finally {
+			totpBusy = false;
+		}
+	}
+
+	async function confirmTotp() {
+		totpBusy = true;
+		try {
+			const result = await enableTotp(totpCode.trim());
+			cancelTotp();
+			recoveryCodes = result.recovery_codes;
+			toast.success($t('account.totpEnabled'));
+			await loadTotpStatus();
+		} catch (e) {
+			totpError(e);
+			totpCode = '';
+		} finally {
+			totpBusy = false;
+		}
+	}
+
+	async function turnOffTotp() {
+		totpBusy = true;
+		try {
+			await disableTotp(totpPassword, totpCode.trim());
+			cancelTotp();
+			toast.success($t('account.totpDisabled'));
+			await loadTotpStatus();
+		} catch (e) {
+			totpError(e);
+			totpCode = '';
+		} finally {
+			totpBusy = false;
+		}
+	}
+
+	async function copyRecoveryCodes() {
+		if (!recoveryCodes) return;
+		try {
+			await navigator.clipboard.writeText(recoveryCodes.join('\n'));
+			toast.success($t('account.totpCodesCopied'));
+		} catch {
+			toast.error($t('account.failedToUpdate'));
+		}
+	}
 
 	async function saveDisplayName() {
 		const trimmed = displayName.trim();
@@ -228,6 +327,124 @@
 			{$t('account.updatePassword')}
 		{/if}
 	</button>
+
+	<!-- Two-step sign-in -->
+	<h3 class="text-xs text-gray-400 dark:text-gray-600 mt-6 mb-1">{$t('account.totpTitle')}</h3>
+	{#if recoveryCodes}
+		<p class="text-[0.75rem] text-gray-500 dark:text-gray-500 mb-2">
+			{$t('account.totpRecoveryHint')}
+		</p>
+		<ul
+			class="grid w-fit grid-cols-2 gap-x-6 gap-y-1 font-mono text-[0.8125rem] text-gray-800 dark:text-gray-200 select-all mb-2"
+		>
+			{#each recoveryCodes as recoveryCode (recoveryCode)}
+				<li>{recoveryCode}</li>
+			{/each}
+		</ul>
+		<div class="flex gap-4">
+			<button
+				onclick={copyRecoveryCodes}
+				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpCopyCodes')}</button
+			>
+			<button
+				onclick={() => (recoveryCodes = null)}
+				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpSavedCodes')}</button
+			>
+		</div>
+	{:else if totpStatus?.enabled}
+		<p class="text-[0.75rem] text-gray-500 dark:text-gray-500">
+			{$t('account.totpOn', { count: totpStatus.recovery_codes_left })}
+		</p>
+		{#if disablingTotp}
+			<input
+				type="password"
+				placeholder={$t('account.currentPassword')}
+				bind:value={totpPassword}
+				autocomplete="current-password"
+				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+			/>
+			<input
+				type="text"
+				placeholder={$t('account.totpCodeOrRecovery')}
+				bind:value={totpCode}
+				autocomplete="one-time-code"
+				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+			/>
+			<div class="mt-2 flex gap-4">
+				<button
+					disabled={totpBusy || !totpPassword || !totpCode.trim()}
+					onclick={turnOffTotp}
+					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none"
+				>
+					{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpDisableConfirm')}{/if}
+				</button>
+				<button
+					onclick={cancelTotp}
+					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none">{$t('common.cancel')}</button
+				>
+			</div>
+		{:else}
+			<button
+				onclick={() => (disablingTotp = true)}
+				class="mt-2 self-start text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpDisable')}</button
+			>
+		{/if}
+	{:else if totpSetup}
+		<p class="text-[0.75rem] text-gray-500 dark:text-gray-500 mb-2">{$t('account.totpScan')}</p>
+		<div class="w-40 h-40 p-1 bg-white rounded-md ring-1 ring-gray-200 dark:ring-white/10 mb-2">
+			{@html totpSetup.qr_svg}
+		</div>
+		<p class="text-[0.75rem] text-gray-500 dark:text-gray-500">{$t('account.totpManual')}</p>
+		<code class="font-mono text-[0.8125rem] text-gray-800 dark:text-gray-200 select-all mb-2"
+			>{groupedSecret}</code
+		>
+		<input
+			type="text"
+			placeholder={$t('account.totpCodePlaceholder')}
+			bind:value={totpCode}
+			inputmode="numeric"
+			autocomplete="one-time-code"
+			maxlength="7"
+			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+		/>
+		<div class="mt-2 flex gap-4">
+			<button
+				disabled={totpBusy || !totpCode.trim()}
+				onclick={confirmTotp}
+				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none"
+			>
+				{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpVerify')}{/if}
+			</button>
+			<button
+				onclick={cancelTotp}
+				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none">{$t('common.cancel')}</button
+			>
+		</div>
+	{:else if totpStatus}
+		<p class="text-[0.75rem] text-gray-500 dark:text-gray-500">{$t('account.totpOffHint')}</p>
+		<input
+			type="password"
+			placeholder={$t('account.currentPassword')}
+			bind:value={totpPassword}
+			autocomplete="current-password"
+			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+		/>
+		<button
+			disabled={totpBusy || !totpPassword}
+			onclick={startTotpSetup}
+			class="mt-2 self-start text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
+			disabled:opacity-30 disabled:pointer-events-none"
+		>
+			{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpEnable')}{/if}
+		</button>
+	{/if}
 
 	<!-- Save -->
 	<div class="mt-auto pt-6 flex justify-end">

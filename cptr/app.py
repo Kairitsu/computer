@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI):
     _logging.getLogger(__name__).info("truststore: using system certificate store")
 
     await init_db()
+    from cptr.utils.config import load_session_revocations
+
+    await load_session_revocations()
     app.state.MODELS = {}
     from cptr.env import STARTUP_TOKEN
 

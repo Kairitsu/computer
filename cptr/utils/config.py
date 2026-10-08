@@ -306,17 +306,20 @@ def _get_jwt_secret() -> str:
 def create_token(user_id: str, username: str, role: str = "user") -> str:
     """Create a signed JWT per RFC 7519. Includes standard claims:
     - sub: subject (user_id)
+    - iat: issued at (checked against revoke_sessions)
     - exp: expiration time
     - jti: unique token identifier
     """
     import uuid
 
+    now = time.time()
     return jwt.encode(
         {
             "sub": user_id,
             "username": username,
             "role": role,
-            "exp": time.time() + SESSION_MAX_AGE,
+            "iat": now,
+            "exp": now + SESSION_MAX_AGE,
             "jti": str(uuid.uuid4()),
         },
         _get_jwt_secret(),
@@ -325,9 +328,13 @@ def create_token(user_id: str, username: str, role: str = "user") -> str:
 
 
 def verify_token(token: str) -> AuthResult | None:
-    """Verify a JWT. No DB read."""
+    """Verify a JWT. No DB read: revocations come from an in-memory copy."""
     try:
         payload = jwt.decode(token, _get_jwt_secret(), algorithms=["HS256"])
+        # Tokens from before revoke_sessions (or from before tokens had iat) are void.
+        floor = _sessions_valid_after.get(payload.get("sub"))
+        if floor is not None and payload.get("iat", 0) < floor:
+            return None
         return AuthResult(
             user_id=payload.get("sub"),
             username=payload.get("username"),
@@ -336,6 +343,33 @@ def verify_token(token: str) -> AuthResult | None:
         )
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
+
+
+# ── Session revocation ───────────────────────────────────────
+
+# user_id → epoch seconds. Mirrors auths.sessions_valid_after so verify_token stays DB-free.
+_sessions_valid_after: dict[str, float] = {}
+
+
+async def load_session_revocations() -> None:
+    """Load revocation times from the DB. Called once at startup."""
+    from cptr.models import Auth
+
+    _sessions_valid_after.clear()
+    _sessions_valid_after.update(await Auth.sessions_valid_after_all())
+
+
+async def revoke_sessions(user_id: str) -> None:
+    """Sign out every session this user has. Issue a new token afterwards to stay signed in."""
+    from cptr.models import Auth
+
+    from cptr.socket.main import disconnect_user
+
+    at = time.time()
+    await Auth.set_sessions_valid_after(user_id, at)
+    _sessions_valid_after[user_id] = at
+    # Live sockets were authenticated once, at connect; make them authenticate again.
+    await disconnect_user(user_id)
 
 
 # ── Rate Limiting (in-memory, fine) ──────────────────────────
