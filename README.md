@@ -182,7 +182,7 @@ After=network.target
 
 [Service]
 User=alice
-WorkingDirectory=/home/alice/computer
+WorkingDirectory=/home/alice
 # PATH 里要包含 grok、uv 和 node 所在的目录
 Environment=PATH=/home/alice/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/alice/computer/.venv/bin/cptr run --host 0.0.0.0 --port 8000 --headless

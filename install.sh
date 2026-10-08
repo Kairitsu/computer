@@ -311,7 +311,8 @@ Wants=network-online.target
 
 [Service]
 ${user_line}
-WorkingDirectory=$INSTALL_DIR
+# 和代码目录分开：Grok 的探测会话会建在工作目录下。
+WorkingDirectory=$HOME
 Environment=PATH=$(service_path)
 $(data_dir_env_line)
 ExecStart=$INSTALL_DIR/.venv/bin/cptr run --host $HOST --port $PORT --headless
@@ -375,7 +376,7 @@ setup_service() {
 		<string>--port</string><string>$PORT</string>
 		<string>--headless</string>
 	</array>
-	<key>WorkingDirectory</key><string>$INSTALL_DIR</string>
+	<key>WorkingDirectory</key><string>$HOME</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key><string>$(service_path)</string>
