@@ -25,6 +25,7 @@ _SENSITIVE_KEYS = {
     "password",
     "current_password",
     "new_password",
+    "grant",
     "code",
     "totp_secret",
     "recovery_codes",

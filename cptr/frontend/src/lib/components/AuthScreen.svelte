@@ -57,6 +57,10 @@
 	);
 
 	onMount(() => {
+		if (sessionStorage.getItem('cptr.passwordReset')) {
+			sessionStorage.removeItem('cptr.passwordReset');
+			toast.success($t('account.passwordResetLogin'));
+		}
 		// Match the browser chrome (mobile address bar, PWA title bar) to the page.
 		const meta = document.querySelector('meta[name="theme-color"]');
 		const previous = meta?.getAttribute('content');

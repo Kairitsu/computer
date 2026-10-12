@@ -34,7 +34,7 @@
 
 	let { showPwaSettings = false }: Props = $props();
 
-	const REPO_URL = 'https://github.com/open-webui/computer';
+	const REPO_URL = 'https://github.com/Kairitsu/computer';
 
 	let resetting = $state(false);
 	// Server-wide limits for the Grok processes chats keep between turns; admins set them.

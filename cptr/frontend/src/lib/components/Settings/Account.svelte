@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
+		verifyCurrentPassword,
+		verifyPasswordCode,
 		updatePassword as apiUpdatePassword,
 		uploadAvatar,
 		deleteAvatar,
@@ -14,12 +16,19 @@
 		type TotpSetup
 	} from '$lib/apis/auth';
 	import { ApiError } from '$lib/apis';
-	import { session, setSession } from '$lib/session';
+	import { session, setSession, clearSession } from '$lib/session';
 	import { t } from '$lib/i18n';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
+	type PasswordStep = 'idle' | 'current' | 'forgot' | 'new';
+	type ForgotMethod = 'totp' | 'recovery';
+
+	let passwordStep = $state<PasswordStep>('idle');
+	let forgotMethod = $state<ForgotMethod>('totp');
 	let currentPassword = $state('');
 	let newPassword = $state('');
+	let passwordCode = $state('');
+	let passwordGrant = $state('');
 	let updatingPassword = $state(false);
 	let uploadingAvatar = $state(false);
 	let displayName = $state($session?.display_name ?? '');
@@ -136,23 +145,78 @@
 		}
 	}
 
-	async function updatePassword() {
-		if (!currentPassword || !newPassword) {
-			toast.error($t('account.bothFieldsRequired'));
+	function resetPasswordFlow() {
+		passwordStep = 'idle';
+		forgotMethod = 'totp';
+		currentPassword = '';
+		newPassword = '';
+		passwordCode = '';
+		passwordGrant = '';
+	}
+
+	function passwordError(e: unknown) {
+		if (!(e instanceof ApiError)) {
+			toast.error($t('auth.connectionFailed'));
 			return;
 		}
+		const known: Record<string, string> = {
+			'incorrect current password': 'account.passwordIncorrect',
+			'incorrect password': 'account.passwordIncorrect',
+			'invalid code': 'auth.codeInvalid',
+			'two-step sign-in is off': 'account.passwordForgotUnavailable',
+			'min 6 characters': 'auth.minChars',
+			'too many attempts': 'account.tooManyAttempts',
+			'verification expired': 'account.passwordVerifyExpired'
+		};
+		const key = known[e.message];
+		toast.error(key ? $t(key) : e.message);
+	}
+
+	async function verifyCurrent() {
+		if (!currentPassword) return;
+		updatingPassword = true;
+		try {
+			const result = await verifyCurrentPassword(currentPassword);
+			currentPassword = '';
+			passwordGrant = result.grant;
+			passwordStep = 'new';
+		} catch (e) {
+			passwordError(e);
+		} finally {
+			updatingPassword = false;
+		}
+	}
+
+	async function verifyForgot() {
+		if (!passwordCode.trim()) return;
+		updatingPassword = true;
+		try {
+			const result = await verifyPasswordCode(forgotMethod, passwordCode.trim());
+			passwordCode = '';
+			passwordGrant = result.grant;
+			passwordStep = 'new';
+		} catch (e) {
+			passwordError(e);
+			passwordCode = '';
+		} finally {
+			updatingPassword = false;
+		}
+	}
+
+	async function confirmNewPassword() {
+		if (!newPassword) return;
 		if (newPassword.length < 6) {
 			toast.error($t('auth.minChars'));
 			return;
 		}
 		updatingPassword = true;
 		try {
-			await apiUpdatePassword(currentPassword, newPassword);
-			toast.success($t('account.passwordUpdated'));
-			currentPassword = '';
-			newPassword = '';
+			await apiUpdatePassword(passwordGrant, newPassword);
+			sessionStorage.setItem('cptr.passwordReset', '1');
+			clearSession();
 		} catch (e) {
-			toast.error(e instanceof ApiError ? e.message : $t('auth.connectionFailed'));
+			passwordError(e);
+			if (e instanceof ApiError && e.message === 'verification expired') resetPasswordFlow();
 		} finally {
 			updatingPassword = false;
 		}
@@ -300,36 +364,137 @@
 		class="settings-field mb-5 w-full"
 	/>
 
-	<!-- Password -->
+	<!-- Password: hidden until the user asks to change it, then verified before the new one. -->
 	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">{$t('account.password')}</h3>
-	<div class="flex flex-col gap-1.5">
+	{#if passwordStep === 'idle'}
+		<button
+			type="button"
+			class="settings-action self-start"
+			onclick={() => (passwordStep = 'current')}
+		>
+			{$t('account.changePassword')}
+		</button>
+	{:else if passwordStep === 'current'}
 		<input
 			type="password"
 			placeholder={$t('account.currentPassword')}
 			bind:value={currentPassword}
 			autocomplete="current-password"
 			class="settings-field w-full"
+			onkeydown={(e) => {
+				if (e.key === 'Enter') verifyCurrent();
+			}}
 		/>
+		<div class="mt-2 flex flex-wrap gap-1.5">
+			<button
+				type="button"
+				class="settings-action"
+				disabled={updatingPassword || !currentPassword}
+				onclick={verifyCurrent}
+			>
+				{#if updatingPassword}<Spinner size={14} />{:else}{$t('account.verifyPassword')}{/if}
+			</button>
+			<button
+				type="button"
+				class="settings-action"
+				disabled={updatingPassword}
+				onclick={() => {
+					passwordCode = '';
+					forgotMethod = 'totp';
+					passwordStep = 'forgot';
+				}}
+			>
+				{$t('account.forgotPassword')}
+			</button>
+			<button type="button" class="settings-action" onclick={resetPasswordFlow}
+				>{$t('common.cancel')}</button
+			>
+		</div>
+	{:else if passwordStep === 'forgot'}
+		{#if totpStatus?.enabled}
+			<div class="segmented mb-1.5" role="group">
+				<button
+					type="button"
+					class:active={forgotMethod === 'totp'}
+					onclick={() => (forgotMethod = 'totp')}
+				>
+					{$t('account.forgotUseTotp')}
+				</button>
+				<button
+					type="button"
+					class:active={forgotMethod === 'recovery'}
+					onclick={() => (forgotMethod = 'recovery')}
+				>
+					{$t('account.forgotUseRecovery')}
+				</button>
+			</div>
+			<input
+				type="text"
+				placeholder={forgotMethod === 'totp'
+					? $t('account.totpCodePlaceholder')
+					: $t('account.recoveryCodePlaceholder')}
+				bind:value={passwordCode}
+				inputmode={forgotMethod === 'totp' ? 'numeric' : 'text'}
+				autocomplete="one-time-code"
+				spellcheck="false"
+				class="settings-field w-full"
+				onkeydown={(e) => {
+					if (e.key === 'Enter') verifyForgot();
+				}}
+			/>
+			<div class="mt-2 flex flex-wrap gap-1.5">
+				<button
+					type="button"
+					class="settings-action"
+					disabled={updatingPassword || !passwordCode.trim()}
+					onclick={verifyForgot}
+				>
+					{#if updatingPassword}<Spinner size={14} />{:else}{$t('account.verifyPassword')}{/if}
+				</button>
+				<button
+					type="button"
+					class="settings-action"
+					onclick={() => {
+						passwordCode = '';
+						passwordStep = 'current';
+					}}>{$t('common.cancel')}</button
+				>
+			</div>
+		{:else}
+			<p class="text-[0.75rem] text-gray-500 dark:text-gray-500">
+				{$t('account.passwordForgotUnavailable')}
+			</p>
+			<button
+				type="button"
+				class="settings-action mt-2 self-start"
+				onclick={() => (passwordStep = 'current')}>{$t('common.cancel')}</button
+			>
+		{/if}
+	{:else}
 		<input
 			type="password"
 			placeholder={$t('account.newPassword')}
 			bind:value={newPassword}
 			autocomplete="new-password"
 			class="settings-field w-full"
+			onkeydown={(e) => {
+				if (e.key === 'Enter') confirmNewPassword();
+			}}
 		/>
-	</div>
-	<button
-		type="button"
-		disabled={updatingPassword || !currentPassword || !newPassword}
-		onclick={updatePassword}
-		class="settings-action mt-2 self-start"
-	>
-		{#if updatingPassword}
-			<Spinner size={14} />
-		{:else}
-			{$t('account.updatePassword')}
-		{/if}
-	</button>
+		<div class="mt-2 flex flex-wrap gap-1.5">
+			<button
+				type="button"
+				class="settings-action"
+				disabled={updatingPassword || !newPassword}
+				onclick={confirmNewPassword}
+			>
+				{#if updatingPassword}<Spinner size={14} />{:else}{$t('account.passwordConfirm')}{/if}
+			</button>
+			<button type="button" class="settings-action" onclick={resetPasswordFlow}
+				>{$t('common.cancel')}</button
+			>
+		</div>
+	{/if}
 
 	<!-- Two-step sign-in -->
 	<h3 class="text-xs text-gray-400 dark:text-gray-600 mt-6 mb-1">{$t('account.totpTitle')}</h3>

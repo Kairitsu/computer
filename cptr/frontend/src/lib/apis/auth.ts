@@ -51,14 +51,20 @@ export const signup = (username: string, password: string) =>
 
 export const logout = () => fetchHandler('/api/auth/logout', { method: 'POST' }).catch(() => {});
 
-export const updatePassword = (currentPassword: string, newPassword: string) =>
-	fetchJSON(
-		'/api/auth/password',
-		jsonBody({
-			current_password: currentPassword,
-			new_password: newPassword
-		})
+/** Check the current password. Returns a short-lived grant for setting a new one. */
+export const verifyCurrentPassword = (currentPassword: string) =>
+	fetchJSON<{ grant: string }>(
+		'/api/auth/password/verify',
+		jsonBody({ current_password: currentPassword })
 	);
+
+/** Check an authenticator code or a recovery code. Returns the same kind of grant. */
+export const verifyPasswordCode = (method: 'totp' | 'recovery', code: string) =>
+	fetchJSON<{ grant: string }>('/api/auth/password/verify-code', jsonBody({ method, code }));
+
+/** Set a new password with a grant, then the server signs this browser out. */
+export const updatePassword = (grant: string, newPassword: string) =>
+	fetchJSON('/api/auth/password', jsonBody({ grant, new_password: newPassword }));
 
 /** Upload avatar (resized client-side). Returns { ok, profile_image_url }. */
 export const uploadAvatar = async (

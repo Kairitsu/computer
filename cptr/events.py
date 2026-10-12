@@ -60,6 +60,7 @@ SENSITIVE_KEYS = {
     "hashed_password",
     "current_password",
     "new_password",
+    "grant",
     "code",
     "recovery_codes",
     "otpauth_uri",

@@ -26,6 +26,7 @@ from cptr.utils.config import (
 )
 from cptr.models import User, Auth, Config
 from cptr.utils import totp
+from cptr.utils.password_grant import consume_password_grant, issue_password_grant
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -58,9 +59,26 @@ async def _check_code(auth: Auth, code: str) -> bool:
     """Accept a current authenticator code (each only once) or an unused recovery code."""
     digits = "".join(code.split())
     if digits.isdigit() and len(digits) == totp.DIGITS:
-        last = auth.totp_last_step if auth.totp_last_step is not None else -1
-        step = totp.match_step(auth.totp_secret, digits, after_step=last)
-        return step is not None and await Auth.claim_totp_step(auth.user_id, step)
+        return await _check_totp_only(auth, digits)
+    return await _check_recovery_only(auth, code)
+
+
+async def _check_totp_only(auth: Auth, code: str) -> bool:
+    """Accept only a current authenticator code. A recovery code is left unused."""
+    if not auth.totp_secret:
+        return False
+    digits = "".join(code.split())
+    if not (digits.isdigit() and len(digits) == totp.DIGITS):
+        return False
+    last = auth.totp_last_step if auth.totp_last_step is not None else -1
+    step = totp.match_step(auth.totp_secret, digits, after_step=last)
+    return step is not None and await Auth.claim_totp_step(auth.user_id, step)
+
+
+async def _check_recovery_only(auth: Auth, code: str) -> bool:
+    """Accept only an unused recovery code. An authenticator code is left unused."""
+    if not code or not code.strip():
+        return False
     return await Auth.claim_recovery_code(auth, totp.hash_recovery_code(code))
 
 
@@ -208,35 +226,58 @@ async def logout():
     return resp
 
 
+@router.post("/password/verify")
+async def verify_password_for_change(request: Request, body: PasswordVerifyRequest):
+    """Check the current password and return a short-lived grant to set a new one."""
+    auth, error = await _totp_request(request)
+    if error:
+        return error
+    if not _password_ok(auth, body.current_password):
+        return JSONResponse({"error": "incorrect current password"}, 401)
+    return {"grant": issue_password_grant(auth.user_id)}
+
+
+@router.post("/password/verify-code")
+async def verify_code_for_change(request: Request, body: PasswordVerifyCodeRequest):
+    """Check an authenticator code or a recovery code, then return a password grant.
+
+    The chosen method is the only one accepted, so a recovery code is not used
+    up when the user is entering an authenticator code, and the reverse.
+    """
+    auth, error = await _totp_request(request)
+    if error:
+        return error
+    if not auth.totp_enabled:
+        return JSONResponse({"error": "two-step sign-in is off"}, 400)
+    method = body.method.strip().lower()
+    if method == "totp":
+        ok = await _check_totp_only(auth, body.code)
+    elif method == "recovery":
+        ok = await _check_recovery_only(auth, body.code)
+    else:
+        return JSONResponse({"error": "invalid method"}, 400)
+    if not ok:
+        return JSONResponse({"error": "invalid code"}, 401)
+    return {"grant": issue_password_grant(auth.user_id)}
+
+
 @router.post("/password")
 async def update_password(request: Request, body: UpdatePasswordRequest):
-    """Update password for the authenticated user."""
-    token = request.cookies.get(COOKIE_NAME)
-    auth_info = check_access(
-        client_host=request.client.host if request.client else "127.0.0.1",
-        jwt_token=token,
-    )
-    if auth_info is None:
-        return JSONResponse({"error": "not authenticated"}, 401)
-    ip = request.client.host if request.client else "unknown"
-    if not check_rate_limit(ip):
-        return JSONResponse({"error": "too many attempts"}, 429)
-    record_attempt(ip)
-
+    """Set a new password with a grant from verify or verify-code, then sign out."""
+    auth, error = await _totp_request(request)
+    if error:
+        return error
     if len(body.new_password.strip()) < 6:
         return JSONResponse({"error": "min 6 characters"}, 400)
+    if not consume_password_grant(body.grant, auth.user_id):
+        return JSONResponse({"error": "verification expired"}, 401)
 
-    # Verify current password
-    result = await Auth.get_with_user(auth_info.username)
-    if not result:
-        return JSONResponse({"error": "user not found"}, 404)
-    auth, _ = result
-    if auth.password and not verify_password(body.current_password, auth.password):
-        return JSONResponse({"error": "incorrect current password"}, 401)
-
-    await Auth.update_password(auth_info.user_id, hash_password(body.new_password.strip()))
-    # Sign out everywhere else; this browser gets a fresh session.
-    return await _resign_in(request, auth_info.user_id, auth.username)
+    await Auth.update_password(auth.user_id, hash_password(body.new_password.strip()))
+    # Every session ends, including this browser. The user signs in again by hand.
+    await revoke_sessions(auth.user_id)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(key=COOKIE_NAME, path="/")
+    return resp
 
 
 async def _resign_in(request: Request, user_id: str, username: str, data: dict | None = None):
@@ -386,8 +427,17 @@ class SignupRequest(BaseModel):
     password: str
 
 
-class UpdatePasswordRequest(BaseModel):
+class PasswordVerifyRequest(BaseModel):
     current_password: str
+
+
+class PasswordVerifyCodeRequest(BaseModel):
+    method: str  # "totp" or "recovery"
+    code: str
+
+
+class UpdatePasswordRequest(BaseModel):
+    grant: str
     new_password: str
 
 
