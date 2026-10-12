@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { activeWorkspace, addWorkspace, openChatTab, openFileTab } from '$lib/stores';
+	import { activeWorkspace, openChatTab, openFileTab, openProjectSessionTab } from '$lib/stores';
 	import {
 		getGitCompareDiff,
 		getGitCurrentPr,
@@ -640,11 +640,11 @@
 			return;
 		}
 		const target = worktree.target_path || worktree.path;
-		addWorkspace(target);
 		showWorktrees = false;
 		creatingWorktree = false;
 		newWorktreeBranch = '';
-		await goto(`/?workspace=${encodeURIComponent(target)}`);
+		await openProjectSessionTab(target);
+		await goto('/');
 	}
 
 	async function restoreStashedChangesForBranch(branch: string) {
@@ -1112,9 +1112,9 @@
 			newWorktreeBranch = '';
 			creatingWorktree = false;
 			if (target) {
-				addWorkspace(target);
 				showWorktrees = false;
-				await goto(`/?workspace=${encodeURIComponent(target)}`);
+				await openProjectSessionTab(target);
+				await goto('/');
 			} else {
 				await loadWorktrees();
 			}

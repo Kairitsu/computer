@@ -13,7 +13,11 @@
 		activeTab,
 		activeHomeTab,
 		currentWorkspace,
-		requestHomeChat
+		requestHomeChat,
+		openProjectSessionTab,
+		openHomeStripChat,
+		closeHomeStripChat,
+		focusDefaultHomeTab
 	} from '$lib/stores';
 	import { chatEnabled, updateChatStatuses } from '$lib/stores/chat';
 	import { socketStore } from '$lib/stores/socket.svelte';
@@ -63,7 +67,7 @@
 	let wsChatsCache = $state<Map<string, ChatInfo[]>>(new Map());
 	let wsChatsHasMore = $state<Map<string, boolean>>(new Map());
 	let wsChatsLoading = $state<Set<string>>(new Set());
-	let currentPath = $derived($currentWorkspace?.path ?? HOME);
+	let currentPath = $derived($currentWorkspace?.path ?? ($activeHomeTab?.workspace || HOME));
 	let currentChatId = $derived(
 		$currentWorkspace
 			? $activeTab?.type === 'chat'
@@ -230,16 +234,18 @@
 	function openWorkspace(e: MouseEvent, path: string) {
 		if (e.metaKey || e.ctrlKey) return;
 		e.preventDefault();
-		goto(`/?workspace=${encodeURIComponent(path)}`);
+		void openProjectSessionTab(path);
+		void goto('/');
 		closeMobileSidebar();
 	}
 
 	function openChat(chatId: string, wsPath: string) {
 		if (wsPath === HOME) {
 			requestHomeChat(chatId);
-			goto('/');
+			void goto('/');
 		} else {
-			goto(`/?workspace=${encodeURIComponent(wsPath)}&chatId=${encodeURIComponent(chatId)}`);
+			openHomeStripChat(chatId, wsPath);
+			void goto('/');
 		}
 		closeMobileSidebar();
 	}
@@ -247,9 +253,10 @@
 	function newChat(wsPath: string) {
 		if (wsPath === HOME) {
 			requestHomeChat();
-			goto('/');
+			void goto('/');
 		} else {
-			goto(`/?workspace=${encodeURIComponent(wsPath)}&chatId`);
+			void openProjectSessionTab(wsPath);
+			void goto('/');
 		}
 		closeMobileSidebar();
 	}
@@ -290,9 +297,10 @@
 		await apiDeleteChat(chatId);
 		const chats = wsChatsCache.get(wsPath) ?? [];
 		wsChatsCache = new Map([...wsChatsCache, [wsPath, chats.filter((chat) => chat.id !== chatId)]]);
+		closeHomeStripChat(chatId);
 		if (currentPath === wsPath && currentChatId === chatId) {
-			if (wsPath === HOME) requestHomeChat();
-			else goto(`/?workspace=${encodeURIComponent(wsPath)}`);
+			if (wsPath === HOME) focusDefaultHomeTab();
+			void goto('/');
 		}
 	}
 

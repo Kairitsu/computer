@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { addWorkspace } from '$lib/stores';
+	import { openProjectSessionTab } from '$lib/stores';
 	import { getWelcome } from '$lib/apis/state';
 	import { createEntry, listDir } from '$lib/apis/files';
 	import Icon from './Icon.svelte';
@@ -118,15 +118,18 @@
 		fetchDirectories(prev);
 	}
 
-	function selectCurrent() {
+	function chooseDirectory(path: string) {
 		if (onselect) {
-			onselect(currentPath);
+			onselect(path);
 			onclose();
 			return;
 		}
-		addWorkspace(currentPath);
-		goto(`/?workspace=${encodeURIComponent(currentPath)}`);
+		void openProjectSessionTab(path).then(() => goto('/'));
 		onclose();
+	}
+
+	function selectCurrent() {
+		chooseDirectory(currentPath);
 	}
 
 	// ── Path editing ────────────────────────────────────────────
@@ -480,9 +483,7 @@
 					ondblclick={(e) => {
 						e.stopPropagation();
 						const fullPath = currentPath === '/' ? `/${dir.name}` : `${currentPath}/${dir.name}`;
-						addWorkspace(fullPath);
-						goto(`/?workspace=${encodeURIComponent(fullPath)}`);
-						onclose();
+						chooseDirectory(fullPath);
 					}}
 					onmouseenter={() => {
 						selectedIndex = i;

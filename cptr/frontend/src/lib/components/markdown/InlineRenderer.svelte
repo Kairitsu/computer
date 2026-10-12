@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Token } from 'marked';
-	import { openFileTab, setFileBrowserCwd, setActiveTab } from '$lib/stores';
+	import { openFileTab, openDirectoryAsSession } from '$lib/stores';
 	import { t } from '$lib/i18n';
 
 	interface Props {
@@ -74,12 +74,8 @@
 				title={filePath}
 				onclick={(e) => {
 					e.preventDefault();
-					if (isDirectory) {
-						setFileBrowserCwd(filePath);
-						setActiveTab('files');
-					} else {
-						openFileTab(filePath);
-					}
+					if (isDirectory) openDirectoryAsSession(filePath);
+					else openFileTab(filePath);
 				}}
 			>
 				{#if isDirectory}

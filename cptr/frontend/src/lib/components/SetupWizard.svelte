@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { addWorkspace, openProjectSessionTab } from '$lib/stores';
 
 	import { formatChord, keybindings } from '$lib/stores/keybindings';
 	import { t } from '$lib/i18n';
@@ -30,7 +31,8 @@
 		oncomplete();
 
 		if (selectedPath) {
-			await goto(`/?workspace=${encodeURIComponent(selectedPath)}`);
+			await openProjectSessionTab(selectedPath);
+			await goto('/');
 		}
 	}
 
@@ -136,17 +138,12 @@
 
 {#if showPicker}
 	<DirectoryPicker
-		onclose={() => {
+		onclose={() => (showPicker = false)}
+		onselect={(path) => {
+			selectedPath = path;
+			addWorkspace(path);
 			showPicker = false;
-			const params = new URLSearchParams(window.location.search);
-			const wsPath = params.get('workspace');
-			if (wsPath) {
-				selectedPath = wsPath;
-				const url = new URL(window.location.href);
-				url.searchParams.delete('workspace');
-				window.history.replaceState({}, '', url.toString());
-				next();
-			}
+			next();
 		}}
 	/>
 {/if}

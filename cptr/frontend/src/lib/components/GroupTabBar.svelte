@@ -7,7 +7,6 @@
 		closeTab,
 		setActiveGroup,
 		reorderTabs,
-		openUntitledFileTab,
 		openInSplit,
 		closeGroup,
 		moveTabToGroup,
@@ -20,7 +19,6 @@
 	} from '$lib/stores';
 	import { openChatTab } from '$lib/stores';
 	import { chatEnabled, chatStatuses, isChatUnread, streamingChatTabs } from '$lib/stores/chat';
-	import { keybindings, formatChord } from '$lib/stores/keybindings';
 	import Icon from './Icon.svelte';
 	import Spinner from './common/Spinner.svelte';
 	import DropdownMenu from './DropdownMenu.svelte';
@@ -66,10 +64,6 @@
 
 	let tabsEl: HTMLDivElement | undefined = $state();
 	let sortable: Sortable | null = null;
-
-	// Plus menu
-	let plusBtnEl: HTMLButtonElement | undefined = $state();
-	let showPlusMenu = $state(false);
 
 	// Split menu
 	let splitBtnEl: HTMLButtonElement | undefined = $state();
@@ -189,33 +183,10 @@
 		else moveTabToGroup(payload.tabId, payload.groupId, group.id);
 	}
 
-	const plusMenuItems = $derived([
-		{
-			label: $t('bar.newFile'),
-			icon: 'page',
-			shortcut: formatChord($keybindings.newFile),
-			onclick: () => {
-				openUntitledFileTab(group.id);
-			}
-		},
-		...($chatEnabled
-			? [
-					{
-						label: $t('bar.newChat'),
-						icon: 'chat-bubble',
-						shortcut: formatChord($keybindings.newChat),
-						onclick: () => {
-							openChatTab(undefined, group.id);
-						}
-					}
-				]
-			: [])
-	]);
-
-	// Home only makes chats, so its "+" opens one directly instead of a menu.
+	// "+" always starts a session. The home strip inherits the active tab's workspace.
 	function handlePlusClick() {
 		if (home) onHomeNewChat?.();
-		else showPlusMenu = !showPlusMenu;
+		else openChatTab(undefined, group.id);
 	}
 
 	const contextMenuItems = $derived.by(() => {
@@ -365,7 +336,7 @@
 					<span class="max-w-30 overflow-hidden text-ellipsis">
 						{tab.type === 'files'
 							? ($activeWorkspace?.name ?? $t('bar.files'))
-							: tab.type === 'home' && !tab.path
+							: (tab.type === 'home' && !tab.path) || tab.path?.startsWith('new-')
 								? $t('chat.newSession')
 								: tab.label}
 					</span>
@@ -394,13 +365,12 @@
 		</div>
 
 		<!-- Plus button -->
-		{#if !home || $chatEnabled}
+		{#if $chatEnabled}
 			<button
-				bind:this={plusBtnEl}
 				class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100 shrink-0"
 				onclick={handlePlusClick}
-				aria-label={home ? $t('bar.newChat') : $t('bar.new')}
-				use:tooltip={home ? $t('bar.newChat') : $t('bar.new')}
+				aria-label={$t('bar.newChat')}
+				use:tooltip={$t('bar.newChat')}
 			>
 				<Icon name="plus" size={14} />
 			</button>
@@ -443,15 +413,6 @@
 		{/if}
 	</div>
 </div>
-
-{#if showPlusMenu && plusBtnEl}
-	<DropdownMenu
-		items={plusMenuItems}
-		anchor={plusBtnEl}
-		onclose={() => (showPlusMenu = false)}
-		className="min-w-52"
-	/>
-{/if}
 
 {#if contextMenu}
 	<DropdownMenu

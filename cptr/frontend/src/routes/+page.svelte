@@ -5,14 +5,12 @@
 		currentWorkspace,
 		workspaceList,
 		addWorkspace,
-		loadWorkspace,
 		gitReviewOpen,
 		setActiveGroup,
 		setSplitRatio,
 		moveTabToNewSplit,
 		openChatTab,
 		openFileTab,
-		setFileBrowserCwd,
 		showSearch,
 		pwaPreferences,
 		homeState,
@@ -23,7 +21,14 @@
 		moveHomeTabToGroup,
 		setHomeSplitRatio,
 		homeChatRequest,
-		releaseClosedChatTab
+		releaseClosedChatTab,
+		focusDefaultHomeTab,
+		openNewSessionTab,
+		openProjectSessionTab,
+		openHomeStripChat,
+		switchSessionWorkspace,
+		isSessionHomepage,
+		rememberWorkspace
 	} from '$lib/stores';
 	import type { Tab, EditorGroup, EditorLayout, SplitDirection, WorkspaceState } from '$lib/stores';
 	import { chatEnabled } from '$lib/stores/chat';
@@ -98,42 +103,11 @@
 		return `home-${Date.now()}-${++homeTabCount}`;
 	}
 
-	/** Sidebar "new chat": switch back to the Home tab, leaving every other tab open. */
-	function focusHomeTab() {
-		for (const group of $homeState.groups) {
-			const homeTab = group.tabs.find((tab) => tab.type === 'home');
-			if (homeTab) {
-				updateHomeTabs(group.id, (tabs) => ({ tabs, activeTabId: homeTab.id }));
-				return;
-			}
-		}
-	}
-
-	/** Open a chat in a tab of its own, or switch to the tab already showing it. */
-	function openHomeChat(chatId?: string) {
-		if (!chatId) return focusHomeTab();
-		for (const group of $homeState.groups) {
-			const existing = group.tabs.find((tab) => tab.type === 'chat' && tab.path === chatId);
-			if (existing) {
-				updateHomeTabs(group.id, (tabs) => ({ tabs, activeTabId: existing.id }));
-				return;
-			}
-		}
-		const groupId = activeHomeGroup?.id;
-		if (!groupId) return;
-		const tab: Tab = { id: newHomeTabId(), type: 'chat', label: 'Chat', path: chatId };
-		updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
-	}
-
-	/** Tab bar "+ → New chat": a separate chat tab next to the Home tab. */
+	/** Tab bar "+": a new session in the same workspace as the active tab. */
 	function openHomeChatTab(groupId = $homeState.activeGroupId) {
-		const tab: Tab = {
-			id: newHomeTabId(),
-			type: 'chat',
-			label: 'New Chat',
-			path: `new-${Date.now()}`
-		};
-		updateHomeTabs(groupId, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
+		const group = $homeState.groups.find((item) => item.id === groupId);
+		const active = group?.tabs.find((tab) => tab.id === group.activeTabId);
+		openNewSessionTab(active?.workspace ?? '', groupId);
 	}
 
 	function closeHomeTab(tabId: string, groupId = $homeState.activeGroupId) {
@@ -183,18 +157,9 @@
 		}));
 	}
 
-	function setHomeTabWorkspace(tabId: string, workspace: string) {
-		homeState.update((state) => ({
-			...state,
-			groups: state.groups.map((group) => ({
-				...group,
-				tabs: group.tabs.map((tab) => (tab.id === tabId ? { ...tab, workspace } : tab))
-			}))
-		}));
-	}
-
 	const INTENT_URL_KEYS = [
 		'intent',
+		'workspace',
 		'chatId',
 		'file',
 		'dir',
@@ -206,12 +171,11 @@
 		'url'
 	];
 
-	// ── URL-driven workspace loading ───────────────────────────────
-	// The workspace path comes from the URL query param: ?workspace=/path/to/dir
-	// Each browser tab has its own URL → its own workspace.
-	// Intent params (chatId, file, dir) are processed AFTER loading.
+	// ── URL intents ────────────────────────────────────────────────
+	// ?workspace= used to open the folder view. It now opens a project session
+	// tab on the same strip as the default new-chat home, then leaves the URL.
 
-	let lastLoadedPath = $state<string | null>(null);
+	let lastHandledHref = '';
 	type LaunchQueueWindow = Window & {
 		__cptrLaunchQueueBound?: boolean;
 		launchQueue?: {
@@ -310,9 +274,16 @@
 	async function processIntentParams() {
 		const url = new URL($page.url);
 		const parsed = urlIntent(url);
-		if (parsed) history.replaceState(history.state, '', clearIntentUrl(url));
-		if (!parsed) return;
-		await handleIntent(parsed);
+		const bareWorkspace = !parsed ? url.searchParams.get('workspace') : null;
+		if (parsed) await handleIntent(parsed);
+		else if (bareWorkspace && isSupportedWorkspacePath(bareWorkspace)) {
+			await openProjectSessionTab(bareWorkspace);
+		}
+		if (!parsed && !bareWorkspace) return;
+		const next = clearIntentUrl(url);
+		if (next !== url.pathname + url.search) {
+			await goto(next, { replaceState: true, noScroll: true, keepFocus: true });
+		}
 	}
 
 	async function handleIntent(intent: LaunchIntent) {
@@ -333,35 +304,37 @@
 				await createNote(targetWorkspace!);
 				break;
 			case 'newChat':
-				if (targetWorkspace) openChatTab();
-				else openHomeChat();
+				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
+				else focusDefaultHomeTab();
 				break;
 			case 'search':
 				showSearch.set(true);
 				break;
 			case 'openChat':
-				if (targetWorkspace) {
-					openChatTab(intent.chatId ?? undefined);
+				if (intent.chatId && targetWorkspace) {
+					await rememberWorkspace(targetWorkspace);
+					openHomeStripChat(intent.chatId, targetWorkspace);
+				} else if (targetWorkspace) {
+					await openProjectSessionTab(targetWorkspace);
 				} else if (intent.chatId) {
 					const chat = await getChat(intent.chatId).catch(() => null);
 					const chatWorkspace = chat?.chat.meta?.workspace;
 					if (typeof chatWorkspace === 'string' && chatWorkspace) {
-						addWorkspace(chatWorkspace);
-						await goto(
-							`/?workspace=${encodeURIComponent(chatWorkspace)}&chatId=${encodeURIComponent(intent.chatId)}`
-						);
+						await rememberWorkspace(chatWorkspace);
+						openHomeStripChat(intent.chatId, chatWorkspace);
 					} else {
-						openHomeChat(intent.chatId);
+						openHomeStripChat(intent.chatId);
 					}
 				} else {
-					openHomeChat();
+					focusDefaultHomeTab();
 				}
 				break;
 			case 'openFile':
+				if (targetWorkspace) await rememberWorkspace(targetWorkspace);
 				if (intent.filePath) openFileTab(intent.filePath);
 				break;
 			case 'openDir':
-				if (intent.dirPath) setFileBrowserCwd(intent.dirPath);
+				await openProjectSessionTab(targetWorkspace || intent.dirPath || '');
 				break;
 			case 'share':
 				await handleShareIntent(intent, targetWorkspace!);
@@ -377,9 +350,8 @@
 	}
 
 	async function createNote(workspacePath: string, content = '') {
-		if (get(currentWorkspace)?.path !== workspacePath) {
-			await loadWorkspace(workspacePath);
-		}
+		await rememberWorkspace(workspacePath);
+		currentWorkspace.set(null);
 
 		const base = noteBaseName();
 		for (let i = 1; i < 100; i += 1) {
@@ -413,7 +385,7 @@
 
 		if (behavior === 'chatDraft') {
 			sessionStorage.setItem(`cptr:intent:chatDraft:${workspacePath}`, shareMarkdown(share));
-			openChatTab();
+			await openProjectSessionTab(workspacePath);
 			return;
 		}
 		await createNote(workspacePath, shareMarkdown(share));
@@ -458,9 +430,7 @@
 			shareBehavior: behavior ?? pendingIntent.shareBehavior
 		};
 		pendingIntent = null;
-		const params = new URLSearchParams({ workspace: path });
-		await goto(`/?${params.toString()}`, { replaceState: true });
-		if (get(currentWorkspace)?.path !== path) await loadWorkspace(path);
+		currentWorkspace.set(null);
 		await handleIntent(intent);
 	}
 
@@ -478,34 +448,18 @@
 	}
 
 	$effect(() => {
+		const href = $page.url.pathname + $page.url.search;
+		if (href === lastHandledHref) return;
+		lastHandledHref = href;
 		const workspacePath = $page.url.searchParams.get('workspace');
 		if (workspacePath && !isSupportedWorkspacePath(workspacePath)) {
-			lastLoadedPath = null;
 			currentWorkspace.set(null);
-			goto('/', { replaceState: true });
+			void goto('/', { replaceState: true });
 			return;
 		}
-		if (workspacePath && workspacePath !== lastLoadedPath) {
-			// New workspace — load then process intents
-			lastLoadedPath = workspacePath;
-			loadWorkspace(workspacePath).then(async () => {
-				const canonicalWorkspacePath = get(currentWorkspace)?.path;
-				if (canonicalWorkspacePath && canonicalWorkspacePath !== workspacePath) {
-					const params = new URLSearchParams($page.url.searchParams);
-					params.set('workspace', canonicalWorkspacePath);
-					lastLoadedPath = canonicalWorkspacePath;
-					await goto(`/?${params.toString()}`, { replaceState: true });
-				}
-				processIntentParams();
-			});
-		} else if (workspacePath && workspacePath === lastLoadedPath) {
-			// Same workspace — process intents immediately
-			if (get(currentWorkspace)?.path === workspacePath) processIntentParams();
-		} else if (!workspacePath) {
-			lastLoadedPath = null;
-			currentWorkspace.set(null);
-			processIntentParams();
-		}
+		// A project is a session tab on the home strip, not the folder view.
+		if (get(currentWorkspace)) currentWorkspace.set(null);
+		void processIntentParams();
 	});
 
 	$effect(() => {
@@ -535,7 +489,7 @@
 					.detail
 			) {
 				case 'newChat':
-					openHomeChat();
+					focusDefaultHomeTab();
 					break;
 				case 'closeTab':
 					if (
@@ -560,13 +514,14 @@
 		return () => window.removeEventListener('cptr:home-action', handleHomeAction);
 	});
 
-	// Sidebar "new chat" / Default workspace chat clicks land in the Home chat slot.
+	// Sidebar "new chat" / default-workspace chat clicks land in the home tab strip.
 	$effect(() => {
 		const request = $homeChatRequest;
-		if (!request || $currentWorkspace) return;
+		if (!request) return;
 		untrack(() => {
 			homeChatRequest.set(null);
-			openHomeChat(request.chatId);
+			if (request.chatId) openHomeStripChat(request.chatId);
+			else focusDefaultHomeTab();
 		});
 	});
 
@@ -804,11 +759,14 @@
 							tabId={tab.id}
 							workspace={tab.workspace ?? ''}
 							active={tab.id === homePane.activeTabId}
-							onworkspacechange={tab.type === 'home'
-								? (path) => setHomeTabWorkspace(tab.id, path)
+							onworkspacechange={isSessionHomepage(tab)
+								? (path) => switchSessionWorkspace(path, homePane.id)
 								: undefined}
 							ontabupdate={updateHomeChatTab}
-							onopenchat={(chatId) => openHomeChat(chatId)}
+							onopenchat={(chatId) => {
+								if (chatId) openHomeStripChat(chatId, tab.workspace);
+								else focusDefaultHomeTab();
+							}}
 						/>
 					</div>
 				{/each}

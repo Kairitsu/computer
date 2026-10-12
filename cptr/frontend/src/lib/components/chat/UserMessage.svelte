@@ -4,7 +4,7 @@
 	import UploadPreviewModal from './UploadPreviewModal.svelte';
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import { fileIconName } from '$lib/utils/fileIcon';
-	import { openFileTab, setFileBrowserCwd, setActiveTab } from '$lib/stores';
+	import { openFileTab, openDirectoryAsSession } from '$lib/stores';
 	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
 
@@ -123,12 +123,8 @@
 							title={cleanPath}
 							onclick={(e) => {
 								e.preventDefault();
-								if (isDir) {
-									setFileBrowserCwd(cleanPath);
-									setActiveTab('files');
-								} else {
-									openFileTab(cleanPath);
-								}
+								if (isDir) openDirectoryAsSession(cleanPath);
+								else openFileTab(cleanPath);
 							}}
 							><Icon
 								name={isDir ? 'folder' : fileIconName(segment.label, 'file')}

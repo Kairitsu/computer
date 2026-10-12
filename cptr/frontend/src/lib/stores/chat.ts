@@ -228,10 +228,9 @@ export function bindGlobalChatListener() {
 						: i18next.t('chat.notification.finishedBody'));
 			const openChat = async () => {
 				const { goto } = await import('$app/navigation');
-				const workspaceQuery = workspacePath
-					? `workspace=${encodeURIComponent(workspacePath)}&`
-					: '';
-				await goto(`/?${workspaceQuery}chatId=${encodeURIComponent(data.chat_id)}`);
+				const { openHomeStripChat } = await import('$lib/stores');
+				openHomeStripChat(data.chat_id, workspacePath || undefined);
+				await goto('/');
 			};
 
 			// In-app toast

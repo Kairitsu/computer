@@ -4,9 +4,12 @@
 		currentWorkspace,
 		showSearch,
 		openFileTab,
-		setFileBrowserCwd,
-		requestHomeChat
+		requestHomeChat,
+		openProjectSessionTab,
+		openHomeStripChat,
+		rememberWorkspace
 	} from '$lib/stores';
+	import { get } from 'svelte/store';
 	import { getPathDisplayName } from '$lib/utils/paths';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import {
@@ -273,41 +276,56 @@
 		return getPathDisplayName(workspacePath, workspacePath);
 	}
 
+	function owningWorkspace(path: string): string | null {
+		let best: string | null = null;
+		for (const ws of get(workspaceList)) {
+			const root = ws.path.endsWith('/') ? ws.path.slice(0, -1) : ws.path;
+			if ((path === root || path.startsWith(root + '/')) && (!best || root.length > best.length)) {
+				best = root;
+			}
+		}
+		return best;
+	}
+
 	function selectChat(chat: ChatSearchResult) {
 		onclose();
 		if (!chat.workspace) {
 			// Home chats belong to no workspace; open them in Home like the sidebar does.
 			requestHomeChat(chat.id);
-			goto('/');
+			void goto('/');
 			return;
 		}
-		goto(`/?workspace=${encodeURIComponent(chat.workspace)}&chatId=${encodeURIComponent(chat.id)}`);
+		openHomeStripChat(chat.id, chat.workspace);
+		void goto('/');
 	}
 
 	function selectFile(file: FileSearchResult) {
 		onclose();
-		if (file.type === 'file') {
-			goto(
-				`/?workspace=${encodeURIComponent(file.workspace)}&file=${encodeURIComponent(file.path)}`
-			);
-		} else if (file.type === 'directory') {
-			goto(
-				`/?workspace=${encodeURIComponent(file.workspace)}&dir=${encodeURIComponent(file.path)}`
-			);
+		currentWorkspace.set(null);
+		if (file.type === 'directory') {
+			void openProjectSessionTab(file.workspace || file.path);
+		} else {
+			void rememberWorkspace(file.workspace);
+			openFileTab(file.path);
 		}
+		void goto('/');
 	}
 
 	function selectFileMatch(match: FileMatch) {
 		onclose();
+		currentWorkspace.set(null);
 		if (match.type === 'directory') {
-			setFileBrowserCwd(match.path);
+			const workspace = owningWorkspace(match.path);
+			if (workspace) void openProjectSessionTab(workspace);
 		} else {
 			openFileTab(match.path);
 		}
+		void goto('/');
 	}
 
 	function selectContentMatch(match: FileMatch, content: ContentMatch) {
 		onclose();
+		currentWorkspace.set(null);
 		openFileTab(match.path, undefined, {
 			searchTarget: {
 				line: content.line,
@@ -316,6 +334,7 @@
 				requestId: ++searchTargetRequestId
 			}
 		});
+		void goto('/');
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

@@ -2,8 +2,8 @@
  * Workspace + Tab state management for cptr.
  *
  * State is split into three layers:
- *   1. Browser-tab state: which workspace is active, determined by URL (?workspace=...)
- *   2. Workspace state: tabs, groups, split layout, persisted server-side per workspace path
+ *   1. Session tabs: the default new-chat home and project session tabs share one tab strip
+ *   2. Workspace state: saved per folder for the sidebar; it is not the project homepage
  *   3. User preferences: theme, locale, sidebar, persisted server-side globally
  *
  * Architecture:
@@ -909,9 +909,7 @@ if (typeof BroadcastChannel !== 'undefined') {
 
 /**
  * Register a workspace path in the sidebar list.
- * Does NOT set currentWorkspace. That happens when the URL changes
- * (via goto() in the calling component), which triggers loadWorkspace().
- * The URL is the single source of truth for which workspace is active.
+ * Opening the project itself is openProjectSessionTab(), which adds a session tab.
  */
 export function addWorkspace(path: string): void {
 	const name = getPathDisplayName(path, path);
@@ -926,6 +924,202 @@ export function addWorkspace(path: string): void {
 	workspaceOrder.update((order) => {
 		if (order.includes(path)) return order;
 		return [...order, path];
+	});
+}
+
+/**
+ * Make sure the sidebar still lists this folder after a refresh.
+ * An existing saved workspace is left as it is, including any file tabs.
+ */
+export async function rememberWorkspace(path: string): Promise<string> {
+	addWorkspace(path);
+	try {
+		const existing = await getWorkspaceState(path);
+		const canonical = typeof existing?.path === 'string' && existing.path ? existing.path : path;
+		if (canonical !== path) {
+			workspaceList.update((list) => list.filter((item) => item.path !== path));
+			workspaceOrder.update((order) => order.filter((item) => item !== path));
+			addWorkspace(canonical);
+		}
+		const stored = Object.keys(existing ?? {}).filter((key) => key !== 'name' && key !== 'path');
+		if (stored.length === 0) {
+			await saveWorkspaceState(canonical, {
+				name: getPathDisplayName(canonical),
+				fileBrowserCwd: canonical
+			});
+		}
+		return canonical;
+	} catch {
+		return path;
+	}
+}
+
+function showSessionHome(): void {
+	if (get(currentWorkspace)) currentWorkspace.set(null);
+}
+
+function updateHomeGroup(
+	groupId: string,
+	update: (tabs: Tab[]) => { tabs: Tab[]; activeTabId: string }
+): void {
+	homeState.update((state) => ({
+		...state,
+		activeGroupId: groupId,
+		groups: state.groups.map((group) =>
+			group.id === groupId ? { ...group, ...update(group.tabs) } : group
+		)
+	}));
+}
+
+/** The fixed default-workspace new-chat tab. Project homepages are ordinary closable tabs. */
+export function isSessionHomepage(tab: Tab | null | undefined): boolean {
+	if (!tab) return false;
+	if (tab.type === 'home') return true;
+	return tab.type === 'chat' && !!tab.path?.startsWith('new-');
+}
+
+export function focusDefaultHomeTab(): void {
+	showSessionHome();
+	const state = get(homeState);
+	for (const group of state.groups) {
+		const homeTab = group.tabs.find((tab) => tab.type === 'home');
+		if (!homeTab) continue;
+		if (state.activeGroupId === group.id && group.activeTabId === homeTab.id) return;
+		updateHomeGroup(group.id, (tabs) => ({ tabs, activeTabId: homeTab.id }));
+		return;
+	}
+}
+
+/** A new closable chat tab. `workspace` empty means the default workspace. */
+export function openNewSessionTab(workspace = '', groupId?: string): void {
+	showSessionHome();
+	const state = get(homeState);
+	const gid =
+		groupId && state.groups.some((group) => group.id === groupId) ? groupId : state.activeGroupId;
+	const tab: Tab = {
+		id: nextId(),
+		type: 'chat',
+		label: 'New Chat',
+		path: `new-${Date.now()}`,
+		...(workspace ? { workspace } : {})
+	};
+	updateHomeGroup(gid, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
+}
+
+/** A folder link opens the project session that contains it, not the folder listing. */
+export function openDirectoryAsSession(path: string): void {
+	const cleaned = path.replace(/\/+$/, '');
+	if (!cleaned) return;
+	let best = '';
+	for (const ws of get(workspaceList)) {
+		const root = ws.path.replace(/\/+$/, '');
+		if ((cleaned === root || cleaned.startsWith(root + '/')) && root.length > best.length) {
+			best = root;
+		}
+	}
+	void openProjectSessionTab(best || cleaned);
+}
+
+/** Open another project session homepage. Repeating the same project opens another tab. */
+export async function openProjectSessionTab(workspace: string, groupId?: string): Promise<void> {
+	const requested = workspace.trim();
+	if (!requested) {
+		focusDefaultHomeTab();
+		return;
+	}
+	showSessionHome();
+	const path = await rememberWorkspace(requested);
+	openNewSessionTab(path, groupId);
+}
+
+/** Open a saved chat in the home tab strip, or switch to the tab already showing it. */
+export function openHomeStripChat(chatId: string, workspace?: string, groupId?: string): void {
+	if (!chatId) {
+		focusDefaultHomeTab();
+		return;
+	}
+	showSessionHome();
+	const state = get(homeState);
+	for (const group of state.groups) {
+		const existing = group.tabs.find((tab) => tab.type === 'chat' && tab.path === chatId);
+		if (!existing) continue;
+		updateHomeGroup(group.id, (tabs) => ({
+			tabs: tabs.map((tab) =>
+				tab.id === existing.id && workspace && !tab.workspace ? { ...tab, workspace } : tab
+			),
+			activeTabId: existing.id
+		}));
+		return;
+	}
+	const gid =
+		groupId && state.groups.some((group) => group.id === groupId) ? groupId : state.activeGroupId;
+	const tab: Tab = {
+		id: nextId(),
+		type: 'chat',
+		label: 'Chat',
+		path: chatId,
+		...(workspace ? { workspace } : {})
+	};
+	updateHomeGroup(gid, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
+}
+
+/**
+ * Workspace chip on a session homepage.
+ * Default workspace returns to the existing new-chat home. A project always opens a new tab.
+ */
+export function switchSessionWorkspace(path: string, groupId?: string): void {
+	if (!path) {
+		focusDefaultHomeTab();
+		return;
+	}
+	void openProjectSessionTab(path, groupId);
+}
+
+/** Remove home-strip tabs showing a chat, for example after it is deleted. */
+export function closeHomeStripChat(chatId: string): void {
+	const state = get(homeState);
+	const closing: Tab[] = [];
+	for (const group of state.groups) {
+		for (const tab of group.tabs) {
+			if (tab.type === 'chat' && tab.path === chatId) closing.push(tab);
+		}
+	}
+	if (!closing.length) return;
+	let removed = false;
+	homeState.update((current) => {
+		const removedGroups: string[] = [];
+		const groups = current.groups
+			.map((group) => {
+				const tabs = group.tabs.filter((tab) => !(tab.type === 'chat' && tab.path === chatId));
+				if (!tabs.length) {
+					removedGroups.push(group.id);
+					return null;
+				}
+				const activeStillThere = tabs.some((tab) => tab.id === group.activeTabId);
+				return {
+					...group,
+					tabs,
+					activeTabId: activeStillThere ? group.activeTabId : (tabs[tabs.length - 1]?.id ?? '')
+				};
+			})
+			.filter((group): group is EditorGroup => group !== null);
+		if (!groups.length) return current;
+		removed = true;
+		let layout = current.layout;
+		for (const groupId of removedGroups) {
+			layout = removeLayoutGroup(layout, groupId) ?? layout;
+		}
+		const activeGroupId = groups.some((group) => group.id === current.activeGroupId)
+			? current.activeGroupId
+			: groups[0].id;
+		return { ...current, groups, layout, activeGroupId };
+	});
+	if (!removed) return;
+	for (const tab of closing) releaseClosedChatTab(tab);
+	streamingChatTabs.update((open) => {
+		const next = new Set(open);
+		for (const tab of closing) next.delete(tab.id);
+		return next;
 	});
 }
 
