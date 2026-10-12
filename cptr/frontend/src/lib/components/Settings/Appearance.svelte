@@ -258,25 +258,22 @@
 				{fontSizeDraft}px
 			</span>
 		</div>
-		<div class="mt-2 flex flex-wrap gap-1">
+		<div class="segmented mt-2" role="group" aria-labelledby="font-size-label">
 			{#each fontSizePresets as option}
 				<button
 					type="button"
-					class="h-7 px-2.5 rounded-lg text-xs transition-colors duration-100
-					{fontSizeDraft === option.size
-						? 'bg-gray-200/50 dark:bg-white/8 text-gray-900 dark:text-white font-medium'
-						: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
+					class:active={fontSizeDraft === option.size}
 					onclick={() => setFontSize(option.size)}
 				>
 					{$t(option.key)}
-					<span class="ml-0.5 text-[0.625rem] text-gray-400">{option.size}</span>
+					<span class="ml-0.5 text-[0.625rem] opacity-70">{option.size}</span>
 				</button>
 			{/each}
 		</div>
 		<div class="flex items-center gap-1.5 pt-1.5">
 			<button
 				type="button"
-				class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors"
+				class="settings-icon"
 				aria-label={$t('appearance.decreaseFontSize')}
 				onclick={() => setFontSize(fontSizeDraft - 1)}
 			>
@@ -298,7 +295,7 @@
 			/>
 			<button
 				type="button"
-				class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors"
+				class="settings-icon"
 				aria-label={$t('appearance.increaseFontSize')}
 				onclick={() => setFontSize(fontSizeDraft + 1)}
 			>
@@ -313,9 +310,9 @@
 
 <div class="flex flex-col h-full">
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-none pr-1.5 -mr-1.5">
-		<div class="flex items-center justify-between mb-4">
+		<div class="flex items-start justify-between gap-3 mb-4">
 			<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('appearance.title')}</h2>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center justify-end gap-1.5">
 				<input
 					bind:this={fileInput}
 					type="file"
@@ -323,23 +320,15 @@
 					class="hidden"
 					onchange={importTheme}
 				/>
-				<button
-					type="button"
-					class="text-[0.625rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
-					onclick={() => fileInput?.click()}
-				>
+				<button type="button" class="settings-action" onclick={() => fileInput?.click()}>
 					{$t('appearance.import')}
 				</button>
-				<button
-					type="button"
-					class="text-[0.625rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
-					onclick={exportTheme}
-				>
+				<button type="button" class="settings-action" onclick={exportTheme}>
 					{$t('appearance.exportTheme')}
 				</button>
 				<button
 					type="button"
-					class="text-[0.625rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100 disabled:opacity-30 disabled:pointer-events-none"
+					class="settings-action"
 					disabled={!hasCustomAppearance}
 					onclick={resetAppearance}
 				>
@@ -429,7 +418,7 @@
 							/>
 							<input
 								value={colorDrafts[opt.key]}
-								class="w-24 bg-transparent text-right text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none"
+								class="settings-field w-24 text-right font-mono"
 								aria-label={opt.label}
 								oninput={(e) => updateColor(opt.key, e.currentTarget.value)}
 							/>
@@ -445,7 +434,7 @@
 				<input
 					value={$themeConfig?.uiFont ?? ''}
 					placeholder={resolvedConfig.uiFont}
-					class="w-full max-w-[15rem] bg-transparent text-right text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none"
+					class="settings-field w-full max-w-[15rem] text-right"
 					aria-label={$t('appearance.uiFont')}
 					onchange={(e) => updateFont(e.currentTarget.value)}
 				/>
@@ -458,7 +447,7 @@
 					</span>
 					<button
 						type="button"
-						class="ml-auto h-6 px-2 rounded-lg text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors"
+						class="settings-action ml-auto"
 						aria-live="polite"
 						onclick={toggleBorderContrast}
 					>
@@ -471,7 +460,7 @@
 					<div class="flex items-center gap-1.5 pt-1.5">
 						<button
 							type="button"
-							class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors"
+							class="settings-icon"
 							aria-labelledby="border-contrast-label"
 							aria-label={$t('appearance.decreaseBorderContrast')}
 							onclick={() => setBorderContrastPreference(borderContrastDraft - borderContrastStep)}
@@ -495,7 +484,7 @@
 						/>
 						<button
 							type="button"
-							class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors"
+							class="settings-icon"
 							aria-labelledby="border-contrast-label"
 							aria-label={$t('appearance.increaseBorderContrast')}
 							onclick={() => setBorderContrastPreference(borderContrastDraft + borderContrastStep)}
@@ -527,44 +516,6 @@
 </div>
 
 <style>
-	.segmented {
-		display: inline-flex;
-		gap: 0.125rem;
-		padding: 0.1875rem;
-		border-radius: 0.75rem;
-		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
-	}
-
-	.segmented button {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.3125rem;
-		height: 1.75rem;
-		padding: 0 0.875rem;
-		border-radius: 0.5625rem;
-		font-size: 0.75rem;
-		color: var(--app-fg-muted);
-		transition:
-			background 0.1s,
-			color 0.1s;
-	}
-
-	.segmented-sm button {
-		height: 1.5rem;
-		padding: 0 0.625rem;
-	}
-
-	.segmented button:hover {
-		color: var(--app-fg);
-	}
-
-	.segmented button.active {
-		background: var(--app-bg);
-		color: var(--app-fg);
-		font-weight: 600;
-		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
-	}
-
 	.preset-card {
 		display: flex;
 		flex-direction: column;
@@ -572,7 +523,7 @@
 		min-width: 0;
 		padding: 0.3125rem;
 		border-radius: 0.75rem;
-		border: 1px solid color-mix(in oklab, var(--app-fg) 10%, transparent);
+		border: 1px solid color-mix(in oklab, var(--app-fg) 12%, transparent);
 		text-align: left;
 		transition:
 			border-color 0.1s,
@@ -655,10 +606,11 @@
 	.appearance-swatch {
 		width: 1.5rem;
 		height: 1.5rem;
-		border: 1px solid var(--app-border);
+		border: 1px solid color-mix(in oklab, var(--app-fg) 16%, transparent);
 		border-radius: 624.9375rem;
 		background: transparent;
 		padding: 0.125rem;
+		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
 	}
 
 	.appearance-range {

@@ -152,6 +152,237 @@
 	color: var(--app-fg);
 }
 
+/* Settings controls use the appearance theme switch: a 6% track, and a raised
+   surface for the selected or focused control. */
+.segmented {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.125rem;
+	max-width: 100%;
+	padding: 0.1875rem;
+	border-radius: 0.75rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+}
+
+.segmented button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3125rem;
+	height: 1.75rem;
+	padding: 0 0.875rem;
+	border: 0;
+	border-radius: 0.5625rem;
+	background: transparent;
+	font-size: 0.75rem;
+	font-weight: 500;
+	line-height: 1;
+	color: var(--app-fg-muted);
+	white-space: nowrap;
+	transition:
+		background 0.1s,
+		color 0.1s,
+		box-shadow 0.1s;
+}
+
+.segmented.segmented-sm button {
+	height: 1.5rem;
+	padding: 0 0.625rem;
+	font-size: 0.6875rem;
+}
+
+.segmented button:hover {
+	color: var(--app-fg);
+}
+
+.segmented button.active {
+	background: var(--app-bg);
+	color: var(--app-fg);
+	font-weight: 600;
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.settings-field {
+	display: block;
+	box-sizing: border-box;
+	min-height: 1.75rem;
+	padding: 0.25rem 0.75rem;
+	border: 0;
+	border-radius: 0.75rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	color: var(--app-fg);
+	font-size: 0.8125rem;
+	line-height: 1.35;
+	outline: none;
+	transition:
+		background 0.1s,
+		box-shadow 0.1s;
+}
+
+.settings-field::placeholder {
+	color: var(--app-fg-muted);
+}
+
+.settings-field:focus {
+	background: var(--app-bg);
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.settings-field:-webkit-autofill,
+.settings-field:-webkit-autofill:hover {
+	-webkit-text-fill-color: var(--app-fg);
+	caret-color: var(--app-fg);
+	box-shadow: 0 0 0 1000px color-mix(in oklab, var(--app-fg) 6%, var(--app-bg)) inset;
+	transition: background-color 600000s 0s;
+}
+
+.settings-field:focus:-webkit-autofill {
+	-webkit-text-fill-color: var(--app-fg);
+	box-shadow:
+		0 0 0 1000px var(--app-bg) inset,
+		0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+select.settings-field {
+	cursor: pointer;
+	padding-right: 1.75rem;
+}
+
+textarea.settings-field {
+	min-height: 6.5rem;
+	padding: 0.5rem 0.75rem;
+	resize: vertical;
+	line-height: 1.5;
+}
+
+.settings-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3125rem;
+	min-height: 1.75rem;
+	padding: 0 0.875rem;
+	border: 0;
+	border-radius: 0.75rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	color: var(--app-fg);
+	font-size: 0.75rem;
+	font-weight: 500;
+	line-height: 1.2;
+	white-space: nowrap;
+	text-decoration: none;
+	transition:
+		background 0.1s,
+		color 0.1s,
+		box-shadow 0.1s;
+}
+
+.settings-action:hover,
+.settings-action:focus-visible {
+	background: var(--app-bg);
+	color: var(--app-fg);
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.settings-action:disabled {
+	opacity: 0.35;
+	pointer-events: none;
+	box-shadow: none;
+}
+
+.settings-action.danger,
+.settings-icon.danger {
+	color: #dc2626;
+}
+
+.settings-action.danger:hover,
+.settings-action.danger:focus-visible,
+.settings-icon.danger:hover,
+.settings-icon.danger:focus-visible {
+	color: #b91c1c;
+}
+
+.settings-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: 0;
+	border: 0;
+	border-radius: 0.5625rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	color: var(--app-fg-muted);
+	flex-shrink: 0;
+	transition:
+		background 0.1s,
+		color 0.1s,
+		box-shadow 0.1s;
+}
+
+.settings-icon:hover,
+.settings-icon:focus-visible {
+	background: var(--app-bg);
+	color: var(--app-fg);
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.settings-icon:disabled {
+	opacity: 0.35;
+	pointer-events: none;
+}
+
+.settings-nav {
+	border-radius: 0.75rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	padding: 0.1875rem;
+	gap: 0.125rem;
+}
+
+.settings-nav > button {
+	border: 0;
+	border-radius: 0.5625rem;
+	background: transparent;
+	color: var(--app-fg-muted);
+	transition:
+		background 0.1s,
+		color 0.1s,
+		box-shadow 0.1s;
+}
+
+.settings-nav > button:hover {
+	color: var(--app-fg);
+}
+
+.settings-nav > button.active {
+	background: var(--app-bg);
+	color: var(--app-fg);
+	font-weight: 600;
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.settings-row {
+	border-radius: 0.75rem;
+	background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	transition:
+		background 0.1s,
+		box-shadow 0.1s;
+}
+
+.settings-row:hover,
+.settings-row:focus-within {
+	background: var(--app-bg);
+	box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+}
+
+.segmented button:focus-visible,
+.settings-field:focus-visible,
+.settings-nav > button:focus-visible,
+.settings-row:focus-visible {
+	outline: 2px solid color-mix(in oklab, var(--app-accent) 45%, transparent);
+	outline-offset: 1px;
+}
+
 .app-theme :where(option) {
 	background: var(--app-bg);
 	color: var(--app-fg);

@@ -39,7 +39,7 @@
 		<ul class="mt-4 flex max-h-72 flex-col gap-1.5 overflow-y-auto">
 			{#each accounts as account (account.id)}
 				<li
-					class="row flex items-center gap-3 rounded-xl px-3 py-2.5"
+					class="settings-row row flex items-center gap-3 px-3 py-2.5"
 					class:is-active={account.active}
 				>
 					<span class="avatar" aria-hidden="true">{initials(account)}</span>
@@ -62,14 +62,14 @@
 						{#if !account.active}
 							<button
 								type="button"
-								class="btn btn-solid"
+								class="settings-action"
 								disabled={busy}
 								onclick={() => onswitch(account.id)}>{$t('grokAccount.switch')}</button
 							>
 						{/if}
 						<button
 							type="button"
-							class="btn btn-ghost btn-danger"
+							class="settings-icon danger"
 							disabled={busy}
 							aria-label={$t('grokAccount.remove')}
 							onclick={() => onremove(account.id)}
@@ -84,12 +84,12 @@
 
 	<div class="mt-5 flex flex-wrap items-center justify-end gap-2">
 		{#if signedIn}
-			<button type="button" class="btn btn-ghost" disabled={busy} onclick={onsave}
+			<button type="button" class="settings-action" disabled={busy} onclick={onsave}
 				>{$t('grokAccount.saveCurrent')}</button
 			>
 		{/if}
-		<button type="button" class="btn btn-ghost" onclick={onclose}>{$t('common.close')}</button>
-		<button type="button" class="btn btn-solid" disabled={busy} onclick={onadd}>
+		<button type="button" class="settings-action" onclick={onclose}>{$t('common.close')}</button>
+		<button type="button" class="settings-action" disabled={busy} onclick={onadd}>
 			<Icon name="plus" size={12} />
 			{$t('grokAccount.addAccount')}
 		</button>
@@ -102,13 +102,9 @@
 		background: color-mix(in oklab, var(--app-fg) 4%, transparent);
 	}
 
-	.row {
-		border: 1px solid color-mix(in oklab, var(--app-fg) 8%, transparent);
-	}
-
 	.row.is-active {
-		border-color: color-mix(in oklab, var(--app-accent) 45%, transparent);
-		background: color-mix(in oklab, var(--app-accent) 6%, transparent);
+		background: var(--app-bg);
+		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
 	}
 
 	.avatar {
@@ -133,47 +129,5 @@
 		line-height: 1.125rem;
 		color: var(--app-fg-muted);
 		border: 1px solid color-mix(in oklab, var(--app-fg) 12%, transparent);
-	}
-
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.3125rem;
-		height: 1.75rem;
-		padding: 0 0.75rem;
-		border-radius: 0.5rem;
-		font-size: 0.75rem;
-		font-weight: 500;
-		transition:
-			background 0.12s ease,
-			opacity 0.12s ease;
-	}
-
-	.btn:disabled {
-		opacity: 0.45;
-		pointer-events: none;
-	}
-
-	.btn-solid {
-		background: var(--app-accent);
-		color: var(--app-accent-fg);
-	}
-
-	.btn-solid:hover {
-		opacity: 0.88;
-	}
-
-	.btn-ghost {
-		color: var(--app-fg);
-		border: 1px solid color-mix(in oklab, var(--app-fg) 12%, transparent);
-	}
-
-	.btn-ghost:hover {
-		background: var(--app-hover);
-	}
-
-	.btn-danger {
-		padding: 0 0.5rem;
-		color: #dc2626;
 	}
 </style>

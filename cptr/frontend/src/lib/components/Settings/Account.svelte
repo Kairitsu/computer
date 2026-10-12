@@ -272,16 +272,17 @@
 			<span class="text-sm font-medium text-gray-900 dark:text-white"
 				>{$session?.display_name || $session?.username}</span
 			>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-1.5">
 				<button
-					class="text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
+					type="button"
+					class="settings-action"
 					onclick={handleAvatarSelect}
 					disabled={uploadingAvatar}>{$t('account.uploadPhoto')}</button
 				>
 				{#if avatarUrl}
-					<span class="text-gray-300 dark:text-gray-700 text-[0.6875rem]">·</span>
 					<button
-						class="text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
+						type="button"
+						class="settings-action"
 						onclick={handleAvatarDelete}
 						disabled={uploadingAvatar}>{$t('account.removePhoto')}</button
 					>
@@ -296,30 +297,32 @@
 		type="text"
 		placeholder={$t('account.displayNamePlaceholder')}
 		bind:value={displayName}
-		class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1 mb-5"
+		class="settings-field mb-5 w-full"
 	/>
 
 	<!-- Password -->
 	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">{$t('account.password')}</h3>
-	<input
-		type="password"
-		placeholder={$t('account.currentPassword')}
-		bind:value={currentPassword}
-		autocomplete="current-password"
-		class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
-	/>
-	<input
-		type="password"
-		placeholder={$t('account.newPassword')}
-		bind:value={newPassword}
-		autocomplete="new-password"
-		class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
-	/>
+	<div class="flex flex-col gap-1.5">
+		<input
+			type="password"
+			placeholder={$t('account.currentPassword')}
+			bind:value={currentPassword}
+			autocomplete="current-password"
+			class="settings-field w-full"
+		/>
+		<input
+			type="password"
+			placeholder={$t('account.newPassword')}
+			bind:value={newPassword}
+			autocomplete="new-password"
+			class="settings-field w-full"
+		/>
+	</div>
 	<button
+		type="button"
 		disabled={updatingPassword || !currentPassword || !newPassword}
 		onclick={updatePassword}
-		class="mt-2 self-start text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-		disabled:opacity-30 disabled:pointer-events-none"
+		class="settings-action mt-2 self-start"
 	>
 		{#if updatingPassword}
 			<Spinner size={14} />
@@ -341,16 +344,12 @@
 				<li>{recoveryCode}</li>
 			{/each}
 		</ul>
-		<div class="flex gap-4">
-			<button
-				onclick={copyRecoveryCodes}
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpCopyCodes')}</button
+		<div class="flex flex-wrap gap-1.5">
+			<button type="button" class="settings-action" onclick={copyRecoveryCodes}
+				>{$t('account.totpCopyCodes')}</button
 			>
-			<button
-				onclick={() => (recoveryCodes = null)}
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpSavedCodes')}</button
+			<button type="button" class="settings-action" onclick={() => (recoveryCodes = null)}
+				>{$t('account.totpSavedCodes')}</button
 			>
 		</div>
 	{:else if totpStatus?.enabled}
@@ -358,40 +357,40 @@
 			{$t('account.totpOn', { count: totpStatus.recovery_codes_left })}
 		</p>
 		{#if disablingTotp}
-			<input
-				type="password"
-				placeholder={$t('account.currentPassword')}
-				bind:value={totpPassword}
-				autocomplete="current-password"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
-			/>
-			<input
-				type="text"
-				placeholder={$t('account.totpCodeOrRecovery')}
-				bind:value={totpCode}
-				autocomplete="one-time-code"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
-			/>
-			<div class="mt-2 flex gap-4">
+			<div class="mt-2 flex flex-col gap-1.5">
+				<input
+					type="password"
+					placeholder={$t('account.currentPassword')}
+					bind:value={totpPassword}
+					autocomplete="current-password"
+					class="settings-field w-full"
+				/>
+				<input
+					type="text"
+					placeholder={$t('account.totpCodeOrRecovery')}
+					bind:value={totpCode}
+					autocomplete="one-time-code"
+					class="settings-field w-full"
+				/>
+			</div>
+			<div class="mt-2 flex flex-wrap gap-1.5">
 				<button
+					type="button"
 					disabled={totpBusy || !totpPassword || !totpCode.trim()}
 					onclick={turnOffTotp}
-					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none"
+					class="settings-action danger"
 				>
 					{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpDisableConfirm')}{/if}
 				</button>
-				<button
-					onclick={cancelTotp}
-					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none">{$t('common.cancel')}</button
+				<button type="button" class="settings-action" onclick={cancelTotp}
+					>{$t('common.cancel')}</button
 				>
 			</div>
 		{:else}
 			<button
+				type="button"
 				onclick={() => (disablingTotp = true)}
-				class="mt-2 self-start text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none">{$t('account.totpDisable')}</button
+				class="settings-action danger mt-2 self-start">{$t('account.totpDisable')}</button
 			>
 		{/if}
 	{:else if totpSetup}
@@ -410,21 +409,19 @@
 			inputmode="numeric"
 			autocomplete="one-time-code"
 			maxlength="7"
-			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+			class="settings-field w-full"
 		/>
-		<div class="mt-2 flex gap-4">
+		<div class="mt-2 flex flex-wrap gap-1.5">
 			<button
+				type="button"
 				disabled={totpBusy || !totpCode.trim()}
 				onclick={confirmTotp}
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none"
+				class="settings-action"
 			>
 				{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpVerify')}{/if}
 			</button>
-			<button
-				onclick={cancelTotp}
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none">{$t('common.cancel')}</button
+			<button type="button" class="settings-action" onclick={cancelTotp}
+				>{$t('common.cancel')}</button
 			>
 		</div>
 	{:else if totpStatus}
@@ -434,13 +431,13 @@
 			placeholder={$t('account.currentPassword')}
 			bind:value={totpPassword}
 			autocomplete="current-password"
-			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-1"
+			class="settings-field mt-1.5 w-full"
 		/>
 		<button
+			type="button"
 			disabled={totpBusy || !totpPassword}
 			onclick={startTotpSetup}
-			class="mt-2 self-start text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none"
+			class="settings-action mt-2 self-start"
 		>
 			{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpEnable')}{/if}
 		</button>
@@ -449,10 +446,10 @@
 	<!-- Save -->
 	<div class="mt-auto pt-6 flex justify-end">
 		<button
+			type="button"
 			onclick={saveDisplayName}
 			disabled={savingProfile}
-			class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100
-			disabled:opacity-30 disabled:pointer-events-none"
+			class="settings-action"
 		>
 			{#if savingProfile}
 				{$t('settings.saving')}

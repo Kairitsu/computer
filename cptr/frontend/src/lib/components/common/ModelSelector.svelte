@@ -132,11 +132,7 @@
 </script>
 
 <span class="relative inline-flex {open ? 'z-[1001]' : ''}">
-	<button
-		bind:this={btnEl}
-		class="flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors duration-100"
-		onclick={toggle}
-	>
+	<button bind:this={btnEl} class="settings-action max-w-full" onclick={toggle}>
 		<span class="truncate max-w-[10rem]"
 			>{selectedModel === null || selectedModel === ''
 				? nullLabel
@@ -174,7 +170,7 @@
 			{align}
 		>
 			{#snippet header()}
-				<div class="flex items-center gap-1.5 h-6 px-2 mt-0.5">
+				<div class="flex items-center gap-1.5 px-1.5 py-1">
 					<svg
 						class="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600"
 						viewBox="0 0 24 24"
@@ -190,7 +186,7 @@
 						bind:this={searchInputEl}
 						value={search}
 						placeholder={$t('modelSelector.search')}
-						class="w-full bg-transparent text-[0.6875rem] text-gray-500 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none"
+						class="settings-field w-full"
 						oninput={(e) => {
 							search = e.currentTarget.value;
 							resetHighlightedIndex();

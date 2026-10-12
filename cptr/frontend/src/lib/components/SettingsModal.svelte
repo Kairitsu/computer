@@ -86,9 +86,10 @@
 	<nav
 		class="shrink-0 min-w-0 md:min-h-0 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto scrollbar-none border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/6 md:w-[11.25rem]"
 	>
-		<div class="flex w-max min-w-full md:w-auto md:min-w-0 md:flex-col p-1 gap-px">
+		<div class="settings-nav flex w-max min-w-full md:w-auto md:min-w-0 md:flex-col">
 			<button
-				class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 rounded-lg text-xs text-gray-400 dark:text-gray-600 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-75 md:mb-1"
+				type="button"
+				class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 text-xs text-left"
 				onclick={onclose}
 			>
 				<Icon name="chevron-left" size={12} />
@@ -97,10 +98,9 @@
 
 			{#each tabs as tab}
 				<button
-					class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 rounded-lg text-xs text-left transition-colors duration-75
-						{activeTab === tab.id
-						? 'font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-white/6'
-						: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
+					type="button"
+					class="flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 text-xs text-left"
+					class:active={activeTab === tab.id}
 					onclick={() => (activeTab = tab.id)}
 				>
 					<Icon name={tab.icon} size={14} />

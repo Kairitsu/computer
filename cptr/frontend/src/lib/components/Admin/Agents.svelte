@@ -241,7 +241,8 @@
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('admin.agents')}</h2>
 		<div class="flex items-center gap-1">
 			<button
-				class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75 disabled:opacity-30"
+				type="button"
+				class="settings-icon"
 				onclick={refresh}
 				disabled={refreshing}
 				title={$t('admin.agentsRefresh')}
@@ -253,7 +254,8 @@
 				{/if}
 			</button>
 			<button
-				class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
+				type="button"
+				class="settings-icon"
 				onclick={() => (modal = { mode: 'create', profile: newProfile() })}
 				title={$t('admin.agentsAddProfile')}
 			>
@@ -267,9 +269,9 @@
 			<Spinner size={16} />
 		</div>
 	{:else}
-		<div class="divide-y divide-gray-100 dark:divide-white/5">
+		<div class="flex flex-col gap-1.5">
 			{#each profiles as profile, index (profile.id)}
-				<div class="group flex items-center gap-2 w-full min-h-9 py-1.5 text-left">
+				<div class="settings-row flex items-center gap-2 w-full min-h-9 px-2.5 py-1.5 text-left">
 					<button
 						type="button"
 						class="flex-1 min-w-0 text-left"
@@ -312,11 +314,7 @@
 			<span class="text-xs text-gray-500">
 				{profiles.length} profile{profiles.length === 1 ? '' : 's'}
 			</span>
-			<button
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100 disabled:opacity-50"
-				onclick={save}
-				disabled={saving}
-			>
+			<button type="button" class="settings-action" onclick={save} disabled={saving}>
 				{#if saving}
 					<Spinner size={14} />
 				{:else}

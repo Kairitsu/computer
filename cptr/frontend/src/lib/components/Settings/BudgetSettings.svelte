@@ -42,12 +42,11 @@
 	<span class="text-[0.8125rem] font-semibold" style="color: var(--app-fg);"
 		>{$t('quotaSettings.budget')}</span
 	>
-	<div class="period-group ml-auto flex items-center gap-0.5 rounded-lg p-0.5">
+	<div class="segmented segmented-sm ml-auto" role="group" aria-label={$t('quotaSettings.budget')}>
 		{#each periods as period}
 			<button
 				type="button"
-				class="h-6 rounded-md px-2 text-[0.6875rem] transition-colors"
-				class:period-active={$quotaBudget.period === period}
+				class:active={$quotaBudget.period === period}
 				onclick={() => setPeriod(period)}
 			>
 				{$t(`usageIndicator.period.${period}`)}
@@ -66,21 +65,17 @@
 		bind:value={budgetDraft}
 		placeholder={$t('quotaSettings.budgetPlaceholder')}
 		aria-label={$t('quotaSettings.budget')}
-		class="budget-input h-7 min-w-0 flex-1 rounded-lg border px-2 text-xs outline-none"
+		class="settings-field min-w-0 flex-1"
 	/>
 	<button
 		type="submit"
-		class="save-btn h-7 shrink-0 rounded-lg px-3 text-xs font-medium"
+		class="settings-action shrink-0"
 		disabled={budgetDraft.trim() !== '' && !parseTokens(budgetDraft)}
 	>
 		{$t('modelHub.contextSave')}
 	</button>
 	{#if $quotaBudget.tokens}
-		<button
-			type="button"
-			class="h-7 shrink-0 rounded-lg px-2 text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-			onclick={clearBudget}
-		>
+		<button type="button" class="settings-action shrink-0" onclick={clearBudget}>
 			{$t('quotaSettings.clear')}
 		</button>
 	{/if}
@@ -96,34 +91,3 @@
 		{$t('quotaSettings.budgetHint')}
 	{/if}
 </p>
-
-<style>
-	.period-group {
-		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
-	}
-
-	.period-group button {
-		color: var(--app-fg-muted);
-	}
-
-	.period-group button.period-active {
-		background: var(--app-bg);
-		color: var(--app-fg);
-		font-weight: 600;
-	}
-
-	.budget-input {
-		background: var(--app-bg);
-		color: var(--app-fg);
-		border-color: color-mix(in oklab, var(--app-fg) 12%, transparent);
-	}
-
-	.save-btn {
-		background: var(--app-accent);
-		color: var(--app-accent-fg);
-	}
-
-	.save-btn:disabled {
-		opacity: 0.4;
-	}
-</style>

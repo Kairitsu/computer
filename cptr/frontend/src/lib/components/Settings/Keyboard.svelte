@@ -94,11 +94,10 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex flex-col min-h-full">
-	<div class="flex items-center justify-between mb-3">
+	<div class="flex items-start justify-between gap-3 mb-3">
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('keyboard.title')}</h2>
-		<button
-			class="text-[0.625rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
-			onclick={resetKeybindings}>{$t('keyboard.resetDefaults')}</button
+		<button type="button" class="settings-action shrink-0" onclick={resetKeybindings}
+			>{$t('keyboard.resetDefaults')}</button
 		>
 	</div>
 
@@ -134,16 +133,16 @@
 						<span class="recording-indicator">{$t('keyboard.pressKeys')}</span>
 					{:else if chord}
 						<button
-							class="cursor-pointer"
+							type="button"
+							class="settings-action key-bind"
 							onclick={() => startRecording(actionId)}
 							title={$t('keyboard.clickToRebind')}
 						>
 							<KeyPill text={formatChord(chord)} />
 						</button>
 					{:else}
-						<button
-							class="text-[0.625rem] text-gray-500 dark:text-gray-600 cursor-pointer hover:text-gray-400 transition-colors duration-75"
-							onclick={() => startRecording(actionId)}>{$t('keyboard.unassigned')}</button
+						<button type="button" class="settings-action" onclick={() => startRecording(actionId)}
+							>{$t('keyboard.unassigned')}</button
 						>
 					{/if}
 
@@ -175,16 +174,24 @@
 		border-bottom: none;
 	}
 
+	.key-bind :global(.key-pill) {
+		height: auto;
+		padding: 0;
+		background: transparent;
+		color: inherit;
+	}
+
 	.recording-indicator {
 		display: inline-flex;
 		align-items: center;
-		height: 1.125rem;
-		padding: 0 0.5rem;
-		border-radius: 0.25rem;
-		font-size: 0.625rem;
-		font-weight: 500;
-		background: var(--app-active);
+		min-height: 1.75rem;
+		padding: 0 0.875rem;
+		border-radius: 0.75rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		background: var(--app-bg);
 		color: var(--app-fg);
+		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
 		animation: pulse-subtle 1.5s ease-in-out infinite;
 	}
 

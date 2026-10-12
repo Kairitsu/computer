@@ -30,7 +30,7 @@
 
 		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2">{tr('pwa.shareBehavior')}</h3>
 		<select
-			class="w-full max-w-[12.5rem] bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none py-1 cursor-pointer"
+			class="settings-field w-full max-w-[12.5rem]"
 			value={$pwaPreferences.shareBehavior}
 			onchange={updateShareBehavior}
 		>
@@ -41,7 +41,7 @@
 
 		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{tr('pwa.fileImports')}</h3>
 		<select
-			class="w-full max-w-[12.5rem] bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none py-1 cursor-pointer"
+			class="settings-field w-full max-w-[12.5rem]"
 			value={$pwaPreferences.importDestination}
 			onchange={updateImportDestination}
 		>
@@ -51,7 +51,7 @@
 		</select>
 		{#if $pwaPreferences.importDestination === 'configuredFolder'}
 			<input
-				class="mt-2 w-full h-8 bg-gray-100 dark:bg-white/6 rounded-lg px-2 text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none"
+				class="settings-field mt-2 w-full"
 				placeholder={tr('pwa.importFolderPlaceholder')}
 				value={$pwaPreferences.importFolder ?? ''}
 				oninput={(e) =>

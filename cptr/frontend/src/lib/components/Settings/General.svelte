@@ -251,7 +251,7 @@
 
 		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2">{$t('general.language')}</h3>
 		<select
-			class="w-full max-w-[12.5rem] bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none py-1 cursor-pointer"
+			class="settings-field w-full max-w-[12.5rem]"
 			value={$locale}
 			onchange={(e) => changeLocale((e.currentTarget as HTMLSelectElement).value)}
 		>
@@ -289,8 +289,8 @@
 					{$t('general.checkUpdatesDesc')}
 				</span>
 				<button
-					class="app-muted app-interactive h-7 shrink-0 rounded-lg border px-2.5 text-xs font-medium transition-colors duration-75"
-					style="border-color: var(--app-border);"
+					type="button"
+					class="settings-action shrink-0"
 					onclick={() => showUpdateModal.set(true)}>{$t('sidebar.checkUpdates')}</button
 				>
 			</div>
@@ -306,13 +306,11 @@
 		{/if}
 
 		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.messageQueue')}</h3>
-		<div class="flex gap-1">
+		<div class="segmented" role="group">
 			{#each [{ value: 'queue' as StreamingBehavior, label: $t('general.queue') }, { value: 'interrupt' as StreamingBehavior, label: $t('general.interrupt') }] as opt}
 				<button
-					class="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs transition-colors duration-100
-					{$streamingBehavior === opt.value
-						? 'bg-gray-200/50 dark:bg-white/8 text-gray-900 dark:text-white font-medium'
-						: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
+					type="button"
+					class:active={$streamingBehavior === opt.value}
 					onclick={() => streamingBehavior.set(opt.value)}
 				>
 					{opt.label}
@@ -338,7 +336,7 @@
 							step="1"
 							value={processSettings[field.key]}
 							onchange={(e) => saveProcessSetting(field.key, e.currentTarget)}
-							class="w-20 h-7 px-2 rounded-lg text-xs text-right bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none transition-colors"
+							class="settings-field w-20 text-right"
 						/>
 					</label>
 				{/each}
@@ -363,7 +361,7 @@
 					step="1"
 					value={retention.days}
 					onchange={(e) => saveRetention(e.currentTarget)}
-					class="w-20 h-7 px-2 rounded-lg text-xs text-right bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none transition-colors"
+					class="settings-field w-20 text-right"
 				/>
 			</label>
 			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
@@ -410,11 +408,7 @@
 
 			{#if showPwaSettings}
 				<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('pwa.resetTitle')}</h3>
-				<button
-					class="text-[0.8125rem] text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none"
-					onclick={resetPwa}
-					disabled={resetting}
-				>
+				<button type="button" class="settings-action" onclick={resetPwa} disabled={resetting}>
 					{resetting ? $t('pwa.resetting') : $t('pwa.reset')}
 				</button>
 				<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">

@@ -15,18 +15,53 @@
 
 <button
 	type="button"
-	class="relative w-7 h-4 rounded-full transition-colors duration-150 shrink-0
-		{value ? '' : 'bg-gray-300 dark:bg-gray-700'}"
-	style={value ? 'background: var(--app-accent);' : undefined}
+	class="settings-switch"
+	class:is-on={value}
 	onclick={toggle}
 	{disabled}
 	role="switch"
 	aria-checked={value}
 	aria-label={ariaLabel}
 >
-	<span
-		class="absolute top-[0.125rem] w-3 h-3 rounded-full transition-all duration-150
-			{value ? 'left-[0.875rem]' : 'left-[0.125rem] bg-white dark:bg-gray-500'}"
-		style={value ? 'background: var(--app-accent-fg);' : undefined}
-	></span>
+	<span class="knob"></span>
 </button>
+
+<style>
+	.settings-switch {
+		position: relative;
+		width: 1.75rem;
+		height: 1rem;
+		flex-shrink: 0;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+		transition: background 0.15s;
+	}
+
+	.settings-switch.is-on {
+		background: var(--app-accent);
+	}
+
+	.settings-switch:disabled {
+		opacity: 0.4;
+		pointer-events: none;
+	}
+
+	.knob {
+		position: absolute;
+		top: 0.125rem;
+		left: 0.125rem;
+		width: 0.75rem;
+		height: 0.75rem;
+		border-radius: 999px;
+		background: var(--app-bg);
+		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
+		transition:
+			left 0.15s,
+			background 0.15s;
+	}
+
+	.settings-switch.is-on .knob {
+		left: 0.875rem;
+		background: var(--app-accent-fg);
+	}
+</style>

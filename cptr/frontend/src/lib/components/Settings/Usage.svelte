@@ -286,7 +286,7 @@
 					{#if canManage}
 						<button
 							type="button"
-							class="btn btn-ghost"
+							class="settings-action"
 							disabled={busy}
 							onclick={() => (showAccounts = true)}
 						>
@@ -297,11 +297,11 @@
 							{/if}
 						</button>
 					{/if}
-					<button type="button" class="btn btn-ghost" disabled={refreshing} onclick={refreshAll}>
+					<button type="button" class="settings-action" disabled={refreshing} onclick={refreshAll}>
 						{refreshing ? $t('grokAccount.refreshing') : $t('grokAccount.refresh')}
 					</button>
 					{#if canManage}
-						<button type="button" class="btn btn-ghost" disabled={busy} onclick={logout}>
+						<button type="button" class="settings-action" disabled={busy} onclick={logout}>
 							{$t('grokAccount.logout')}
 						</button>
 					{/if}
@@ -309,7 +309,7 @@
 					{#if canManage && account?.accounts.length}
 						<button
 							type="button"
-							class="btn btn-ghost"
+							class="settings-action"
 							disabled={busy}
 							onclick={() => (showAccounts = true)}
 						>
@@ -321,22 +321,27 @@
 					{#if canManage && !loginRunning}
 						<button
 							type="button"
-							class="btn btn-solid"
+							class="settings-action"
 							disabled={busy || !account?.cli_found}
 							onclick={() => startLogin('oauth')}>{$t('grokAccount.loginOauth')}</button
 						>
 						<button
 							type="button"
-							class="btn btn-ghost"
+							class="settings-action"
 							disabled={busy || !account?.cli_found}
 							onclick={() => startLogin('device')}>{$t('grokAccount.loginDevice')}</button
 						>
 					{:else if loginRunning}
-						<button type="button" class="btn btn-ghost" disabled={busy} onclick={cancelLogin}>
+						<button type="button" class="settings-action" disabled={busy} onclick={cancelLogin}>
 							{$t('common.cancel')}
 						</button>
 					{:else}
-						<button type="button" class="btn btn-ghost" disabled={refreshing} onclick={refreshAll}>
+						<button
+							type="button"
+							class="settings-action"
+							disabled={refreshing}
+							onclick={refreshAll}
+						>
 							{$t('grokAccount.refresh')}
 						</button>
 					{/if}
@@ -356,11 +361,11 @@
 				</p>
 				{#if login.url}
 					<div class="flex flex-wrap items-center gap-1.5">
-						<a class="btn btn-solid" href={login.url} target="_blank" rel="noopener noreferrer">
+						<a class="settings-action" href={login.url} target="_blank" rel="noopener noreferrer">
 							<Icon name="external-link" size={12} />
 							{$t('grokAccount.openLoginPage')}
 						</a>
-						<button type="button" class="btn btn-ghost" onclick={() => copy(login.url ?? '')}>
+						<button type="button" class="settings-action" onclick={() => copy(login.url ?? '')}>
 							<Icon name="copy" size={12} />
 							{$t('grokAccount.copyLink')}
 						</button>
@@ -382,7 +387,7 @@
 				{#if login.method === 'oauth'}
 					<button
 						type="button"
-						class="link-btn self-start"
+						class="settings-action self-start"
 						aria-expanded={pasteOpen}
 						onclick={() => (pasteOpen = !pasteOpen)}>{$t('grokAccount.pasteToggle')}</button
 					>
@@ -395,13 +400,13 @@
 							}}
 						>
 							<input
-								class="paste-input h-7 min-w-0 flex-1 rounded-lg border px-2 text-xs outline-none"
+								class="settings-field min-w-0 flex-1"
 								bind:value={pasteCode}
 								placeholder={$t('grokAccount.pastePlaceholder')}
 								autocomplete="off"
 								spellcheck="false"
 							/>
-							<button type="submit" class="btn btn-solid" disabled={busy || !pasteCode.trim()}
+							<button type="submit" class="settings-action" disabled={busy || !pasteCode.trim()}
 								>{$t('grokAccount.pasteSubmit')}</button
 							>
 						</form>
@@ -510,11 +515,11 @@
 					<Icon name="help-circle" size={13} />
 				</span>
 			</span>
-			<div class="segmented" role="group" aria-label={$t('usage.heatmap')}>
+			<div class="segmented segmented-sm shrink-0" role="group" aria-label={$t('usage.heatmap')}>
 				{#each heatmapModes as mode}
 					<button
 						type="button"
-						class:is-active={heatmapMode === mode.value}
+						class:active={heatmapMode === mode.value}
 						aria-pressed={heatmapMode === mode.value}
 						onclick={() => (heatmapMode = mode.value)}>{$t(mode.label)}</button
 					>
@@ -684,45 +689,6 @@
 		gap: 0.375rem;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.3125rem;
-		height: 1.875rem;
-		padding: 0 0.75rem;
-		border-radius: 0.5rem;
-		font-size: 0.75rem;
-		font-weight: 500;
-		white-space: nowrap;
-		transition:
-			background 0.12s ease,
-			opacity 0.12s ease;
-	}
-
-	.btn:disabled {
-		opacity: 0.45;
-		pointer-events: none;
-	}
-
-	.btn-ghost {
-		color: var(--app-fg);
-		background: var(--app-bg);
-		border: 1px solid var(--card-border);
-	}
-
-	.btn-ghost:hover {
-		background: var(--app-hover);
-	}
-
-	.btn-solid {
-		color: var(--app-accent-fg);
-		background: var(--app-accent);
-	}
-
-	.btn-solid:hover {
-		opacity: 0.88;
-	}
-
 	.count {
 		display: inline-flex;
 		align-items: center;
@@ -766,21 +732,24 @@
 
 	.device-code {
 		align-self: flex-start;
-		padding: 0.375rem 0.75rem;
-		border-radius: 0.5rem;
+		padding: 0.375rem 0.875rem;
+		border: 0;
+		border-radius: 0.75rem;
 		font-family: var(--font-mono);
 		font-size: 1.125rem;
 		font-weight: 600;
 		letter-spacing: 0.12em;
 		color: var(--app-fg);
-		background: var(--app-bg);
-		border: 1px dashed color-mix(in oklab, var(--app-fg) 22%, transparent);
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+		transition:
+			background 0.1s,
+			box-shadow 0.1s;
 	}
 
-	.paste-input {
-		color: var(--app-fg);
+	.device-code:hover,
+	.device-code:focus-visible {
 		background: var(--app-bg);
-		border-color: var(--card-border);
+		box-shadow: 0 1px 3px color-mix(in oklab, black 10%, transparent);
 	}
 
 	.plan {
@@ -933,39 +902,6 @@
 		display: inline-flex;
 		color: var(--app-fg-subtle);
 		cursor: help;
-	}
-
-	.segmented {
-		display: inline-flex;
-		flex-shrink: 0;
-		align-items: center;
-		gap: 2px;
-		padding: 2px;
-		border-radius: 0.5rem;
-		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
-		border: 1px solid var(--card-border);
-	}
-
-	.segmented button {
-		padding: 0.3125rem 0.625rem;
-		border-radius: 0.375rem;
-		font-size: 0.6875rem;
-		font-weight: 500;
-		line-height: 1;
-		color: var(--app-fg-muted);
-		transition:
-			background 0.12s ease,
-			color 0.12s ease;
-	}
-
-	.segmented button:hover {
-		color: var(--app-fg);
-	}
-
-	.segmented button.is-active {
-		color: var(--app-fg);
-		background: var(--app-bg);
-		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 	}
 
 	.stats {

@@ -184,26 +184,24 @@ Files:
 			>{$t('models.systemPrompt')}</span
 		>
 		<textarea
-			class="w-full mt-1 bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-2 text-[0.6875rem] font-mono text-gray-600 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none resize-y leading-relaxed"
+			class="settings-field mt-1 w-full font-mono"
 			rows="6"
 			{placeholder}
 			{value}
 			oninput={(e) => onInput((e.target as HTMLTextAreaElement).value)}
 			spellcheck="false"
 		></textarea>
-		<div class="flex items-center gap-2 mt-1">
+		<div class="flex flex-wrap items-center gap-1.5 mt-1.5">
 			<button
-				class="text-[0.625rem] text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 transition-colors duration-75"
+				type="button"
+				class="settings-action"
 				onclick={() => (showVariables = !showVariables)}
 			>
 				{$t('models.templateVariables')}
 				{showVariables ? '▾' : '▸'}
 			</button>
 			{#if value.trim()}
-				<button
-					class="text-[0.625rem] text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 transition-colors duration-75"
-					onclick={() => onInput('')}
-				>
+				<button type="button" class="settings-action" onclick={() => onInput('')}>
 					{$t('models.resetToDefault')}
 				</button>
 			{/if}
@@ -236,7 +234,8 @@ Files:
 					{$t('admin.models')}
 				</h3>
 				<button
-					class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-700 disabled:opacity-50 disabled:hover:text-gray-400 dark:text-gray-600 dark:hover:text-gray-300 dark:disabled:hover:text-gray-600 transition-colors duration-75"
+					type="button"
+					class="settings-icon"
 					onclick={refreshModels}
 					disabled={refreshing || saving}
 					aria-label={$t('models.refresh')}
@@ -262,7 +261,8 @@ Files:
 
 			<!-- Global defaults -->
 			<button
-				class="group flex items-center gap-2 w-full h-7 text-left"
+				type="button"
+				class="settings-row flex items-center gap-2 w-full min-h-9 px-2.5 py-1.5 text-left"
 				onclick={() => (globalExpanded = !globalExpanded)}
 			>
 				<span class="flex-1 text-[0.8125rem] text-gray-500 dark:text-gray-400"
@@ -290,31 +290,33 @@ Files:
 			{/if}
 
 			<!-- Per-model list -->
-			{#each models as model}
-				<div class="group flex items-center gap-2 w-full h-7 text-left">
-					<button
-						type="button"
-						class="flex-1 min-w-0 text-left text-[0.8125rem] truncate {model.is_active
-							? 'text-gray-700 dark:text-gray-300'
-							: 'text-gray-400 dark:text-gray-600'}"
-						onclick={() => (selectedId = selectedId === model.id ? null : model.id)}
-					>
-						{model.name}
-					</button>
-					<ToggleSwitch value={model.is_active} onchange={(value) => toggleModel(model, value)} />
-				</div>
+			<div class="mt-1.5 flex flex-col gap-1.5">
+				{#each models as model}
+					<div class="settings-row flex items-center gap-2 w-full min-h-9 px-2.5 py-1.5 text-left">
+						<button
+							type="button"
+							class="flex-1 min-w-0 text-left text-[0.8125rem] truncate {model.is_active
+								? 'text-gray-700 dark:text-gray-300'
+								: 'text-gray-400 dark:text-gray-600'}"
+							onclick={() => (selectedId = selectedId === model.id ? null : model.id)}
+						>
+							{model.name}
+						</button>
+						<ToggleSwitch value={model.is_active} onchange={(value) => toggleModel(model, value)} />
+					</div>
 
-				{#if selectedId === model.id}
-					{@render systemPromptField(
-						model.systemPrompt,
-						(v) => {
-							model.systemPrompt = v;
-							model.dirty = true;
-						},
-						$t('models.systemPromptInherited')
-					)}
-				{/if}
-			{/each}
+					{#if selectedId === model.id}
+						{@render systemPromptField(
+							model.systemPrompt,
+							(v) => {
+								model.systemPrompt = v;
+								model.dirty = true;
+							},
+							$t('models.systemPromptInherited')
+						)}
+					{/if}
+				{/each}
+			</div>
 
 			{#if models.length === 0}
 				<p class="text-[0.8125rem] text-gray-400 dark:text-gray-600 py-4">
@@ -324,10 +326,7 @@ Files:
 		</div>
 
 		<div class="pt-3 flex justify-end">
-			<button
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
-				onclick={saveAll}
-			>
+			<button type="button" class="settings-action" onclick={saveAll}>
 				{#if saving}{$t('settings.saving')}{:else}{$t('settings.save')}{/if}
 			</button>
 		</div>

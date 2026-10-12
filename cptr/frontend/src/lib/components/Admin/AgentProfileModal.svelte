@@ -80,13 +80,7 @@
 			<h2 class="text-sm font-medium text-gray-900 dark:text-white">
 				{isNew ? $t('admin.agentsAddProfile') : draft.name}
 			</h2>
-			<button
-				type="button"
-				class="text-[0.8125rem] text-gray-400 dark:text-gray-600 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-				onclick={onclose}
-			>
-				Close
-			</button>
+			<button type="button" class="settings-action" onclick={onclose}> Close </button>
 		</div>
 
 		<div class="flex gap-3">
@@ -100,7 +94,7 @@
 					bind:value={draft.name}
 					autocomplete="off"
 					spellcheck="false"
-					class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5"
+					class="settings-field mt-1 w-full"
 				/>
 			</div>
 			<div class="w-32 shrink-0">
@@ -125,7 +119,7 @@
 							launch_args: draft.launch_args || ''
 						};
 					}}
-					class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 outline-none py-0.5 cursor-pointer"
+					class="settings-field mt-1 w-full"
 				>
 					<option value="codex">Codex</option>
 					<option value="claude_code">Claude Code</option>
@@ -148,7 +142,7 @@
 			bind:value={draft.id}
 			autocomplete="off"
 			spellcheck="false"
-			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			class="settings-field mt-1 w-full font-mono"
 		/>
 
 		<label
@@ -164,7 +158,7 @@
 			placeholder={defaultCommand(draft.agent)}
 			autocomplete="off"
 			spellcheck="false"
-			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			class="settings-field mt-1 w-full font-mono"
 		/>
 
 		<label
@@ -181,7 +175,7 @@
 			autocomplete="off"
 			spellcheck="false"
 			oninput={(e) => (draft.home = e.currentTarget.value || null)}
-			class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			class="settings-field mt-1 w-full font-mono"
 		/>
 
 		{#if draft.agent === 'claude_code'}
@@ -197,7 +191,7 @@
 				bind:value={draft.launch_args}
 				autocomplete="off"
 				spellcheck="false"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+				class="settings-field mt-1 w-full font-mono"
 			/>
 		{/if}
 
@@ -215,7 +209,7 @@
 				placeholder={$t('admin.optional')}
 				autocomplete="off"
 				spellcheck="false"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+				class="settings-field mt-1 w-full font-mono"
 			/>
 		{/if}
 
@@ -233,7 +227,7 @@
 				placeholder={$t('admin.optional')}
 				autocomplete="off"
 				spellcheck="false"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+				class="settings-field mt-1 w-full font-mono"
 			/>
 
 			<label
@@ -249,7 +243,7 @@
 				placeholder={$t('admin.optional')}
 				autocomplete="off"
 				spellcheck="false"
-				class="block w-full bg-transparent text-[0.8125rem] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+				class="settings-field mt-1 w-full font-mono"
 			/>
 		{/if}
 
@@ -258,7 +252,7 @@
 				{#if !isNew}
 					<button
 						type="button"
-						class="text-[0.8125rem] text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors duration-100"
+						class="settings-action danger"
 						onclick={ondelete}
 						title={$t('admin.agentsDeleteProfile')}
 					>
@@ -266,11 +260,7 @@
 					</button>
 				{/if}
 			</div>
-			<button
-				type="button"
-				onclick={() => onsave(normalizeDraft())}
-				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
-			>
+			<button type="button" class="settings-action" onclick={() => onsave(normalizeDraft())}>
 				{$t('settings.save')}
 			</button>
 		</div>
