@@ -1480,6 +1480,8 @@
 	"updater.updateNow": "Update now",
 	"updater.later": "Later",
 	"updater.recheck": "Check again",
+	"updater.viewChangelog": "View changelog",
+	"updater.back": "Back",
 	"updater.copy": "Copy",
 	"updater.copied": "Copied",
 	"updater.errorTitle": "Couldn't check for updates",

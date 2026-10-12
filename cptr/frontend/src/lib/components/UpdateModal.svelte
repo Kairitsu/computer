@@ -10,12 +10,13 @@
 	import Spinner from './common/Spinner.svelte';
 	import ChangelogNotes from './ChangelogNotes.svelte';
 	import { t, locale } from '$lib/i18n';
-	import { ApiError } from '$lib/apis';
+	import { ApiError, fetchJSON } from '$lib/apis';
 	import {
 		checkForUpdate,
 		getServerStartedAt,
 		getUpdateStatus,
 		startUpdate,
+		type ChangelogVersion,
 		type UpdateCheck,
 		type UpdateStatus
 	} from '$lib/apis/update';
@@ -34,6 +35,9 @@
 	let loadError = $state('');
 	let showLog = $state(false);
 	let showAllCommits = $state(false);
+	let viewingChangelog = $state(false);
+	let changelog = $state<Record<string, ChangelogVersion> | null>(null);
+	let changelogError = $state(false);
 	let copied = $state(false);
 	let restartSlow = $state(false);
 	let startedAt: number | null = null;
@@ -47,6 +51,16 @@
 	const noteVersions = $derived(info ? Object.entries(info.notes) : []);
 	const versionChanged = $derived(!!info?.latest && info.latest.version !== info.current.version);
 	const blocked = $derived(info?.reason === 'dirty' || info?.reason === 'diverged');
+	// Same screen as the green check: a successful check with nothing newer to install.
+	const upToDate = $derived(
+		phase === 'result' &&
+			!!info &&
+			info.reason !== 'not_git' &&
+			info.supported &&
+			!(info.reason && !blocked) &&
+			!info.available
+	);
+	const changelogVersions = $derived(changelog ? Object.entries(changelog) : []);
 	const visibleCommits = $derived(
 		info ? (showAllCommits ? info.commits : info.commits.slice(0, COMMITS_PREVIEW)) : []
 	);
@@ -69,6 +83,7 @@
 		progress = null;
 		showLog = false;
 		showAllCommits = false;
+		viewingChangelog = false;
 		restartSlow = false;
 		// An update may already be running, e.g. after reloading the page mid-update.
 		try {
@@ -89,6 +104,7 @@
 
 	async function runCheck() {
 		phase = 'checking';
+		viewingChangelog = false;
 		loadError = '';
 		try {
 			info = await checkForUpdate(true);
@@ -163,6 +179,20 @@
 		showUpdateModal.set(false);
 	}
 
+	async function loadChangelog() {
+		changelogError = false;
+		try {
+			changelog = await fetchJSON<Record<string, ChangelogVersion>>('/api/changelog');
+		} catch {
+			changelogError = true;
+		}
+	}
+
+	function openChangelogView() {
+		viewingChangelog = true;
+		if (!changelog && !changelogError) void loadChangelog();
+	}
+
 	async function copyInstallCommand() {
 		try {
 			await navigator.clipboard.writeText(INSTALL_COMMAND);
@@ -212,7 +242,9 @@
 		<header class="flex items-start gap-3 px-5 pt-5 pb-3 shrink-0">
 			<div class="min-w-0 flex-1">
 				<h2 class="text-sm font-semibold text-gray-900 dark:text-white">
-					{#if busy && failed}
+					{#if upToDate && viewingChangelog}
+						{$t('changelog.whatsNew')}
+					{:else if busy && failed}
 						{$t('updater.failedTitle')}
 					{:else if busy && finishedWithoutRestart}
 						{$t('updater.manualTitle')}
@@ -225,7 +257,10 @@
 					{/if}
 				</h2>
 				<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-500 tabular-nums">
-					{#if info?.available && info.latest && !busy}
+					{#if upToDate && viewingChangelog}
+						{$t('changelog.subtitle')}{#if info}<span class="mx-1.5">·</span>v{info.current
+								.version}{/if}
+					{:else if info?.available && info.latest && !busy}
 						v{info.current.version} → v{info.latest.version}<span class="mx-1.5">·</span>{$t(
 							'updater.newCommits',
 							{ count: info.behind }
@@ -292,20 +327,47 @@
 						{/if}
 					</div>
 				{:else if !info.available}
-					<div class="flex flex-col items-center justify-center gap-2.5 py-12 text-center">
-						<span
-							class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-						>
-							<Icon name="check" size={18} />
-						</span>
-						<p class="text-[0.8125rem] font-medium text-gray-900 dark:text-white">
-							{$t('updater.upToDate')}
-						</p>
-						<p class="text-[0.6875rem] text-gray-400 dark:text-gray-500 tabular-nums">
-							v{info.current.version}{#if info.current.date}<span class="mx-1.5">·</span
-								>{formatDate(info.current.date)}{/if}
-						</p>
-					</div>
+					{#if viewingChangelog}
+						{#if changelogVersions.length > 0}
+							<div class="py-1">
+								<ChangelogNotes versions={changelogVersions} />
+							</div>
+						{:else if changelogError}
+							<div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
+								<p class="text-xs text-gray-500 dark:text-gray-400">
+									{$t('changelog.loadError')}
+								</p>
+								<button
+									class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 dark:bg-white/6 dark:text-gray-400 dark:hover:text-white transition-colors duration-75"
+									onclick={loadChangelog}
+								>
+									{$t('changelog.retry')}
+								</button>
+							</div>
+						{:else}
+							<div class="flex flex-col items-center justify-center gap-3 py-14">
+								<Spinner size={16} />
+								<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600"
+									>{$t('changelog.loading')}</span
+								>
+							</div>
+						{/if}
+					{:else}
+						<div class="flex flex-col items-center justify-center gap-2.5 py-12 text-center">
+							<span
+								class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+							>
+								<Icon name="check" size={18} />
+							</span>
+							<p class="text-[0.8125rem] font-medium text-gray-900 dark:text-white">
+								{$t('updater.upToDate')}
+							</p>
+							<p class="text-[0.6875rem] text-gray-400 dark:text-gray-500 tabular-nums">
+								v{info.current.version}{#if info.current.date}<span class="mx-1.5">·</span
+									>{formatDate(info.current.date)}{/if}
+							</p>
+						</div>
+					{/if}
 				{:else}
 					{#if noteVersions.length > 0}
 						<ChangelogNotes versions={noteVersions} />
@@ -479,7 +541,7 @@
 			{/if}
 		</div>
 
-		<footer class="flex items-center justify-end gap-2 px-5 pt-3 pb-5 shrink-0">
+		<footer class="flex flex-wrap items-center justify-end gap-2 px-5 pt-3 pb-5 shrink-0">
 			{#if phase === 'result' && info?.available && info.supported && !info.reason}
 				<button
 					class="app-muted app-interactive h-8 rounded-lg px-3 text-xs font-medium transition-colors duration-75"
@@ -490,6 +552,13 @@
 					onclick={beginUpdate}>{$t('updater.updateNow')}</button
 				>
 			{:else if phase === 'result' || phase === 'error'}
+				{#if upToDate}
+					<button
+						class="app-muted app-interactive h-8 rounded-lg px-3 text-xs font-medium transition-colors duration-75"
+						onclick={viewingChangelog ? () => (viewingChangelog = false) : openChangelogView}
+						>{viewingChangelog ? $t('updater.back') : $t('updater.viewChangelog')}</button
+					>
+				{/if}
 				{#if info?.reason !== 'not_git'}
 					<button
 						class="app-muted app-interactive h-8 rounded-lg px-3 text-xs font-medium transition-colors duration-75"

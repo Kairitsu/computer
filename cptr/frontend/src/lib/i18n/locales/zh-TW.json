@@ -1392,6 +1392,8 @@
 	"updater.updateNow": "立即更新",
 	"updater.later": "稍後",
 	"updater.recheck": "重新檢查",
+	"updater.viewChangelog": "查看更新日誌",
+	"updater.back": "返回",
 	"updater.copy": "複製",
 	"updater.copied": "已複製",
 	"updater.errorTitle": "檢查更新失敗",

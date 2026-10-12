@@ -1427,6 +1427,8 @@
 	"updater.updateNow": "立即更新",
 	"updater.later": "稍后",
 	"updater.recheck": "重新检查",
+	"updater.viewChangelog": "查看更新日志",
+	"updater.back": "返回",
 	"updater.copy": "复制",
 	"updater.copied": "已复制",
 	"updater.errorTitle": "检查更新失败",
