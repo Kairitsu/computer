@@ -704,17 +704,18 @@ async def get_available_agent_model_entries(app_state=None) -> list[dict[str, An
         model_options = profile["detected"].get("model_options") or {}
         for model in config.get("models") or []:
             model_id = model_id_for_profile(config, model)
-            entries.append(
-                {
-                    "id": model_id,
-                    "name": model_id,
-                    "provider": "agent",
-                    "connection_id": f"agent:{config['id']}",
-                    "agent_id": config["agent"],
-                    "profile_id": config["id"],
-                    **model_options.get(model, {}),
-                }
-            )
+            entry = {
+                "id": model_id,
+                "provider": "agent",
+                "connection_id": f"agent:{config['id']}",
+                "agent_id": config["agent"],
+                "profile_id": config["id"],
+                **model_options.get(model, {}),
+            }
+            # `id` routes the chat. The selector shows the CLI model id, so a
+            # later catalog entry such as grok-4.8 never displays agent:grok/.
+            entry["name"] = model
+            entries.append(entry)
     return entries
 
 

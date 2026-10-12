@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [1.1.2] - 2026-10-12
+
+### Changed
+
+- **模型选择器只显示模型名** 首页和设置页原来显示 `agent:grok/grok-4.7`。前面的 `agent:grok/` 是程序内部用来找到 Grok 的编号，选择器现在只显示 Grok 自己的模型名，例如 `grok-4.7`。以后 Grok 提供新模型时，显示的也是那个模型名，不会再带上这段编号。已经保存的对话仍使用原来的完整编号，不受影响。
+
 ## [1.1.1] - 2026-10-12
 
 ### Changed
