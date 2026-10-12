@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [1.1.1] - 2026-10-12
+
+### Changed
+
+- **手机上的工作区、额度和模型分成三行** 窄屏幕上这三个标签原来挤在一行，名称被截成「默认…」和「agent:grok/grok…」。现在各占一行，工作区、剩余额度和完整的模型名、思考强度都能看全。宽屏幕上仍排成一行。
+
 ## [1.1.0] - 2026-10-08
 
 ### Added

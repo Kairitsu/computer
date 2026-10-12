@@ -871,37 +871,39 @@
 		</div>
 	{/if}
 
-	<!-- Composer chips: workspace (left), usage + model hub (right) -->
-	<div class="composer-chips mb-2 flex items-center gap-2 px-0.5" data-intro="chips">
-		<button
-			bind:this={workspaceChipEl}
-			type="button"
-			class="composer-chip min-w-0"
-			class:static-chip={!onworkspacechange}
-			disabled={!onworkspacechange}
-			title={workspace || workspaceLabel}
-			onclick={() => (workspaceMenuOpen = !workspaceMenuOpen)}
-		>
-			<Icon name={workspace ? 'folder' : 'home'} size={13} class="shrink-0" />
-			<span class="truncate">{workspaceLabel}</span>
-			{#if onworkspacechange}
-				<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
-			{/if}
-		</button>
-		<div class="ml-auto flex min-w-0 items-center gap-1.5">
-			<UsageIndicator
-				{contextUsage}
-				contextWindow={usageContextWindow}
-				defaultContextWindow={modelContextWindow}
-			/>
-			<ModelHubMenu
-				bind:this={modelSelector}
-				bind:selectedModel
-				bind:reasoningEffort
-				bind:contextWindow
-				onchange={onsettingschange}
-				onclose={focusAfterModelSelectorClose}
-			/>
+	<!-- Composer chips: one row when the composer is wide; one chip per row when it is narrow. -->
+	<div class="composer-chips-wrap">
+		<div class="composer-chips mb-2 flex items-center gap-2 px-0.5" data-intro="chips">
+			<button
+				bind:this={workspaceChipEl}
+				type="button"
+				class="composer-chip min-w-0"
+				class:static-chip={!onworkspacechange}
+				disabled={!onworkspacechange}
+				title={workspace || workspaceLabel}
+				onclick={() => (workspaceMenuOpen = !workspaceMenuOpen)}
+			>
+				<Icon name={workspace ? 'folder' : 'home'} size={13} class="shrink-0" />
+				<span class="truncate">{workspaceLabel}</span>
+				{#if onworkspacechange}
+					<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
+				{/if}
+			</button>
+			<div class="composer-chips-side ml-auto flex min-w-0 items-center gap-1.5">
+				<UsageIndicator
+					{contextUsage}
+					contextWindow={usageContextWindow}
+					defaultContextWindow={modelContextWindow}
+				/>
+				<ModelHubMenu
+					bind:this={modelSelector}
+					bind:selectedModel
+					bind:reasoningEffort
+					bind:contextWindow
+					onchange={onsettingschange}
+					onclose={focusAfterModelSelectorClose}
+				/>
+			</div>
 		</div>
 	</div>
 
@@ -1134,6 +1136,49 @@
 
 	.composer-chip.static-chip {
 		cursor: default;
+	}
+
+	/* The chips query the composer width, not the viewport, so a narrow window
+	   stacks them even when the screen itself is wide. */
+	.composer-chips-wrap {
+		container-type: inline-size;
+		container-name: composer;
+	}
+
+	@container composer (max-width: 36rem) {
+		.composer-chips {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+
+		.composer-chips-side {
+			margin-left: 0;
+			width: 100%;
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.5rem;
+		}
+
+		.composer-chip {
+			max-width: 100%;
+			width: fit-content;
+		}
+
+		.composer-chip > span {
+			max-width: none;
+			min-width: 0;
+		}
+
+		.composer-chips :global(.usage-chip),
+		.composer-chips :global(.hub-chip) {
+			max-width: 100%;
+			width: fit-content;
+		}
+
+		.composer-chips :global(.hub-chip span.truncate) {
+			max-width: none;
+			min-width: 0;
+		}
 	}
 
 	.approval-chip {
