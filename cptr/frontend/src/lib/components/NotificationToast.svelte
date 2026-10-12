@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { t } from '$lib/i18n';
 
 	interface Props {
@@ -17,18 +16,6 @@
 	let moved = false;
 	const DRAG_THRESHOLD_PX = 6;
 
-	// ── Sound ──────────────────────────────────────────────────
-	onMount(() => {
-		if (!navigator.userActivation?.hasBeenActive) return;
-
-		const soundEnabled = localStorage.getItem('notificationSound') !== 'false';
-		if (soundEnabled) {
-			const audio = new Audio('/audio/notification.mp3');
-			audio.play().catch(() => {});
-		}
-	});
-
-	// ── Interaction ────────────────────────────────────────────
 	function onPointerDown(e: PointerEvent) {
 		startX = e.clientX;
 		startY = e.clientY;

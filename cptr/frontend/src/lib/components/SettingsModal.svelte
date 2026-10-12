@@ -8,12 +8,11 @@
 	import Usage from './Settings/Usage.svelte';
 	import PWA from './Settings/PWA.svelte';
 	import Account from './Settings/Account.svelte';
-	import Keyboard from './Settings/Keyboard.svelte';
 	import Agents from './Admin/Agents.svelte';
 	import { session } from '$lib/session';
 	import { t } from '$lib/i18n';
 
-	type Tab = 'general' | 'appearance' | 'usage' | 'agents' | 'keyboard' | 'account' | 'pwa';
+	type Tab = 'general' | 'appearance' | 'usage' | 'agents' | 'account' | 'pwa';
 
 	interface Props {
 		onclose: () => void;
@@ -26,11 +25,12 @@
 	const mergedTabs: Record<string, Tab> = {
 		notifications: 'general',
 		workspace: 'general',
-		models: 'agents'
+		models: 'agents',
+		keyboard: 'general'
 	};
 
 	function normalizeTab(tab: string): Tab {
-		const validTabs: Tab[] = ['general', 'appearance', 'usage', 'agents', 'keyboard', 'account'];
+		const validTabs: Tab[] = ['general', 'appearance', 'usage', 'agents', 'account'];
 		if (tab in mergedTabs) return mergedTabs[tab];
 		return validTabs.includes(tab as Tab) ? (tab as Tab) : 'general';
 	}
@@ -50,10 +50,7 @@
 			{ id: 'usage', label: tr('usage.title'), icon: 'usage' }
 		];
 		if (isAdmin) tabs.push({ id: 'agents', label: tr('admin.agents'), icon: 'terminal' });
-		tabs.push(
-			{ id: 'keyboard', label: tr('settings.keyboard'), icon: 'keyboard' },
-			{ id: 'account', label: tr('settings.account'), icon: 'user' }
-		);
+		tabs.push({ id: 'account', label: tr('settings.account'), icon: 'user' });
 		if (showPwaSettings) tabs.push({ id: 'pwa', label: 'PWA', icon: 'phone' });
 		return tabs;
 	});
@@ -119,8 +116,6 @@
 			<Usage />
 		{:else if activeTab === 'agents'}
 			<Agents />
-		{:else if activeTab === 'keyboard'}
-			<Keyboard />
 		{:else if activeTab === 'account'}
 			<Account />
 		{:else if activeTab === 'pwa' && showPwaSettings}

@@ -171,7 +171,7 @@
 	"account.password": "비밀번호",
 	"account.currentPassword": "현재 비밀번호",
 	"account.newPassword": "새 비밀번호",
-	"account.updatePassword": "비밀번호 변경 →",
+	"account.updatePassword": "비밀번호 변경",
 	"account.uploadPhoto": "사진 업로드",
 	"account.removePhoto": "제거",
 	"account.displayNameUpdated": "표시 이름이 변경되었습니다",

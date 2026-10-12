@@ -171,7 +171,7 @@
 	"account.password": "Contraseña",
 	"account.currentPassword": "contraseña actual",
 	"account.newPassword": "nueva contraseña",
-	"account.updatePassword": "Cambiar contraseña →",
+	"account.updatePassword": "Cambiar contraseña",
 	"account.uploadPhoto": "Subir foto",
 	"account.removePhoto": "Eliminar",
 	"account.displayNameUpdated": "Nombre actualizado",

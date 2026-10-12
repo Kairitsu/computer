@@ -12,7 +12,6 @@
 	import { t, locale, changeLocale, supportedLocales } from '$lib/i18n';
 	import { session } from '$lib/session';
 	import { toast } from 'svelte-sonner';
-	import { notificationsEnabled, notificationSound } from '$lib/stores/chat';
 	import {
 		getAdminConfig,
 		getChatRetention,
@@ -36,24 +35,7 @@
 	let { showPwaSettings = false }: Props = $props();
 
 	const REPO_URL = 'https://github.com/open-webui/computer';
-	const SHARE_TEXT = 'Check out Computer. Your computer, from anywhere.';
 
-	const shareLinks = [
-		{
-			label: 'X',
-			href: `https://x.com/intent/tweet?text=${encodeURIComponent(SHARE_TEXT)}&url=${encodeURIComponent(REPO_URL)}`
-		},
-		{
-			label: 'Reddit',
-			href: `https://reddit.com/submit?url=${encodeURIComponent(REPO_URL)}&title=${encodeURIComponent(SHARE_TEXT)}`
-		},
-		{
-			label: 'LinkedIn',
-			href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(REPO_URL)}`
-		}
-	];
-
-	let copied = $state(false);
 	let resetting = $state(false);
 	// Server-wide limits for the Grok processes chats keep between turns; admins set them.
 	let processSettings = $state<GrokProcessSettings | null>(null);
@@ -135,21 +117,6 @@
 		}
 	}
 
-	async function toggleNotifications() {
-		if (!$notificationsEnabled) {
-			if ('Notification' in window) {
-				const permission = await Notification.requestPermission();
-				if (permission === 'granted') {
-					notificationsEnabled.set(true);
-				} else {
-					toast.error($t('general.notificationPermissionDenied'));
-				}
-			}
-		} else {
-			notificationsEnabled.set(false);
-		}
-	}
-
 	async function saveProcessSetting(key: keyof GrokProcessSettings, input: HTMLInputElement) {
 		if (!processSettings) return;
 		const value = Number(input.value);
@@ -163,12 +130,6 @@
 		}
 		// Show the value the server kept (it caps very large ones).
 		input.value = String(processSettings[key]);
-	}
-
-	function copyLink() {
-		navigator.clipboard.writeText(REPO_URL);
-		copied = true;
-		setTimeout(() => (copied = false), 2000);
 	}
 
 	async function resetPwa() {
@@ -221,32 +182,7 @@
 				{/if}
 			</div>
 
-			<p class="text-[0.8125rem] text-gray-500 mt-0.5 mb-2">{$t('app.tagline')}</p>
-
-			<div class="flex items-center gap-1.5">
-				<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mr-1"
-					>{$t('about.share')}</span
-				>
-				{#each shareLinks as link, i}
-					{#if i > 0}
-						<span class="text-[0.6875rem] text-gray-200 dark:text-gray-700">·</span>
-					{/if}
-					<a
-						href={link.href}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-500 transition-colors"
-						>{link.label}</a
-					>
-				{/each}
-				<span class="text-[0.6875rem] text-gray-200 dark:text-gray-700">·</span>
-				<button
-					onclick={copyLink}
-					class="text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-500 transition-colors cursor-pointer"
-				>
-					{copied ? $t('about.copied') : $t('about.copyLink')}
-				</button>
-			</div>
+			<p class="text-[0.8125rem] text-gray-500 mt-0.5">{$t('app.tagline')}</p>
 		</div>
 
 		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2">{$t('general.language')}</h3>
@@ -260,40 +196,8 @@
 			{/each}
 		</select>
 
-		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
-			{$t('general.notifications')}
-		</h3>
-		<div class="flex flex-col gap-2.5">
-			<label class="flex items-center justify-between cursor-pointer">
-				<span class="text-xs text-gray-600 dark:text-gray-400">
-					{$t('general.browserNotifications')}
-				</span>
-				<ToggleSwitch value={$notificationsEnabled} onchange={() => toggleNotifications()} />
-			</label>
-			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 -mt-1">
-				{$t('general.browserNotificationsDesc')}
-			</p>
-
-			<label class="flex items-center justify-between cursor-pointer">
-				<span class="text-xs text-gray-600 dark:text-gray-400">
-					{$t('general.notificationSound')}
-				</span>
-				<ToggleSwitch value={$notificationSound} onchange={(v) => notificationSound.set(v)} />
-			</label>
-		</div>
-
 		{#if $session?.role === 'admin'}
 			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.updates')}</h3>
-			<div class="flex items-center justify-between mb-2.5">
-				<span class="text-xs text-gray-600 dark:text-gray-400">
-					{$t('general.checkUpdatesDesc')}
-				</span>
-				<button
-					type="button"
-					class="settings-action shrink-0"
-					onclick={() => showUpdateModal.set(true)}>{$t('sidebar.checkUpdates')}</button
-				>
-			</div>
 			<label class="flex items-center justify-between cursor-pointer">
 				<span class="text-xs text-gray-600 dark:text-gray-400"
 					>{$t('general.updateNotifications')}</span

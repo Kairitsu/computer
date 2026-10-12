@@ -171,7 +171,7 @@
 	"account.password": "パスワード",
 	"account.currentPassword": "現在のパスワード",
 	"account.newPassword": "新しいパスワード",
-	"account.updatePassword": "パスワードを更新 →",
+	"account.updatePassword": "パスワードを更新",
 	"account.uploadPhoto": "写真をアップロード",
 	"account.removePhoto": "削除",
 	"account.displayNameUpdated": "表示名を更新しました",

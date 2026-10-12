@@ -171,7 +171,7 @@
 	"account.password": "Пароль",
 	"account.currentPassword": "текущий пароль",
 	"account.newPassword": "новый пароль",
-	"account.updatePassword": "Изменить пароль →",
+	"account.updatePassword": "Изменить пароль",
 	"account.uploadPhoto": "Загрузить фото",
 	"account.removePhoto": "Удалить",
 	"account.displayNameUpdated": "Имя обновлено",

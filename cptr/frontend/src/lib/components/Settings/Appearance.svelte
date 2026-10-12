@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
 	import Icon from '../Icon.svelte';
 	import { t } from '$lib/i18n';
 	import {
@@ -39,7 +38,6 @@
 	];
 	type ColorKey = 'background' | 'foreground' | 'accent';
 
-	let fileInput: HTMLInputElement;
 	let section = $state<'theme' | 'interface'>('theme');
 	let fontSizeDraft = $state(BASE_FONT_SIZE);
 	let borderContrastEnabled = $state(false);
@@ -164,88 +162,6 @@
 		borderContrast.set(null);
 		widescreenMode.set(false);
 	}
-
-	function exportTheme() {
-		const payload = {
-			theme: $theme,
-			themeConfig: sanitizeThemeConfig($themeConfig),
-			textScale: $textScale,
-			borderContrast: $borderContrast,
-			widescreenMode: $widescreenMode
-		};
-
-		try {
-			const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-			const url = URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = 'computer-theme.json';
-			link.click();
-			URL.revokeObjectURL(url);
-			toast.success($t('appearance.exported'));
-		} catch {
-			toast.error($t('appearance.exportFailed'));
-		}
-	}
-
-	function validateImportedColors(source: Record<string, unknown>) {
-		for (const bucket of [source, source.light, source.dark]) {
-			if (!bucket || typeof bucket !== 'object') continue;
-			for (const key of ['background', 'foreground', 'accent', 'sidebar']) {
-				if (key in bucket && !normalizeHexColor((bucket as Record<string, unknown>)[key])) {
-					throw new Error('invalid color');
-				}
-			}
-		}
-	}
-
-	async function importTheme(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = '';
-		if (!file) return;
-
-		try {
-			const parsed = JSON.parse(await file.text());
-			const source = parsed?.themeConfig ?? parsed;
-			if (!source || typeof source !== 'object') throw new Error('invalid theme');
-			validateImportedColors(source);
-			const importedConfig = sanitizeThemeConfig(source);
-			const importedTheme = ['system', 'light', 'dark'].includes(parsed?.theme)
-				? (parsed.theme as Theme)
-				: null;
-			const importedScale =
-				typeof parsed?.textScale === 'number' && Number.isFinite(parsed.textScale)
-					? normalizeTextScale(parsed.textScale)
-					: undefined;
-			const importedWidescreenMode =
-				typeof parsed?.widescreenMode === 'boolean' ? parsed.widescreenMode : undefined;
-			const importedBorderContrast =
-				normalizeBorderContrast(parsed?.borderContrast) ??
-				(parsed?.highContrastBorders === true ? 12 : undefined);
-
-			if (
-				!importedConfig &&
-				!importedTheme &&
-				importedScale === undefined &&
-				importedBorderContrast === undefined &&
-				importedWidescreenMode === undefined
-			) {
-				throw new Error('empty theme');
-			}
-			if (importedTheme) theme.set(importedTheme);
-			if (importedConfig) themeConfig.set(importedConfig);
-			if (importedScale !== undefined) textScale.set(importedScale === 1 ? null : importedScale);
-			if (importedBorderContrast !== undefined)
-				borderContrast.set(
-					importedBorderContrast === DEFAULT_BORDER_CONTRAST ? null : importedBorderContrast
-				);
-			if (importedWidescreenMode !== undefined) widescreenMode.set(importedWidescreenMode);
-			toast.success($t('appearance.imported'));
-		} catch {
-			toast.error($t('appearance.importFailed'));
-		}
-	}
 </script>
 
 {#snippet fontSizeControl()}
@@ -312,29 +228,14 @@
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-none pr-1.5 -mr-1.5">
 		<div class="flex items-start justify-between gap-3 mb-4">
 			<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('appearance.title')}</h2>
-			<div class="flex flex-wrap items-center justify-end gap-1.5">
-				<input
-					bind:this={fileInput}
-					type="file"
-					accept="application/json,.json"
-					class="hidden"
-					onchange={importTheme}
-				/>
-				<button type="button" class="settings-action" onclick={() => fileInput?.click()}>
-					{$t('appearance.import')}
-				</button>
-				<button type="button" class="settings-action" onclick={exportTheme}>
-					{$t('appearance.exportTheme')}
-				</button>
-				<button
-					type="button"
-					class="settings-action"
-					disabled={!hasCustomAppearance}
-					onclick={resetAppearance}
-				>
-					{$t('appearance.reset')}
-				</button>
-			</div>
+			<button
+				type="button"
+				class="settings-action"
+				disabled={!hasCustomAppearance}
+				onclick={resetAppearance}
+			>
+				{$t('appearance.reset')}
+			</button>
 		</div>
 
 		<div class="segmented mb-5" role="tablist">

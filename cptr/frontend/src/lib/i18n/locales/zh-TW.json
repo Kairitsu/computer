@@ -247,7 +247,7 @@
 	"account.password": "密碼",
 	"account.currentPassword": "目前密碼",
 	"account.newPassword": "新密碼",
-	"account.updatePassword": "更新密碼 →",
+	"account.updatePassword": "更新密碼",
 	"account.uploadPhoto": "上傳頭像",
 	"account.removePhoto": "移除",
 	"account.displayNameUpdated": "顯示名稱已更新",

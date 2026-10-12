@@ -9,12 +9,17 @@
 		updateConfig
 	} from '$lib/apis/admin';
 	import { t } from '$lib/i18n';
-	import { tooltip } from '$lib/tooltip';
-	import { refreshChatState } from '$lib/stores/chat';
 	import Icon from '../Icon.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ModelSelector from '$lib/components/common/ModelSelector.svelte';
 	import ToggleSwitch from '$lib/components/common/ToggleSwitch.svelte';
+
+	interface ModelsApi {
+		refresh: () => Promise<void>;
+		save: () => Promise<void>;
+	}
+
+	let { register }: { register?: (api: ModelsApi) => void } = $props();
 
 	type ModelEntry = {
 		id: string;
@@ -26,8 +31,6 @@
 	};
 
 	let loading = $state(true);
-	let saving = $state(false);
-	let refreshing = $state(false);
 	let models = $state<ModelEntry[]>([]);
 	let selectedId = $state<string | null>(null);
 
@@ -38,6 +41,7 @@
 
 	// Default model
 	let defaultModelId = $state('');
+	let defaultModelLoaded = false;
 
 	const TEMPLATE_VARIABLES = [
 		{ name: 'CPTR_CONTEXT', desc: 'Runtime, machine, workspace, and tool context' },
@@ -66,8 +70,6 @@
 Workspace: {{WORKSPACE_NAME}}
 Files:
 {{FILE_TREE}}`;
-
-	let hasDirty = $derived(globalDirty || models.some((m) => m.dirty));
 
 	function applyModelConfig(
 		data: Awaited<ReturnType<typeof getModelConfig>>,
@@ -119,20 +121,12 @@ Files:
 			const adminCfg = await getAdminConfig();
 			defaultModelId =
 				typeof adminCfg['chat.default_model'] === 'string' ? adminCfg['chat.default_model'] : '';
+			defaultModelLoaded = true;
 		} catch {}
 	});
 
 	async function refreshModels() {
-		refreshing = true;
-		try {
-			applyModelConfig(await refreshModelList(), true);
-			await refreshChatState();
-			toast.success($t('models.refreshed'));
-		} catch {
-			toast.error($t('models.refreshFailed'));
-		} finally {
-			refreshing = false;
-		}
+		applyModelConfig(await refreshModelList(), true);
 	}
 
 	async function toggleModel(model: ModelEntry, newVal: boolean) {
@@ -152,30 +146,28 @@ Files:
 	}
 
 	async function saveAll() {
-		saving = true;
-		try {
-			const promises: Promise<unknown>[] = [];
-			if (globalDirty) {
-				promises.push(updateModelConfig('*', { params: buildParams(globalSystemPrompt) }));
+		const promises: Promise<unknown>[] = [];
+		if (globalDirty) {
+			promises.push(updateModelConfig('*', { params: buildParams(globalSystemPrompt) }));
+		}
+		for (const model of models) {
+			if (model.dirty) {
+				promises.push(updateModelConfig(model.id, { params: buildParams(model.systemPrompt) }));
 			}
-			for (const model of models) {
-				if (model.dirty) {
-					promises.push(updateModelConfig(model.id, { params: buildParams(model.systemPrompt) }));
-				}
-			}
-			await Promise.all(promises);
-			globalDirty = false;
-			models.forEach((m) => (m.dirty = false));
+		}
+		await Promise.all(promises);
+		globalDirty = false;
+		models.forEach((m) => (m.dirty = false));
 
+		// Skip until the stored default has loaded, so an early save cannot clear it.
+		if (defaultModelLoaded) {
 			await updateConfig({ 'chat.default_model': defaultModelId });
-
-			toast.success($t('settings.saved'));
-		} catch {
-			toast.error($t('models.failedToSave'));
-		} finally {
-			saving = false;
 		}
 	}
+
+	$effect(() => {
+		register?.({ refresh: refreshModels, save: saveAll });
+	});
 </script>
 
 {#snippet systemPromptField(value: string, onInput: (v: string) => void, placeholder: string)}
@@ -229,22 +221,6 @@ Files:
 		<div class="flex justify-center py-8"><Spinner size={16} /></div>
 	{:else}
 		<div>
-			<div class="flex items-center justify-between mb-3">
-				<h3 class="text-xs font-medium text-gray-700 dark:text-gray-300">
-					{$t('admin.models')}
-				</h3>
-				<button
-					type="button"
-					class="settings-icon"
-					onclick={refreshModels}
-					disabled={refreshing || saving}
-					aria-label={$t('models.refresh')}
-					use:tooltip={$t('models.refresh')}
-				>
-					<Icon name="refresh" size={13} class={refreshing ? 'animate-spin' : ''} />
-				</button>
-			</div>
-
 			<div class="mb-1">
 				<div class="flex items-center justify-between gap-3">
 					<h3 class="min-w-0 text-xs text-gray-600 dark:text-gray-400">
@@ -323,12 +299,6 @@ Files:
 					{$t('models.noModels')}
 				</p>
 			{/if}
-		</div>
-
-		<div class="pt-3 flex justify-end">
-			<button type="button" class="settings-action" onclick={saveAll}>
-				{#if saving}{$t('settings.saving')}{:else}{$t('settings.save')}{/if}
-			</button>
 		</div>
 	{/if}
 </div>

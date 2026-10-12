@@ -29,6 +29,11 @@
 	let saved = $state<Record<string, boolean>>({});
 	let modal = $state<ModalState | null>(null);
 	let deletedProfile = $state(false);
+	let modelsApi: { refresh: () => Promise<void>; save: () => Promise<void> } | null = null;
+
+	function registerModels(api: { refresh: () => Promise<void>; save: () => Promise<void> }) {
+		modelsApi = api;
+	}
 
 	const statusLabelKey: Record<string, string> = {
 		ready: 'admin.agentsStatusReady',
@@ -193,17 +198,20 @@
 		saved = { ...saved, [profile.id]: true };
 	}
 
-	async function save() {
+	async function persistAgents() {
 		const savedProfiles = deletedProfile
 			? profiles
 			: profiles.filter((profile) => saved[profile.id]);
-		if (savedProfiles.length === 0 && !deletedProfile) {
-			toast.success($t('settings.saved'));
-			return;
-		}
+		if (savedProfiles.length === 0 && !deletedProfile) return;
+		applyResponse(await updateAgents(savedProfiles.map(normalizeProfile)));
+	}
+
+	async function save() {
 		saving = true;
 		try {
-			applyResponse(await updateAgents(savedProfiles.map(normalizeProfile)));
+			await persistAgents();
+			if (!modelsApi) throw new Error($t('models.failedToSave'));
+			await modelsApi.save();
 			await refreshChatState();
 			toast.success($t('settings.saved'));
 		} catch (error) {
@@ -215,14 +223,30 @@
 
 	async function refresh() {
 		refreshing = true;
+		let agentsOk = false;
+		let modelsOk = false;
 		try {
 			applyResponse(await refreshAgents());
-			await refreshChatState();
+			agentsOk = true;
 		} catch {
 			toast.error($t('admin.failedToLoadConfig'));
-		} finally {
-			refreshing = false;
 		}
+		try {
+			if (!modelsApi) throw new Error('models unavailable');
+			await modelsApi.refresh();
+			modelsOk = true;
+		} catch {
+			toast.error($t('models.refreshFailed'));
+		}
+		if (agentsOk || modelsOk) {
+			try {
+				await refreshChatState();
+			} catch {
+				// The lists above already show the refreshed data.
+			}
+		}
+		if (agentsOk && modelsOk) toast.success($t('settings.refreshed'));
+		refreshing = false;
 	}
 
 	onMount(async () => {
@@ -244,7 +268,7 @@
 				type="button"
 				class="settings-icon"
 				onclick={refresh}
-				disabled={refreshing}
+				disabled={refreshing || saving}
 				title={$t('admin.agentsRefresh')}
 			>
 				{#if refreshing}
@@ -310,23 +334,26 @@
 			</p>
 		{/if}
 
-		<div class="pt-4 flex items-center justify-between">
+		<div class="pt-4">
 			<span class="text-xs text-gray-500">
 				{profiles.length} profile{profiles.length === 1 ? '' : 's'}
 			</span>
-			<button type="button" class="settings-action" onclick={save} disabled={saving}>
-				{#if saving}
-					<Spinner size={14} />
-				{:else}
-					{$t('settings.save')}
-				{/if}
-			</button>
 		</div>
 	{/if}
-</div>
 
-<div class="mt-8">
-	<Models />
+	<div class="mt-5">
+		<Models register={registerModels} />
+	</div>
+
+	<div class="pt-3 flex justify-end">
+		<button type="button" class="settings-action" onclick={save} disabled={saving}>
+			{#if saving}
+				<Spinner size={14} />
+			{:else}
+				{$t('settings.save')}
+			{/if}
+		</button>
+	</div>
 </div>
 
 {#if modal}

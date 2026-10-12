@@ -131,28 +131,18 @@ export function rejectActiveToolCallShortcut(): boolean {
 /**
  * Bind a global socket listener that clears streamingChatTabs when a
  * chat's "done" event arrives -- even if the ChatPanel is not mounted.
- * Also fires browser notifications and in-app toasts.
+ * Also fires in-app toasts. Browser notifications stay off.
  * Called once from the app layout.
  */
 let globalListenerBound = false;
 
-/** Whether browser notifications are enabled (persisted to localStorage). */
-export const notificationsEnabled = writable<boolean>(
-	typeof localStorage !== 'undefined'
-		? localStorage.getItem('notificationsEnabled') === 'true'
-		: false
-);
-notificationsEnabled.subscribe((v) => {
-	if (typeof localStorage !== 'undefined') localStorage.setItem('notificationsEnabled', String(v));
-});
-
-/** Whether notification sound is enabled (persisted to localStorage). */
-export const notificationSound = writable<boolean>(
-	typeof localStorage !== 'undefined' ? localStorage.getItem('notificationSound') !== 'false' : true
-);
-notificationSound.subscribe((v) => {
-	if (typeof localStorage !== 'undefined') localStorage.setItem('notificationSound', String(v));
-});
+// Browser notifications and the notification sound stay off. Older builds
+// stored the choice in localStorage; overwrite it so a leftover "on" cannot
+// raise a system notification or play a sound.
+if (typeof localStorage !== 'undefined') {
+	localStorage.setItem('notificationsEnabled', 'false');
+	localStorage.setItem('notificationSound', 'false');
+}
 
 export function bindGlobalChatListener() {
 	if (globalListenerBound) return;
@@ -262,21 +252,6 @@ export function bindGlobalChatListener() {
 					unstyled: true
 				});
 			});
-
-			// Browser notification (only when tab is hidden)
-			if (document.hidden && get(notificationsEnabled)) {
-				try {
-					const notification = new Notification(`${title} • Computer`, {
-						body: body.slice(0, 200),
-						icon: '/favicon.png'
-					});
-					notification.onclick = () => {
-						window.focus();
-						void openChat();
-						notification.close();
-					};
-				} catch {}
-			}
 		}
 	);
 
