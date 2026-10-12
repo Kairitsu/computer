@@ -84,7 +84,7 @@
 	class="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-4 md:mx-0 flex flex-col md:flex-row max-h-[85vh] lg:max-h-[90vh] md:h-[35rem] lg:h-[42rem] xl:h-[46rem]"
 >
 	<nav
-		class="shrink-0 min-w-0 md:min-h-0 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto scrollbar-none border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/6 md:w-[11.25rem]"
+		class="settings-rail shrink-0 min-w-0 md:h-full md:min-h-0 md:self-stretch overflow-x-auto md:overflow-x-hidden md:overflow-y-auto scrollbar-none border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/6 md:w-[11.25rem] md:rounded-l-3xl"
 	>
 		<div class="settings-nav flex w-max min-w-full md:w-auto md:min-w-0 md:flex-col">
 			<button

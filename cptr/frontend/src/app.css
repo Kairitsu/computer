@@ -339,6 +339,21 @@ textarea.settings-field {
 	gap: 0.125rem;
 }
 
+/* Desktop settings rail: the same track fills the whole left column, not
+   just the stack of tabs. The inner group stays transparent so the tint
+   does not stop under the last item. */
+@media (min-width: 768px) {
+	.settings-rail {
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+	}
+
+	.settings-rail > .settings-nav {
+		background: transparent;
+		border-radius: 0;
+		min-height: 100%;
+	}
+}
+
 .settings-nav > button {
 	border: 0;
 	border-radius: 0.5625rem;

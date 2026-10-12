@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Icon from '../Icon.svelte';
 	import MarkdownRenderer from '$lib/components/markdown/MarkdownRenderer.svelte';
+	import UploadPreviewModal from './UploadPreviewModal.svelte';
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import { openFileTab, setFileBrowserCwd, setActiveTab } from '$lib/stores';
@@ -51,6 +52,16 @@
 	});
 
 	let copied = $state(false);
+	let previewUpload = $state<{ name: string; url: string; type: string } | null>(null);
+
+	function openPreview(upload: { name?: string; url?: string; type?: string }) {
+		if (!upload?.url) return;
+		previewUpload = {
+			name: upload.name || 'file',
+			url: upload.url,
+			type: upload.type || 'file'
+		};
+	}
 
 	function copyContent() {
 		navigator.clipboard.writeText(content);
@@ -68,10 +79,20 @@
 			{#each meta.files as upload}
 				<div class="self-end">
 					{#if upload.type === 'image'}
-						<img src={upload.url} alt={upload.name || 'image'} class="max-h-96 rounded-lg" />
+						<button
+							type="button"
+							class="block cursor-pointer"
+							aria-label={$t('preview.open')}
+							onclick={() => openPreview(upload)}
+						>
+							<img src={upload.url} alt={upload.name || 'image'} class="max-h-96 rounded-lg" />
+						</button>
 					{:else}
-						<div
-							class="app-surface relative group py-1.5 px-2 w-48 flex items-center gap-1.5 border rounded-xl text-left flex-shrink-0 shadow-sm"
+						<button
+							type="button"
+							class="app-surface relative group py-1.5 px-2 w-48 flex items-center gap-1.5 border rounded-xl text-left flex-shrink-0 shadow-sm cursor-pointer"
+							aria-label={$t('preview.open')}
+							onclick={() => openPreview(upload)}
 						>
 							<div class="shrink-0">
 								<Icon name="page-text" size={14} class="app-icon-muted" />
@@ -84,7 +105,7 @@
 									</div>
 								</div>
 							</div>
-						</div>
+						</button>
 					{/if}
 				</div>
 			{/each}
@@ -217,3 +238,12 @@
 		</div>
 	{/if}
 </div>
+
+{#if previewUpload}
+	<UploadPreviewModal
+		name={previewUpload.name}
+		url={previewUpload.url}
+		type={previewUpload.type}
+		onclose={() => (previewUpload = null)}
+	/>
+{/if}

@@ -27,6 +27,7 @@
 	import AskUserCard from './AskUserCard.svelte';
 	import PlanApprovalCard from './PlanApprovalCard.svelte';
 	import Icon from '../Icon.svelte';
+	import UploadPreviewModal from './UploadPreviewModal.svelte';
 	import type { ToolApprovalMode } from '$lib/apis/chat';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { t } from '$lib/i18n';
@@ -179,7 +180,13 @@
 	let attachedUploads = $state<
 		{ id: string; name: string; url: string; type: string; loading?: boolean }[]
 	>([]);
+	let previewUpload = $state<{ name: string; url: string; type: string } | null>(null);
 	let isDragging = $state(false);
+
+	function openPreview(upload: { name: string; url: string; type: string; loading?: boolean }) {
+		if (upload.loading || !upload.url) return;
+		previewUpload = { name: upload.name, url: upload.url, type: upload.type };
+	}
 
 	function isTabDrag(e: DragEvent): boolean {
 		return Boolean(
@@ -951,14 +958,24 @@
 								<Spinner size={16} />
 							</div>
 						{:else if upload.type === 'image'}
-							<img
-								src={upload.url}
-								alt={upload.name}
-								class="app-surface size-8 object-cover rounded-xl border shadow-sm"
-							/>
+							<button
+								type="button"
+								class="block cursor-pointer"
+								aria-label={$t('preview.open')}
+								onclick={() => openPreview(upload)}
+							>
+								<img
+									src={upload.url}
+									alt={upload.name}
+									class="app-surface size-8 object-cover rounded-xl border shadow-sm"
+								/>
+							</button>
 						{:else}
-							<div
-								class="app-surface relative group px-2 w-48 h-8 flex items-center gap-1.5 border rounded-xl text-left flex-shrink-0 shadow-sm"
+							<button
+								type="button"
+								class="app-surface relative group px-2 w-48 h-8 flex items-center gap-1.5 border rounded-xl text-left flex-shrink-0 shadow-sm cursor-pointer"
+								aria-label={$t('preview.open')}
+								onclick={() => openPreview(upload)}
 							>
 								<div class="shrink-0">
 									<Icon name="page-text" size={14} class="app-icon-muted" />
@@ -971,7 +988,7 @@
 										</div>
 									</div>
 								</div>
-							</div>
+							</button>
 						{/if}
 
 						<div class="absolute -top-1.5 -right-1.5 z-10">
@@ -1106,6 +1123,15 @@
 		</div>
 	</div>
 </div>
+
+{#if previewUpload}
+	<UploadPreviewModal
+		name={previewUpload.name}
+		url={previewUpload.url}
+		type={previewUpload.type}
+		onclose={() => (previewUpload = null)}
+	/>
+{/if}
 
 <style>
 	@reference "../../../app.css";
