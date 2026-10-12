@@ -7,7 +7,6 @@
 		closeTab,
 		setActiveGroup,
 		reorderTabs,
-		openInSplit,
 		closeGroup,
 		moveTabToGroup,
 		splitActive,
@@ -87,10 +86,6 @@
 		switch (tab.type) {
 			case 'home':
 				return 'chat-plus';
-			case 'files':
-				return 'folder';
-			case 'file':
-				return 'page';
 			case 'chat':
 				return 'chat-bubble';
 			default:
@@ -193,19 +188,6 @@
 		if (!contextMenu) return [];
 		const tab = contextMenu.tab;
 		const items: { label: string; icon?: string; onclick: () => void; divider?: boolean }[] = [];
-
-		if (isWideScreen && tab.type === 'file' && tab.filePath) {
-			items.push({
-				label: $t('bar.splitRight'),
-				icon: 'split-horizontal',
-				onclick: () => openInSplit(tab.filePath!, 'horizontal')
-			});
-			items.push({
-				label: $t('bar.splitDown'),
-				icon: 'split-vertical',
-				onclick: () => openInSplit(tab.filePath!, 'vertical')
-			});
-		}
 
 		if (!tab.permanent) {
 			if (items.length > 0) items.push({ label: '', onclick: () => {}, divider: true });
@@ -334,11 +316,9 @@
 						<Icon name={tabIconName(tab)} size={14} />
 					{/if}
 					<span class="max-w-30 overflow-hidden text-ellipsis">
-						{tab.type === 'files'
-							? ($activeWorkspace?.name ?? $t('bar.files'))
-							: (tab.type === 'home' && !tab.path) || tab.path?.startsWith('new-')
-								? $t('chat.newSession')
-								: tab.label}
+						{(tab.type === 'home' && !tab.path) || tab.path?.startsWith('new-')
+							? $t('chat.newSession')
+							: tab.label}
 					</span>
 					{#if isChatTab && !isActive && isChatUnread(chatStatus)}
 						<span class="size-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true"></span>

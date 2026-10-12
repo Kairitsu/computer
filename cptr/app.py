@@ -11,10 +11,8 @@ from cptr.routers import (
     admin_router,
     auth_router,
     chat_router,
-    events_router,
     files_router,
     grok_router,
-    git_router,
     search_router,
     state_router,
     update_router,
@@ -234,10 +232,8 @@ async def get_config():
 app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
-app.include_router(events_router)
 app.include_router(files_router)
 app.include_router(grok_router)
-app.include_router(git_router)
 app.include_router(search_router)
 app.include_router(state_router)
 app.include_router(update_router)

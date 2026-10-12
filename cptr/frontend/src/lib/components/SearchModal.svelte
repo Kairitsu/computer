@@ -3,11 +3,9 @@
 		workspaceList,
 		currentWorkspace,
 		showSearch,
-		openFileTab,
 		requestHomeChat,
 		openProjectSessionTab,
-		openHomeStripChat,
-		rememberWorkspace
+		openHomeStripChat
 	} from '$lib/stores';
 	import { get } from 'svelte/store';
 	import { getPathDisplayName } from '$lib/utils/paths';
@@ -50,7 +48,6 @@
 	let resultsEl: HTMLDivElement | undefined = $state();
 	let fileSearchController: AbortController | null = null;
 	let searchRequestId = 0;
-	let searchTargetRequestId = 0;
 	let lastWorkspaceScope: string | null | undefined;
 
 	type SelectableItem =
@@ -299,14 +296,18 @@
 		void goto('/');
 	}
 
+	function openOwningProject(path: string, workspace?: string) {
+		const target = workspace || owningWorkspace(path);
+		if (target) void openProjectSessionTab(target);
+	}
+
 	function selectFile(file: FileSearchResult) {
 		onclose();
 		currentWorkspace.set(null);
 		if (file.type === 'directory') {
 			void openProjectSessionTab(file.workspace || file.path);
 		} else {
-			void rememberWorkspace(file.workspace);
-			openFileTab(file.path);
+			openOwningProject(file.path, file.workspace);
 		}
 		void goto('/');
 	}
@@ -318,22 +319,15 @@
 			const workspace = owningWorkspace(match.path);
 			if (workspace) void openProjectSessionTab(workspace);
 		} else {
-			openFileTab(match.path);
+			openOwningProject(match.path);
 		}
 		void goto('/');
 	}
 
-	function selectContentMatch(match: FileMatch, content: ContentMatch) {
+	function selectContentMatch(match: FileMatch, _content: ContentMatch) {
 		onclose();
 		currentWorkspace.set(null);
-		openFileTab(match.path, undefined, {
-			searchTarget: {
-				line: content.line,
-				column: content.column,
-				length: query.trim().length,
-				requestId: ++searchTargetRequestId
-			}
-		});
+		openOwningProject(match.path);
 		void goto('/');
 	}
 

@@ -5,7 +5,6 @@
 	import { page } from '$app/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import GitBar from '$lib/components/GitBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import AuthScreen from '$lib/components/AuthScreen.svelte';
@@ -19,8 +18,6 @@
 		currentWorkspace,
 		stateLoaded,
 		initState,
-		gitReviewOpen,
-		isGitRepo,
 		splitActive,
 		splitCurrentTab,
 		closeGroup,
@@ -33,12 +30,10 @@
 		showUpdateToastPref
 	} from '$lib/stores';
 	import { matchKeybinding, executeAction } from '$lib/stores/keybindings';
-	import { systemEvents } from '$lib/stores/systemEvents.svelte';
 	import { socketStore } from '$lib/stores/socket.svelte';
 	import { setSession, clearSession, session } from '$lib/session';
 	import { getSession, getConfig } from '$lib/apis/auth';
 	import { checkForUpdate } from '$lib/apis/update';
-	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
 	import { t } from '$lib/i18n';
 	import {
 		refreshChatState,
@@ -57,8 +52,6 @@
 	let showSetup = $state(false);
 	let connectionToast: string | number | undefined;
 	let applyingServiceWorkerUpdate = false;
-	let lastGitRefreshFsTick = 0;
-	let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	const BROWSER_SW_CLEANUP_RELOAD = 'cptr:pwa:browser-sw-cleanup-reload';
 
 	// Auth state
@@ -378,48 +371,6 @@
 			socketStore.disconnect();
 		}
 	});
-
-	// Filesystem events remain workspace-scoped.
-	$effect(() => {
-		const ws = $currentWorkspace;
-		if (ws) {
-			systemEvents.connect(ws.fileBrowserCwd || ws.path);
-		} else {
-			systemEvents.disconnect();
-		}
-	});
-
-	// Drive centralized git status from workspace
-	$effect(() => {
-		const ws = $currentWorkspace;
-		if (!ws) {
-			gitStatusStore.clear();
-			isGitRepo.set(false);
-			gitReviewOpen.set(null);
-			return;
-		}
-		gitStatusStore.setRoot(ws.path);
-	});
-
-	// Keep git decorations fresh after filesystem changes.
-	$effect(() => {
-		const tick = systemEvents.fsTick;
-		const ws = $currentWorkspace;
-		if (tick === 0 || tick === lastGitRefreshFsTick || !ws) return;
-		lastGitRefreshFsTick = tick;
-		if (!systemEvents.isRelevantFsChange(ws.path)) return;
-
-		if (gitRefreshTimer) clearTimeout(gitRefreshTimer);
-		gitRefreshTimer = setTimeout(() => {
-			gitRefreshTimer = null;
-			gitStatusStore.refresh({ force: true });
-		}, 250);
-	});
-
-	// Sync isGitRepo flag from centralized store
-	$effect(() => {
-		isGitRepo.set(gitStatusStore.isRepo);
-	});
 </script>
 
 <svelte:head>
@@ -430,7 +381,7 @@
 		rel="stylesheet"
 	/>
 	<title
-		>{$activeTab && $activeTab.type !== 'files'
+		>{$activeTab
 			? $currentWorkspace
 				? `${$activeTab.label} / ${$currentWorkspace.name} / Computer`
 				: `${$activeTab.label} / Computer`
@@ -481,10 +432,6 @@
 			<main class="relative flex-1 min-h-0 overflow-hidden">
 				{@render children()}
 			</main>
-
-			{#if $currentWorkspace && $isGitRepo && !$gitReviewOpen}
-				<GitBar />
-			{/if}
 		</div>
 	</div>
 

@@ -5,12 +5,10 @@
 		currentWorkspace,
 		workspaceList,
 		addWorkspace,
-		gitReviewOpen,
 		setActiveGroup,
 		setSplitRatio,
 		moveTabToNewSplit,
 		openChatTab,
-		openFileTab,
 		showSearch,
 		pwaPreferences,
 		homeState,
@@ -34,13 +32,10 @@
 	import { chatEnabled } from '$lib/stores/chat';
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
-	import { createEntry, writeFile, uploadFiles as uploadFilesApi } from '$lib/apis/files';
+	import { uploadFiles as uploadFilesApi } from '$lib/apis/files';
 	import { getChat } from '$lib/apis/chat';
 	import { deleteSharePayload, getSharePayload } from '$lib/intents/payloadStore';
 	import type { LaunchIntent, ShareBehavior, SharePayload } from '$lib/intents/types';
-	import FileBrowser from '$lib/components/FileBrowser.svelte';
-	import FileEditor from '$lib/components/FileEditor.svelte';
-	import GitView from '$lib/components/GitView.svelte';
 	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
 	import DirectoryPicker from '$lib/components/DirectoryPicker.svelte';
 	import GroupTabBar from '$lib/components/GroupTabBar.svelte';
@@ -253,13 +248,6 @@
 		return next.pathname + next.search;
 	}
 
-	function noteBaseName(now = new Date()): string {
-		const pad = (n: number) => String(n).padStart(2, '0');
-		return `note-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(
-			now.getHours()
-		)}${pad(now.getMinutes())}`;
-	}
-
 	function shareMarkdown(payload: SharePayload): string {
 		const lines: string[] = [];
 		if (payload.title) lines.push(`# ${payload.title.trim()}`, '');
@@ -301,7 +289,8 @@
 
 		switch (intent.kind) {
 			case 'newNote':
-				await createNote(targetWorkspace!);
+				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
+				else focusDefaultHomeTab();
 				break;
 			case 'newChat':
 				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
@@ -330,8 +319,11 @@
 				}
 				break;
 			case 'openFile':
-				if (targetWorkspace) await rememberWorkspace(targetWorkspace);
-				if (intent.filePath) openFileTab(intent.filePath);
+				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
+				else if (intent.filePath) {
+					const parent = intent.filePath.replace(/\/[^/]+$/, '');
+					if (parent) await openProjectSessionTab(parent);
+				}
 				break;
 			case 'openDir':
 				await openProjectSessionTab(targetWorkspace || intent.dirPath || '');
@@ -349,26 +341,6 @@
 		return ['newNote', 'openFile', 'openDir', 'share', 'importFiles'].includes(kind);
 	}
 
-	async function createNote(workspacePath: string, content = '') {
-		await rememberWorkspace(workspacePath);
-		currentWorkspace.set(null);
-
-		const base = noteBaseName();
-		for (let i = 1; i < 100; i += 1) {
-			const suffix = i === 1 ? '' : `-${i}`;
-			const path = `${workspacePath}/${base}${suffix}.md`;
-			try {
-				await createEntry(path, 'file');
-				if (content) await writeFile(path, content);
-				openFileTab(path, undefined, { edit: true });
-				return path;
-			} catch (e: any) {
-				if (e?.status !== 409) throw e;
-			}
-		}
-		throw new Error('Could not create note');
-	}
-
 	async function handleShareIntent(intent: LaunchIntent, workspacePath: string) {
 		const behavior = intent.shareBehavior ?? get(pwaPreferences).shareBehavior;
 		if (behavior === 'ask') {
@@ -383,12 +355,8 @@
 		}
 		if (!share) return;
 
-		if (behavior === 'chatDraft') {
-			sessionStorage.setItem(`cptr:intent:chatDraft:${workspacePath}`, shareMarkdown(share));
-			await openProjectSessionTab(workspacePath);
-			return;
-		}
-		await createNote(workspacePath, shareMarkdown(share));
+		sessionStorage.setItem(`cptr:intent:chatDraft:${workspacePath}`, shareMarkdown(share));
+		await openProjectSessionTab(workspacePath);
 	}
 
 	async function importIntentFiles(intent: LaunchIntent, workspacePath: string) {
@@ -583,10 +551,6 @@
 		allGroups.find((group) => group.id === $currentWorkspace?.activeGroupId) ?? allGroups[0] ?? null
 	);
 
-	function getGroupActiveTab(group: EditorGroup): Tab | null {
-		return group.tabs.find((t) => t.id === group.activeTabId) ?? null;
-	}
-
 	// ── Drag-to-split ─────────────────────────────────────────────
 
 	const SPLIT_EDGE_FRACTION = 0.3;
@@ -770,16 +734,6 @@
 						/>
 					</div>
 				{/each}
-				{#each homePane.tabs.filter((tab) => tab.type === 'file' && tab.filePath) as tab (tab.id)}
-					<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== homePane.activeTabId}>
-						<FileEditor
-							filePath={tab.filePath!}
-							tabId={tab.id}
-							edit={tab.edit === true}
-							searchTarget={tab.searchTarget}
-						/>
-					</div>
-				{/each}
 			</div>
 			{#if dragOverZone?.groupId === homePane.id}
 				<div class={`split-drop-zone split-drop-${dragOverZone.zone}`}></div>
@@ -866,7 +820,6 @@
 {/snippet}
 
 {#snippet renderPane(group: EditorGroup)}
-	{@const groupTab = getGroupActiveTab(group)}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="split-pane"
@@ -885,21 +838,6 @@
 			}}
 		/>
 		<div class="pane-content">
-			{#each group.tabs.filter((tab) => tab.type === 'files') as tab (tab.id)}
-				<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== group.activeTabId}>
-					<FileBrowser />
-				</div>
-			{/each}
-			{#each group.tabs.filter((tab) => tab.type === 'file' && tab.filePath) as tab (tab.id)}
-				<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== group.activeTabId}>
-					<FileEditor
-						filePath={tab.filePath!}
-						tabId={tab.id}
-						edit={tab.edit === true}
-						searchTarget={tab.searchTarget}
-					/>
-				</div>
-			{/each}
 			{#each group.tabs.filter((tab) => tab.type === 'chat') as tab (tab.id)}
 				<div class="persisted-tab" class:persisted-tab-hidden={tab.id !== group.activeTabId}>
 					<ChatPanel
@@ -913,14 +851,6 @@
 					/>
 				</div>
 			{/each}
-			{#if !groupTab}
-				<FileBrowser />
-			{/if}
-			{#if $gitReviewOpen && group.id === allGroups[0]?.id}
-				<div class="persisted-tab git-review-panel">
-					<GitView />
-				</div>
-			{/if}
 		</div>
 		{#if dragOverZone?.groupId === group.id}
 			<div class={`split-drop-zone split-drop-${dragOverZone.zone}`}></div>

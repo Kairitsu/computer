@@ -8,7 +8,7 @@
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import ReasoningCollapsible from './ReasoningCollapsible.svelte';
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
-	import { currentWorkspace, openFileTab } from '$lib/stores';
+	import { currentWorkspace } from '$lib/stores';
 	import { tooltip } from '$lib/tooltip';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import Icon from '../Icon.svelte';
@@ -153,15 +153,6 @@
 
 	function toggleFile(key: string) {
 		collapsedFiles = { ...collapsedFiles, [key]: !collapsedFiles[key] };
-	}
-
-	function openArtifact(artifact: any) {
-		const workspace = get(currentWorkspace);
-		const path =
-			workspace && artifact.path
-				? `${workspace.path.replace(/\/$/, '')}/${artifact.path}`
-				: artifact.path;
-		if (path) openFileTab(path);
 	}
 
 	/** Human-readable label for a tool call */
@@ -464,13 +455,10 @@
 					{:else if displayItem.type === 'artifact_item'}
 						{@const artifact = displayItem.item}
 						{@const preview = (artifact.content || '').replace(/^#.*\n*/m, '').trim()}
-						<button
-							class="block w-full min-w-0 overflow-hidden text-left my-2 rounded-xl cursor-pointer
+						<div
+							class="block w-full min-w-0 overflow-hidden text-left my-2 rounded-xl
 						border border-gray-200 dark:border-white/8
-						hover:border-gray-300 dark:hover:border-white/12
-						hover:bg-gray-50/50 dark:hover:bg-white/[0.03]
-						transition-colors duration-150 {preview ? 'h-[4.375rem]' : 'h-[2.375rem]'}"
-							onclick={() => openArtifact(artifact)}
+						{preview ? 'h-[4.375rem]' : 'h-[2.375rem]'}"
 						>
 							<div class="h-full min-w-0 overflow-hidden px-3 py-2.5">
 								<div
@@ -488,7 +476,7 @@
 									</div>
 								{/if}
 							</div>
-						</button>
+						</div>
 					{:else if displayItem.type === 'image_item'}
 						<div class="my-2 grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
 							{#each displayItem.item.images || [] as image}
@@ -535,18 +523,6 @@
 									>
 										{file.name || shortPath(file.path)}
 									</div>
-								</button>
-								<button
-									type="button"
-									class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
-									onclick={(event) => {
-										event.stopPropagation();
-										if (filePath) openFileTab(filePath);
-									}}
-									aria-label={$t('directory.open', { name: file.name || shortPath(file.path) })}
-									use:tooltip={$t('chat.openAsTab')}
-								>
-									<Icon name="external-link" size={13} />
 								</button>
 							</div>
 							{#if !collapsed}

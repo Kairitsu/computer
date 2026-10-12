@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Token } from 'marked';
-	import { openFileTab, openDirectoryAsSession } from '$lib/stores';
+	import { openDirectoryAsSession } from '$lib/stores';
 	import { t } from '$lib/i18n';
 
 	interface Props {
@@ -68,17 +68,15 @@
 			{@const isDirectory = rawPath.endsWith('/')}
 			{@const filePath = isDirectory ? rawPath.slice(0, -1) : rawPath}
 			{@const fileName = filePath.split('/').pop() || filePath}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<button
-				class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium cursor-pointer border-none text-blue-500 dark:text-blue-400 hover:bg-blue-500/8 transition-colors align-baseline"
-				title={filePath}
-				onclick={(e) => {
-					e.preventDefault();
-					if (isDirectory) openDirectoryAsSession(filePath);
-					else openFileTab(filePath);
-				}}
-			>
-				{#if isDirectory}
+			{#if isDirectory}
+				<button
+					class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium cursor-pointer border-none text-blue-500 dark:text-blue-400 hover:bg-blue-500/8 transition-colors align-baseline"
+					title={filePath}
+					onclick={(e) => {
+						e.preventDefault();
+						openDirectoryAsSession(filePath);
+					}}
+				>
 					<svg
 						class="w-3.5 h-3.5 shrink-0"
 						viewBox="0 0 16 16"
@@ -92,7 +90,13 @@
 							d="M2.5 3A1.5 1.5 0 0 1 4 1.5h2.172a1.5 1.5 0 0 1 1.06.44l.768.767a1.5 1.5 0 0 0 1.06.439H12A1.5 1.5 0 0 1 13.5 4.5v8A1.5 1.5 0 0 1 12 14H4a1.5 1.5 0 0 1-1.5-1.5V3Z"
 						/>
 					</svg>
-				{:else}
+					{fileName}
+				</button>
+			{:else}
+				<span
+					class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium text-blue-500 dark:text-blue-400 align-baseline"
+					title={filePath}
+				>
 					<svg
 						class="w-3.5 h-3.5 shrink-0"
 						viewBox="0 0 16 16"
@@ -107,9 +111,9 @@
 						/>
 						<path d="M9 1.5V6h4.5" />
 					</svg>
-				{/if}
-				{fileName}
-			</button>
+					{fileName}
+				</span>
+			{/if}
 		{:else}
 			<a href={href || '#'} target="_blank" rel="noopener noreferrer">
 				{#if 'tokens' in item && item.tokens}

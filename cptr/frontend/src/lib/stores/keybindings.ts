@@ -12,7 +12,6 @@
 
 import { writable, get } from 'svelte/store';
 import {
-	openUntitledFileTab,
 	closeTab,
 	setActiveTab,
 	activeGroup,
@@ -250,8 +249,7 @@ export function executeAction(
 
 	switch (action) {
 		case 'newFile':
-			openUntitledFileTab();
-			return true;
+			return false;
 
 		case 'newChat':
 			if (get(currentWorkspace)) openChatTab();

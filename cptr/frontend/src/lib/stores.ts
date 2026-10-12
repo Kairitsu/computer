@@ -46,29 +46,19 @@ export type { AppearancePreferences, Theme, ThemeConfig };
 
 // ── Types ───────────────────────────────────────────────────────
 
-export interface FileSearchTarget {
-	line: number;
-	column: number;
-	length: number;
-	requestId: number;
-}
-
 export interface Tab {
 	id: string;
-	type: 'home' | 'files' | 'file' | 'chat';
+	type: 'home' | 'chat';
 	label: string;
-	filePath?: string;
-	edit?: boolean;
 	path?: string; // generic path (e.g. for chat)
 	workspace?: string; // Home chat tabs: the workspace the chat was started in
 	unsaved?: boolean;
 	permanent?: boolean;
 	badge?: number;
-	searchTarget?: FileSearchTarget;
 }
 
-// Saved tabs of any other type (old terminal, browser and preview tabs) are dropped on load.
-const SUPPORTED_TAB_TYPES = new Set(['home', 'files', 'file', 'chat']);
+// Saved tabs of any other type (file browser, editor, terminal, browser) are dropped on load.
+const SUPPORTED_TAB_TYPES = new Set(['home', 'chat']);
 
 function isSupportedTab(tab: { type?: unknown }): tab is Tab {
 	return typeof tab.type === 'string' && SUPPORTED_TAB_TYPES.has(tab.type);
@@ -164,10 +154,11 @@ function nextId(): string {
 // ── Default group for a workspace ───────────────────────────────
 
 function createDefaultGroup(): EditorGroup {
+	const tabId = 'chat';
 	return {
 		id: 'default',
-		tabs: [{ id: 'files', type: 'files', label: 'Files', permanent: true }],
-		activeTabId: 'files'
+		tabs: [{ id: tabId, type: 'chat', label: 'New Chat', path: `new-${Date.now()}` }],
+		activeTabId: tabId
 	};
 }
 
@@ -349,9 +340,6 @@ export const showChangelog = writable(false);
 export const showUpdateToastPref = writable(true);
 export const showSearch = writable(false);
 export const stateLoaded = writable(false);
-export type GitReviewTarget = { kind: 'local' } | { kind: 'pr'; number: number };
-export const gitReviewOpen = writable<GitReviewTarget | null>(null);
-export const isGitRepo = writable(false);
 export type StreamingBehavior = 'queue' | 'interrupt';
 export const streamingBehavior = writable<StreamingBehavior>('queue');
 export const pwaPreferences = writable<PwaPreferences>(defaultPwaPreferences);
@@ -737,7 +725,7 @@ export async function loadWorkspace(path: string): Promise<void> {
 						...g,
 						tabs: filteredTabs,
 						tabHistory: (g.tabHistory ?? []).filter((id) => liveIds.has(id)),
-						activeTabId: activeStillExists ? g.activeTabId : (filteredTabs[0]?.id ?? 'files')
+						activeTabId: activeStillExists ? g.activeTabId : (filteredTabs[0]?.id ?? '')
 					};
 				})
 				.filter((g) => g.tabs.length > 0);
@@ -1209,132 +1197,6 @@ export function updateTabLabel(tabId: string, label: string): void {
 	);
 }
 
-export function clearFileSearchTarget(tabId: string, requestId: number): void {
-	currentWorkspace.update((workspace) =>
-		workspace
-			? {
-					...workspace,
-					groups: workspace.groups.map((group) => ({
-						...group,
-						tabs: group.tabs.map((tab) =>
-							tab.id === tabId && tab.searchTarget?.requestId === requestId
-								? { ...tab, searchTarget: undefined }
-								: tab
-						)
-					}))
-				}
-			: workspace
-	);
-}
-
-export function openFileTab(
-	filePath: string,
-	targetGroupId?: string,
-	options: { edit?: boolean; searchTarget?: FileSearchTarget } = {}
-): void {
-	const ws = get(currentWorkspace);
-	if (!ws) {
-		openHomeFileTab(filePath, targetGroupId, options);
-		return;
-	}
-
-	const gid = targetGroupId ?? ws.activeGroupId;
-	const group = ws.groups.find((g) => g.id === gid);
-	if (!group) return;
-
-	// Reuse existing tab within this group
-	const existing = group.tabs.find((t) => t.type === 'file' && t.filePath === filePath);
-	if (existing) {
-		if (options.edit || options.searchTarget) {
-			updateGroupTabs(gid, (tabs) => ({
-				tabs: tabs.map((t) =>
-					t.id === existing.id
-						? { ...t, ...(options.edit ? { edit: true } : {}), searchTarget: options.searchTarget }
-						: t
-				),
-				activeTabId: existing.id
-			}));
-			return;
-		}
-		setActiveTab(existing.id, gid);
-		return;
-	}
-
-	const name = getPathDisplayName(filePath, filePath);
-	const newTab: Tab = {
-		id: nextId(),
-		type: 'file',
-		label: name,
-		filePath,
-		edit: options.edit,
-		searchTarget: options.searchTarget
-	};
-
-	updateGroupTabs(gid, (tabs) => ({
-		tabs: [...tabs, newTab],
-		activeTabId: newTab.id
-	}));
-}
-
-function openHomeFileTab(
-	filePath: string,
-	targetGroupId?: string,
-	options: { edit?: boolean; searchTarget?: FileSearchTarget } = {}
-): void {
-	const state = get(homeState);
-	const groupId = targetGroupId ?? state.activeGroupId;
-	const group = state.groups.find((item) => item.id === groupId);
-	if (!group) return;
-
-	const existing = group.tabs.find((tab) => tab.type === 'file' && tab.filePath === filePath);
-	const tab: Tab = existing ?? {
-		id: nextId(),
-		type: 'file',
-		label: getPathDisplayName(filePath, filePath),
-		filePath,
-		edit: options.edit,
-		searchTarget: options.searchTarget
-	};
-	const updateGroup = (group: EditorGroup) =>
-		group.id === groupId
-			? { ...group, tabs: existing ? group.tabs : [...group.tabs, tab], activeTabId: tab.id }
-			: group;
-
-	homeState.update((current) => ({
-		...current,
-		activeGroupId: groupId,
-		groups: current.groups.map(updateGroup)
-	}));
-}
-
-export function openUntitledFileTab(targetGroupId?: string): void {
-	// Find the lowest unused number across ALL groups
-	const ws = get(currentWorkspace);
-	const allTabs = ws ? ws.groups.flatMap((g) => g.tabs) : [];
-	const usedNumbers = new Set(
-		allTabs
-			.filter((t) => t.filePath?.startsWith('untitled:Untitled-'))
-			.map((t) => parseInt(t.filePath!.replace('untitled:Untitled-', ''), 10))
-			.filter((n) => !isNaN(n))
-	);
-	let n = 1;
-	while (usedNumbers.has(n)) n++;
-
-	const label = `Untitled-${n}`;
-	const newTab: Tab = {
-		id: nextId(),
-		type: 'file',
-		label,
-		filePath: `untitled:${label}`,
-		unsaved: true
-	};
-
-	updateGroupTabs(targetGroupId, (tabs) => ({
-		tabs: [...tabs, newTab],
-		activeTabId: newTab.id
-	}));
-}
-
 export function openChatTab(chatId?: string, targetGroupId?: string): void {
 	const ws = get(currentWorkspace);
 	if (!ws) return;
@@ -1519,88 +1381,6 @@ export function setHomeActiveGroup(groupId: string): void {
 	);
 }
 
-export function setFileBrowserCwd(cwd: string): void {
-	currentWorkspace.update((ws) => (ws ? { ...ws, fileBrowserCwd: cwd } : ws));
-}
-
-export function markTabUnsaved(tabId: string, unsaved: boolean): void {
-	currentWorkspace.update((ws) => {
-		if (!ws) return ws;
-		return {
-			...ws,
-			groups: ws.groups.map((g) => ({
-				...g,
-				tabs: g.tabs.map((t) => (t.id === tabId ? { ...t, unsaved } : t))
-			}))
-		};
-	});
-}
-
-export function updateTabFilePath(tabId: string, newPath: string): void {
-	const name = getPathDisplayName(newPath, newPath);
-	currentWorkspace.update((ws) => {
-		if (!ws) return ws;
-		return {
-			...ws,
-			groups: ws.groups.map((g) => ({
-				...g,
-				tabs: g.tabs.map((t) =>
-					t.id === tabId ? { ...t, filePath: newPath, label: name, unsaved: false } : t
-				)
-			}))
-		};
-	});
-}
-
-export function clearTabEdit(tabId: string): void {
-	currentWorkspace.update((ws) => {
-		if (!ws) return ws;
-		return {
-			...ws,
-			groups: ws.groups.map((g) => ({
-				...g,
-				tabs: g.tabs.map((t) => {
-					if (t.id !== tabId || !t.edit) return t;
-					const next = { ...t };
-					delete next.edit;
-					return next;
-				})
-			}))
-		};
-	});
-}
-
-// ── Split / Editor Group actions ────────────────────────────────
-
-/** Open a file in a new editor group. */
-export function openInSplit(filePath: string, direction?: SplitDirection): void {
-	const ws = get(currentWorkspace);
-	if (!ws) return;
-
-	const dir = direction ?? ws.splitDirection ?? 'horizontal';
-
-	// Create a new group with this file
-	const name = getPathDisplayName(filePath, filePath);
-	const newTab: Tab = { id: nextId(), type: 'file', label: name, filePath };
-	const newGroup: EditorGroup = {
-		id: nextId(),
-		tabs: [newTab],
-		activeTabId: newTab.id
-	};
-
-	currentWorkspace.update((ws) => {
-		if (!ws) return ws;
-		return {
-			...ws,
-			groups: [...ws.groups, newGroup],
-			activeGroupId: newGroup.id,
-			layout: splitLayout(ws.layout, ws.activeGroupId, newGroup.id, dir),
-			splitDirection: dir,
-			splitRatio: ws.splitRatio ?? 0.5
-		};
-	});
-}
-
 /** Split the current active tab into a new group */
 export function splitCurrentTab(direction?: SplitDirection): void {
 	const ws = get(currentWorkspace);
@@ -1740,7 +1520,7 @@ function moveTabToGroupInState<T extends SplitEditorState>(
 	let newGroups = state.groups.map((g) => {
 		if (g.id === fromGroupId) {
 			const newTabs = g.tabs.filter((t) => t.id !== tabId);
-			const newActiveId = g.activeTabId === tabId ? (newTabs[0]?.id ?? 'files') : g.activeTabId;
+			const newActiveId = g.activeTabId === tabId ? (newTabs[0]?.id ?? '') : g.activeTabId;
 			return { ...g, tabs: newTabs, activeTabId: newActiveId };
 		}
 		if (g.id === toGroupId) {

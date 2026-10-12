@@ -4,7 +4,7 @@
 	import UploadPreviewModal from './UploadPreviewModal.svelte';
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import { fileIconName } from '$lib/utils/fileIcon';
-	import { openFileTab, openDirectoryAsSession } from '$lib/stores';
+	import { openDirectoryAsSession } from '$lib/stores';
 	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
 
@@ -118,19 +118,19 @@
 							content={segment.value}
 						/>{:else}{@const isDir = segment.path.endsWith('/')}{@const cleanPath = isDir
 							? segment.path.slice(0, -1)
-							: segment.path}<button
+							: segment.path}{#if isDir}<button
 							class="inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-400 rounded px-1.5 py-px mx-0.5 text-xs font-mono align-baseline border-none cursor-pointer hover:bg-blue-500/20 transition-colors"
 							title={cleanPath}
 							onclick={(e) => {
 								e.preventDefault();
-								if (isDir) openDirectoryAsSession(cleanPath);
-								else openFileTab(cleanPath);
+								openDirectoryAsSession(cleanPath);
 							}}
-							><Icon
-								name={isDir ? 'folder' : fileIconName(segment.label, 'file')}
-								size={11}
-							/>{segment.label}</button
-						>{/if}{/each}
+							><Icon name="folder" size={11} />{segment.label}</button
+						>{:else}<span
+							class="inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-400 rounded px-1.5 py-px mx-0.5 text-xs font-mono align-baseline"
+							title={cleanPath}
+							><Icon name={fileIconName(segment.label, 'file')} size={11} />{segment.label}</span
+						>{/if}{/if}{/each}
 			</div>
 		</div>
 	</div>
