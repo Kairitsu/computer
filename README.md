@@ -239,28 +239,6 @@ curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh |
 - 不要在公网上用明文 HTTP 访问，优先使用 Tailscale 这类私有网络，或者加上 HTTPS；
 - 重要的文件提前备份。AI Agent 会改文件、删文件、执行命令，出了问题很难挽回。
 
-## 常见问题
-
-**输入框上方一直显示“没有可用模型”？**
-
-多半是 Grok CLI 还没登录，去“设置 → 用量”登录一下。如果还是不行，打开“设置 → 代理”，看看 Grok 的检测状态。找不到 `grok` 命令的话，可以在那里手动填写它的完整路径，比如 `/home/alice/.local/bin/grok`。
-
-**点「检查更新」时提示无法在应用内更新？**
-
-应用内更新要求代码目录是一个 git 仓库，并且程序是从这个目录里装的（一键安装和上面的手动安装都是这样）。如果是用 wheel 包或者 `pip install .` 装的，用一键安装脚本重新装一次就好，`~/.cptr` 里的数据不受影响。
-
-**能用 Docker 部署吗？**
-
-仓库里的 `Dockerfile` 是原版留下来的，镜像里没有 Grok CLI，暂时不建议用。
-
-**Windows 能用吗？**
-
-目前没有在 Windows 上测试过。推荐用 Linux 服务器，或者在 Windows 上通过 WSL 运行。
-
-**本地开发怎么跑？**
-
-构建好前端以后运行 `./dev.sh`（需要 uv）。它会以热重载模式启动在 9741 端口，数据放在项目目录下的 `.cptr` 里。
-
 ## 法律声明
 
 - **原项目与版权。** 本项目基于 [Open WebUI Computer](https://github.com/open-webui/computer) 修改而来。原项目 Copyright © 2026 Open WebUI, Inc.，保留所有权利，按 Open Use License 授权。该许可证完整纳入了 Elastic License 2.0（ELv2），并附加了“署名保留”条款，全文见 [LICENSE](LICENSE)。本仓库的全部内容，包括我的修改，同样按照这份许可证提供。应用内“设置 → 通用”中保留了原项目的许可证与版权信息。

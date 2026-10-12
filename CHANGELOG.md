@@ -4,6 +4,13 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [1.4.7] - 2026-10-12
+
+### Removed
+
+- **删掉用不上的 Dockerfile** 仓库里原版留下来的 Dockerfile 已删除。现在用一键脚本或手动用 git 和 uv 安装，不靠这个镜像。已经在跑的服务不用重装。
+- **说明里去掉「常见问题」** 安装文档末尾整段常见问题已删掉。安装、更新、安全提醒和法律声明都还在。
+
 ## [1.4.6] - 2026-10-12
 
 ### Removed
