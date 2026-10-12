@@ -11,7 +11,6 @@ from cptr.models.chats import (
     internal_status,
     is_internal_chat,
 )
-from cptr.models.automations import Automation, AutomationRun
 
 __all__ = [
     "Base",
@@ -25,6 +24,4 @@ __all__ = [
     "ChatMessage",
     "internal_status",
     "is_internal_chat",
-    "Automation",
-    "AutomationRun",
 ]

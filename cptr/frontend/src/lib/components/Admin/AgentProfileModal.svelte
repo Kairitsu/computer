@@ -33,38 +33,16 @@
 			command: draft.command.trim() || defaultCommand(draft.agent),
 			home: draft.home?.trim() || null,
 			models,
-			default_model: defaultModel,
-			launch_args: draft.launch_args?.trim() || '',
-			api_endpoint: draft.api_endpoint?.trim() || '',
-			server_url: draft.server_url?.trim() || '',
-			server_password: draft.server_password?.trim() || ''
+			default_model: defaultModel
 		};
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return {
-			codex: 'codex',
-			claude_code: 'claude',
-			cursor: 'agent',
-			grok: 'grok',
-			opencode: 'opencode',
-			cline: 'cline',
-			gemini: 'gemini',
-			pi: 'pi'
-		}[agent];
+		return { grok: 'grok' }[agent];
 	}
 
 	function defaultName(agent: AgentProfile['agent']): string {
-		return {
-			codex: 'Codex',
-			claude_code: 'Claude Code',
-			cursor: 'Cursor',
-			grok: 'Grok',
-			opencode: 'OpenCode',
-			cline: 'Cline',
-			gemini: 'Gemini',
-			pi: 'Pi'
-		}[agent];
+		return { grok: 'Grok' }[agent];
 	}
 </script>
 
@@ -112,23 +90,12 @@
 							name: defaultName(agent),
 							command: defaultCommand(agent),
 							models: [],
-							default_model: '',
-							approval_mode: draft.approval_mode || 'auto',
-							sandbox_mode: draft.sandbox_mode || 'workspace-write',
-							permission_mode: draft.permission_mode || 'default',
-							launch_args: draft.launch_args || ''
+							default_model: ''
 						};
 					}}
 					class="settings-field mt-1 w-full"
 				>
-					<option value="codex">Codex</option>
-					<option value="claude_code">Claude Code</option>
-					<option value="cursor">Cursor</option>
 					<option value="grok">Grok</option>
-					<option value="opencode">OpenCode</option>
-					<option value="cline">Cline</option>
-					<option value="gemini">Gemini</option>
-					<option value="pi">Pi</option>
 				</select>
 			</div>
 		</div>
@@ -178,74 +145,6 @@
 			class="settings-field mt-1 w-full font-mono"
 		/>
 
-		{#if draft.agent === 'claude_code'}
-			<label
-				for={`${fieldPrefix}-launch-args`}
-				class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2"
-			>
-				{$t('admin.agentsLaunchArgs')}
-			</label>
-			<input
-				id={`${fieldPrefix}-launch-args`}
-				type="text"
-				bind:value={draft.launch_args}
-				autocomplete="off"
-				spellcheck="false"
-				class="settings-field mt-1 w-full font-mono"
-			/>
-		{/if}
-
-		{#if draft.agent === 'cursor'}
-			<label
-				for={`${fieldPrefix}-api-endpoint`}
-				class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2"
-			>
-				{$t('admin.agentsApiEndpoint')}
-			</label>
-			<input
-				id={`${fieldPrefix}-api-endpoint`}
-				type="text"
-				bind:value={draft.api_endpoint}
-				placeholder={$t('admin.optional')}
-				autocomplete="off"
-				spellcheck="false"
-				class="settings-field mt-1 w-full font-mono"
-			/>
-		{/if}
-
-		{#if draft.agent === 'opencode'}
-			<label
-				for={`${fieldPrefix}-server-url`}
-				class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2"
-			>
-				{$t('admin.agentsServerUrl')}
-			</label>
-			<input
-				id={`${fieldPrefix}-server-url`}
-				type="text"
-				bind:value={draft.server_url}
-				placeholder={$t('admin.optional')}
-				autocomplete="off"
-				spellcheck="false"
-				class="settings-field mt-1 w-full font-mono"
-			/>
-
-			<label
-				for={`${fieldPrefix}-server-password`}
-				class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-2"
-			>
-				{$t('admin.agentsServerPassword')}
-			</label>
-			<input
-				id={`${fieldPrefix}-server-password`}
-				type="password"
-				bind:value={draft.server_password}
-				placeholder={$t('admin.optional')}
-				autocomplete="off"
-				spellcheck="false"
-				class="settings-field mt-1 w-full font-mono"
-			/>
-		{/if}
 
 		<div class="flex items-center justify-between mt-3">
 			<div class="flex items-center gap-3">

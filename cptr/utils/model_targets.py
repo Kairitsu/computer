@@ -15,7 +15,7 @@ from cptr.utils.agents.models import parse_agent_model_id
 class AgentModelTarget:
     kind: Literal["agent"]
     profile_id: str
-    agent: Literal["codex", "claude_code", "cursor", "grok", "opencode", "cline", "gemini", "pi"]
+    agent: Literal["grok"]
     model: str
     full_model_id: str
     config: dict[str, Any]

@@ -35,15 +35,7 @@ export const updateChatRetention = (days: number) =>
 
 // ── Agents ─────────────────────────────────────────────────
 
-export type AgentType =
-	| 'codex'
-	| 'claude_code'
-	| 'cursor'
-	| 'grok'
-	| 'opencode'
-	| 'cline'
-	| 'gemini'
-	| 'pi';
+export type AgentType = 'grok';
 export type AgentMode = 'auto' | 'enabled' | 'disabled';
 export type AgentStatus = 'ready' | 'not_found' | 'missing_dependency' | 'auth_unknown' | 'error';
 
@@ -56,13 +48,6 @@ export interface AgentProfile {
 	home: string | null;
 	models: string[];
 	default_model: string;
-	approval_mode?: 'ask' | 'auto' | 'full';
-	sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
-	permission_mode?: 'default' | 'accept_edits' | 'bypass_permissions';
-	launch_args?: string;
-	api_endpoint?: string;
-	server_url?: string;
-	server_password?: string;
 }
 
 export interface AgentsResponseProfile {

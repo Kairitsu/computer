@@ -56,11 +56,7 @@
 			command: profile.command.trim() || defaultCommand(profile.agent),
 			home: profile.home?.trim() || null,
 			models: nextModels,
-			default_model: defaultModel,
-			launch_args: profile.launch_args?.trim() || '',
-			api_endpoint: profile.api_endpoint?.trim() || '',
-			server_url: profile.server_url?.trim() || '',
-			server_password: profile.server_password?.trim() || ''
+			default_model: defaultModel
 		};
 	}
 
@@ -72,7 +68,7 @@
 		deletedProfile = false;
 	}
 
-	function newProfile(agent: AgentProfile['agent'] = 'codex'): AgentProfile {
+	function newProfile(agent: AgentProfile['agent'] = 'grok'): AgentProfile {
 		const base = defaultProfileId(agent);
 		let suffix = profiles.length + 1;
 		let id = `${base}-${suffix}`;
@@ -88,14 +84,7 @@
 			command: defaultCommand(agent),
 			home: null,
 			models: [],
-			default_model: '',
-			approval_mode: 'auto',
-			sandbox_mode: 'workspace-write',
-			permission_mode: 'default',
-			launch_args: '',
-			api_endpoint: '',
-			server_url: '',
-			server_password: ''
+			default_model: ''
 		};
 	}
 
@@ -111,33 +100,15 @@
 	}
 
 	function defaultProfileId(agent: AgentProfile['agent']): string {
-		return agent === 'claude_code' ? 'claude-code' : agent;
+		return agent;
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return {
-			codex: 'codex',
-			claude_code: 'claude',
-			cursor: 'agent',
-			grok: 'grok',
-			opencode: 'opencode',
-			cline: 'cline',
-			gemini: 'gemini',
-			pi: 'pi'
-		}[agent];
+		return { grok: 'grok' }[agent];
 	}
 
 	function agentLabel(agent: AgentProfile['agent']): string {
-		return {
-			codex: 'Codex',
-			claude_code: 'Claude Code',
-			cursor: 'Cursor',
-			grok: 'Grok',
-			opencode: 'OpenCode',
-			cline: 'Cline',
-			gemini: 'Gemini',
-			pi: 'Pi'
-		}[agent];
+		return { grok: 'Grok' }[agent];
 	}
 
 	function statusKey(profile: AgentProfile): string {

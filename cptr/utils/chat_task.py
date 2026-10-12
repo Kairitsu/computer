@@ -1064,14 +1064,7 @@ async def run_chat_task(
 
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
-        from cptr.utils.agents.claude_code import run_claude_code_agent
-        from cptr.utils.agents.cline import run_cline_agent
-        from cptr.utils.agents.codex import run_codex_agent
-        from cptr.utils.agents.cursor import run_cursor_agent
-        from cptr.utils.agents.gemini import run_gemini_agent
         from cptr.utils.agents.grok import run_grok_agent
-        from cptr.utils.agents.opencode import run_opencode_agent
-        from cptr.utils.agents.pi import run_pi_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
         identity = await identity_for_context({"request": request, "user_id": user_id})
@@ -1114,14 +1107,7 @@ async def run_chat_task(
                     resume_state = candidate
 
         runners = {
-            "codex": run_codex_agent,
-            "claude_code": run_claude_code_agent,
-            "cursor": run_cursor_agent,
             "grok": run_grok_agent,
-            "opencode": run_opencode_agent,
-            "cline": run_cline_agent,
-            "gemini": run_gemini_agent,
-            "pi": run_pi_agent,
         }
         runner = runners.get(agent_target.agent)
         if runner is None:

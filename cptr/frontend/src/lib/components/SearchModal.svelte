@@ -57,7 +57,7 @@
 		| { kind: 'content-match'; match: FileMatch; content: ContentMatch };
 
 	// Determine active workspace from the URL, not the store.
-	// When on /scheduled or other non-workspace pages, $currentWorkspace
+	// When on a page that is not a workspace, $currentWorkspace
 	// retains the last workspace but we should search across all.
 	const urlWorkspacePath = $derived($page.url.searchParams.get('workspace'));
 	const effectiveWorkspace = $derived(urlWorkspacePath ? $currentWorkspace : null);

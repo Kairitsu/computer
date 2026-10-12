@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 COOKIE_NAME = "cptr_session"
 
 # Coding agents that accept a per-turn reasoning effort (see utils/agents).
-REASONING_EFFORT_AGENTS = frozenset({"codex", "grok"})
+REASONING_EFFORT_AGENTS = frozenset({"grok"})
 
 
 def _get_user(request: Request) -> str:

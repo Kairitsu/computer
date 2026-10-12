@@ -4,6 +4,13 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [1.4.6] - 2026-10-12
+
+### Removed
+
+- **只保留 Grok** 设置里的代理不能再添加 Codex、Claude Code、Cursor、OpenCode、Cline、Gemini 或 Pi。已经配好的 Grok 还在，对话、模型名和思考强度都不变。
+- **去掉定时任务** 「已计划」页面、到点自动执行提示词的后台任务，以及对应的接口都去掉了。现有的聊天、工作区和检查更新不受影响。
+
 ## [1.4.5] - 2026-10-12
 
 ### Changed

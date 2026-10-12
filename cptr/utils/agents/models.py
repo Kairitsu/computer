@@ -14,41 +14,6 @@ CONFIG_KEY_AGENT_PROFILES = "agents.profiles"
 
 DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
     {
-        "id": "codex",
-        "agent": "codex",
-        "name": "Codex",
-        "mode": "auto",
-        "command": "codex",
-        "home": None,
-        "models": [],
-        "default_model": "",
-        "approval_mode": "auto",
-        "sandbox_mode": "workspace-write",
-    },
-    {
-        "id": "claude-code",
-        "agent": "claude_code",
-        "name": "Claude Code",
-        "mode": "auto",
-        "command": "claude",
-        "home": None,
-        "models": [],
-        "default_model": "",
-        "permission_mode": "default",
-        "launch_args": "",
-    },
-    {
-        "id": "cursor",
-        "agent": "cursor",
-        "name": "Cursor",
-        "mode": "auto",
-        "command": "agent",
-        "home": None,
-        "models": [],
-        "default_model": "",
-        "api_endpoint": "",
-    },
-    {
         "id": "grok",
         "agent": "grok",
         "name": "Grok",
@@ -58,73 +23,13 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
         "models": [],
         "default_model": "",
     },
-    {
-        "id": "opencode",
-        "agent": "opencode",
-        "name": "OpenCode",
-        "mode": "auto",
-        "command": "opencode",
-        "home": None,
-        "models": [],
-        "default_model": "",
-        "server_url": "",
-        "server_password": "",
-    },
-    {
-        "id": "cline",
-        "agent": "cline",
-        "name": "Cline",
-        "mode": "auto",
-        "command": "cline",
-        "home": None,
-        "models": [],
-        "default_model": "",
-    },
-    {
-        "id": "gemini",
-        "agent": "gemini",
-        "name": "Gemini",
-        "mode": "auto",
-        "command": "gemini",
-        "home": None,
-        "models": [],
-        "default_model": "",
-    },
-    {
-        "id": "pi",
-        "agent": "pi",
-        "name": "Pi",
-        "mode": "auto",
-        "command": "pi",
-        "home": None,
-        "models": [],
-        "default_model": "",
-    },
 ]
 
 _PROFILE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_VALID_AGENTS = {"codex", "claude_code", "cursor", "grok", "opencode", "cline", "gemini", "pi"}
+_VALID_AGENTS = {"grok"}
 _VALID_MODES = {"auto", "enabled", "disabled"}
-_VALID_CODEX_APPROVAL = {"ask", "auto", "full"}
-_VALID_CODEX_SANDBOX = {"read-only", "workspace-write", "danger-full-access"}
-_VALID_CLAUDE_PERMISSION = {"default", "accept_edits", "bypass_permissions"}
 _AGENT_DEFAULTS: dict[str, dict[str, str]] = {
-    "codex": {"name": "Codex", "command": "codex", "model": ""},
-    "claude_code": {
-        "name": "Claude Code",
-        "command": "claude",
-        "model": "",
-    },
-    "cursor": {
-        "name": "Cursor",
-        "command": "agent",
-        "model": "",
-    },
     "grok": {"name": "Grok", "command": "grok", "model": ""},
-    "opencode": {"name": "OpenCode", "command": "opencode", "model": ""},
-    "cline": {"name": "Cline", "command": "cline", "model": ""},
-    "gemini": {"name": "Gemini", "command": "gemini", "model": ""},
-    "pi": {"name": "Pi", "command": "pi", "model": ""},
 }
 
 
@@ -140,9 +45,7 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
 
     agent = str(profile.get("agent") or "").strip()
     if agent not in _VALID_AGENTS:
-        raise HTTPException(
-            400, "agent must be codex, claude_code, cursor, grok, opencode, cline, gemini, or pi"
-        )
+        raise HTTPException(400, "agent must be grok")
     defaults = _AGENT_DEFAULTS[agent]
 
     mode = str(profile.get("mode") or "auto").strip()
@@ -188,40 +91,6 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
         "models": normalized_models,
         "default_model": default_model,
     }
-
-    if agent == "codex":
-        approval_mode = str(profile.get("approval_mode") or "auto").strip()
-        sandbox_mode = str(profile.get("sandbox_mode") or "workspace-write").strip()
-        if approval_mode not in _VALID_CODEX_APPROVAL:
-            raise HTTPException(400, "codex approval_mode must be ask, auto, or full")
-        if sandbox_mode not in _VALID_CODEX_SANDBOX:
-            raise HTTPException(
-                400, "codex sandbox_mode must be read-only, workspace-write, or danger-full-access"
-            )
-        normalized.update(
-            {
-                "approval_mode": approval_mode,
-                "sandbox_mode": sandbox_mode,
-            }
-        )
-    elif agent == "claude_code":
-        permission_mode = str(profile.get("permission_mode") or "default").strip()
-        if permission_mode not in _VALID_CLAUDE_PERMISSION:
-            raise HTTPException(
-                400, "claude permission_mode must be default, accept_edits, or bypass_permissions"
-            )
-        normalized.update(
-            {
-                "permission_mode": permission_mode,
-                "launch_args": str(profile.get("launch_args") or "").strip(),
-            }
-        )
-    elif agent == "cursor":
-        normalized["api_endpoint"] = str(profile.get("api_endpoint") or "").strip()
-    elif agent == "opencode":
-        normalized["server_url"] = str(profile.get("server_url") or "").strip()
-        normalized["server_password"] = str(profile.get("server_password") or "").strip()
-
     return normalized
 
 
@@ -235,6 +104,10 @@ def normalize_agent_profiles(raw_profiles: Any) -> list[dict[str, Any]]:
     for profile in raw_profiles:
         if not isinstance(profile, dict):
             raise HTTPException(400, "agent profiles must be objects")
+        # Retired runners (Codex, Claude Code, and the rest) are ignored so an
+        # old saved list still loads the Grok profile.
+        if str(profile.get("agent") or "").strip() not in _VALID_AGENTS:
+            continue
         profiles.append(normalize_agent_profile(profile))
 
     seen: set[str] = set()

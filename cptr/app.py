@@ -10,7 +10,6 @@ from fastapi.staticfiles import StaticFiles
 from cptr.routers import (
     admin_router,
     auth_router,
-    automations_router,
     chat_router,
     events_router,
     files_router,
@@ -61,11 +60,6 @@ async def lifespan(app: FastAPI):
 
     await warm_model_cache(app.state)
 
-    # Start automation scheduler
-    from cptr.utils.automations import scheduler_worker_loop
-
-    app.state.scheduler_task = asyncio.create_task(scheduler_worker_loop(app))
-
     # Delete chats past the history limit (Settings → General).
     from cptr.utils.chat_retention import retention_loop
 
@@ -74,12 +68,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for name in ("scheduler_task", "retention_task"):
-            task = getattr(app.state, name, None)
-            if task:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+        task = getattr(app.state, "retention_task", None)
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
         # Stop the Grok processes chats keep between turns.
         try:
@@ -240,7 +233,6 @@ async def get_config():
 # Routers
 app.include_router(admin_router)
 app.include_router(auth_router)
-app.include_router(automations_router)
 app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)
