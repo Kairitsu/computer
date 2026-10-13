@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Icon from '../Icon.svelte';
-	import MarkdownRenderer from '$lib/components/markdown/MarkdownRenderer.svelte';
 	import UploadPreviewModal from './UploadPreviewModal.svelte';
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import { fileIconName } from '$lib/utils/fileIcon';
@@ -114,9 +113,9 @@
 	<div class="flex justify-end">
 		<div class="max-w-[90%] px-4 py-2 rounded-3xl app-interactive-active">
 			<div class="text-[0.8125rem] leading-relaxed text-gray-900 dark:text-gray-200 break-words">
-				{#each parsedContent as segment}{#if segment.type === 'text'}<MarkdownRenderer
-							content={segment.value}
-						/>{:else}{@const isDir = segment.path.endsWith('/')}{@const cleanPath = isDir
+				{#each parsedContent as segment}{#if segment.type === 'text'}<span
+							class="whitespace-pre-wrap">{segment.value}</span
+						>{:else}{@const isDir = segment.path.endsWith('/')}{@const cleanPath = isDir
 							? segment.path.slice(0, -1)
 							: segment.path}{#if isDir}<button
 							class="inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-400 rounded px-1.5 py-px mx-0.5 text-xs font-mono align-baseline border-none cursor-pointer hover:bg-blue-500/20 transition-colors"

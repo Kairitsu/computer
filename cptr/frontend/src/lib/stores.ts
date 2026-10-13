@@ -29,6 +29,7 @@ import type { UpdateCheck } from '$lib/apis/update';
 import { changeLocale, i18next } from '$lib/i18n';
 import { requestConfirm } from '$lib/stores/confirm';
 import { streamingChatTabs } from '$lib/stores/chat';
+import type { ComposerNewline, ComposerSendKey } from '$lib/composerKeys';
 import { keybindings, loadKeybindings } from '$lib/stores/keybindings';
 import { defaultPwaPreferences, type PwaPreferences } from '$lib/intents/types';
 import { getPathDisplayName, isSupportedWorkspacePath } from '$lib/utils/paths';
@@ -130,6 +131,10 @@ export interface UserPreferences {
 	keybindings?: Record<string, string>; // user-customised keyboard shortcuts
 	version?: string; // last seen app version for changelog
 	showUpdateToast?: boolean; // show version update notifications (default true)
+	/** Key that inserts a line break in the session composer. Default: Shift+Enter. */
+	composerNewline?: ComposerNewline;
+	/** Send key when Enter inserts the line break. Default: Ctrl+Enter. */
+	composerSendKey?: ComposerSendKey;
 	pwa?: PwaPreferences;
 	textScale?: number | null;
 	widescreenMode?: boolean;
@@ -342,6 +347,10 @@ export const showSearch = writable(false);
 export const stateLoaded = writable(false);
 export type StreamingBehavior = 'queue' | 'interrupt';
 export const streamingBehavior = writable<StreamingBehavior>('queue');
+/** Session composer: which chord inserts a line break. Enter sends unless this is 'enter'. */
+export const composerNewline = writable<ComposerNewline>('shift-enter');
+/** Used only when composerNewline is 'enter'. */
+export const composerSendKey = writable<ComposerSendKey>('ctrl-enter');
 export const pwaPreferences = writable<PwaPreferences>(defaultPwaPreferences);
 export const themeConfig = writable<ThemeConfig | null>(null);
 export const textScale = writable<number | null>(null);
@@ -456,6 +465,8 @@ function persistPreferences(): void {
 			keybindings: get(keybindings),
 			version: get(lastSeenVersion),
 			showUpdateToast: get(showUpdateToastPref),
+			composerNewline: get(composerNewline),
+			composerSendKey: get(composerSendKey),
 			pwa: get(pwaPreferences),
 			textScale: get(textScale),
 			widescreenMode: get(widescreenMode),
@@ -510,6 +521,12 @@ function subscribeForPersistence() {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	showUpdateToastPref.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	composerNewline.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	composerSendKey.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	pwaPreferences.subscribe(() => {
@@ -582,6 +599,17 @@ export async function loadPreferences(): Promise<void> {
 		if (prefs.version) lastSeenVersion.set(prefs.version as string);
 		if (prefs.showUpdateToast !== undefined)
 			showUpdateToastPref.set(prefs.showUpdateToast as boolean);
+		if (
+			prefs.composerNewline === 'shift-enter' ||
+			prefs.composerNewline === 'ctrl-enter' ||
+			prefs.composerNewline === 'alt-enter' ||
+			prefs.composerNewline === 'enter'
+		) {
+			composerNewline.set(prefs.composerNewline);
+		}
+		if (prefs.composerSendKey === 'ctrl-enter' || prefs.composerSendKey === 'alt-enter') {
+			composerSendKey.set(prefs.composerSendKey);
+		}
 		textScale.set(
 			typeof appearance.textScale === 'number'
 				? appearance.textScale

@@ -3,12 +3,13 @@
 	import { mount, unmount } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import StarterKit from '@tiptap/starter-kit';
-	import { Markdown } from '@tiptap/markdown';
 	import Placeholder from '@tiptap/extension-placeholder';
-	import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-	import { all, createLowlight } from 'lowlight';
+	import { get } from 'svelte/store';
 
-	import { createFileMention, extractMentionedFiles, type FileMentionAttrs } from './FileMention';
+	import { createFileMention, type FileMentionAttrs } from './FileMention';
+	import { canonicalComposerText, plainTextSlice, plainTextToDoc } from '$lib/composerPlainText';
+	import { enterAction } from '$lib/composerKeys';
+	import { composerNewline, composerSendKey } from '$lib/stores';
 	import { createSlashCommandMention } from './SlashCommandMention';
 	import FileSuggestionPopup from './FileSuggestionPopup.svelte';
 	import { searchFiles } from '$lib/apis/files';
@@ -167,14 +168,6 @@
 			window.matchMedia('(hover: none) and (pointer: coarse)').matches
 		);
 	}
-
-	// ── Lowlight setup ──────────────────────────────
-	const lowlight = createLowlight(all);
-	const _origHighlight = lowlight.highlight.bind(lowlight);
-	lowlight.highlight = (lang: string, value: string, opts?: Record<string, unknown>) => {
-		if (!lowlight.registered(lang)) return lowlight.highlightAuto(value);
-		return _origHighlight(lang, value, opts);
-	};
 
 	// ── File Uploads ────────────────────────────────
 	let attachedUploads = $state<
@@ -487,52 +480,73 @@
 		editor = new Editor({
 			element: editorEl,
 			extensions: [
+				// Plain text only: no bold, italic, headings, lists, code, or links.
 				StarterKit.configure({
+					bold: false,
+					italic: false,
+					strike: false,
+					code: false,
 					codeBlock: false,
-					heading: { levels: [1, 2, 3] }
+					heading: false,
+					bulletList: false,
+					orderedList: false,
+					listItem: false,
+					listKeymap: false,
+					blockquote: false,
+					horizontalRule: false,
+					link: false,
+					underline: false,
+					hardBreak: false,
+					trailingNode: false
 				}),
-				Markdown,
 				Placeholder.configure({ placeholder }),
-				CodeBlockLowlight.configure({ lowlight }),
 				fileMention,
 				slashCommandMention
 			],
-			content: inputText || '',
-			contentType: inputText ? 'markdown' : undefined,
+			content: plainTextToDoc(inputText || ''),
 			autofocus: true,
 			editorProps: {
 				attributes: {
 					class: 'chat-prosemirror',
 					spellcheck: 'true'
 				},
-				handleKeyDown: (view, event) => {
-					if (event.key === 'Enter' && isMobileInput()) return false;
-
-					if (event.key === 'Enter' && !event.shiftKey) {
-						// Don't send while suggestion popup is open — let it confirm selection
-						if (popupComponent) return false;
-						const { state } = view;
-						const head = state.selection.$head;
-
-						let inside = false;
-						for (let d = head.depth; d > 0; d--) {
-							const name = head.node(d).type.name;
-							if (['codeBlock', 'bulletList', 'orderedList', 'listItem'].includes(name)) {
-								inside = true;
-								break;
-							}
-						}
-						if (!inside) {
-							event.preventDefault();
-							handleSubmit();
-							return true;
-						}
+				clipboardTextParser: (text, _context, _plain, view) =>
+					plainTextSlice(view.state.schema, text),
+				handlePaste: (view, event) => {
+					// Files are uploaded by the composer's own paste handler.
+					const items = event.clipboardData?.items;
+					if (items && Array.from(items).some((item) => item.kind === 'file')) return false;
+					const text = event.clipboardData?.getData('text/plain');
+					if (!text) return false;
+					event.preventDefault();
+					view.dispatch(
+						view.state.tr
+							.replaceSelection(plainTextSlice(view.state.schema, text))
+							.scrollIntoView()
+					);
+					return true;
+				},
+				handleKeyDown: (_view, event) => {
+					const action = enterAction(event, get(composerNewline), get(composerSendKey), {
+						mobile: isMobileInput(),
+						suggestionOpen: !!popupComponent || slashSuggestionItems.length > 0
+					});
+					if (action === 'newline') {
+						const inserted = editor?.chain().focus().splitBlock().run() ?? false;
+						if (!inserted) return false;
+						event.preventDefault();
+						return true;
+					}
+					if (action === 'send') {
+						event.preventDefault();
+						handleSubmit();
+						return true;
 					}
 					return false;
 				}
 			},
 			onUpdate: ({ editor: e }) => {
-				inputText = (e as any).getMarkdown() || '';
+				inputText = e.getText({ blockSeparator: '\n' });
 			}
 		});
 	});
@@ -543,17 +557,19 @@
 		editor = null;
 	});
 
-	// Sync external inputText changes (e.g. cleared after send)
+	function editorPlainText(): string {
+		if (!editor || editor.isDestroyed) return '';
+		return editor.getText({ blockSeparator: '\n' });
+	}
+
+	// Sync external inputText changes (e.g. cleared after send, or a message being edited).
 	$effect(() => {
 		if (!editor || editor.isDestroyed) return;
-		const editorMd = (editor as any).getMarkdown() || '';
-		if (inputText !== editorMd) {
-			if (inputText === '') {
-				editor.commands.clearContent();
-			} else {
-				// Markdown, like the initial content: keeps line breaks and file mentions.
-				editor.commands.setContent(inputText, { contentType: 'markdown' });
-			}
+		if (canonicalComposerText(inputText) === editorPlainText()) return;
+		if (inputText === '') {
+			editor.commands.clearContent(false);
+		} else {
+			editor.commands.setContent(plainTextToDoc(inputText), { emitUpdate: false });
 		}
 	});
 
@@ -1263,7 +1279,7 @@
 	/* ── ProseMirror editor ───────────────────────── */
 
 	.chat-editor-mount :global(.chat-prosemirror) {
-		@apply pt-2.5 pb-2 px-1 min-h-6 max-h-96 overflow-y-auto text-[0.8125rem] leading-relaxed outline-none break-words;
+		@apply whitespace-pre-wrap pt-2.5 pb-2 px-1 min-h-6 max-h-96 overflow-y-auto text-[0.8125rem] leading-relaxed outline-none break-words;
 		font-size: 0.8125rem;
 		color: var(--app-fg);
 	}
@@ -1275,98 +1291,8 @@
 		color: color-mix(in oklab, var(--app-fg) 48%, var(--app-bg));
 	}
 
-	/* Paragraphs */
+	/* One paragraph per line, with no extra gap between lines. */
 	.chat-editor-mount :global(.chat-prosemirror p) {
-		@apply mb-1;
-	}
-	.chat-editor-mount :global(.chat-prosemirror p:last-child) {
-		@apply mb-0;
-	}
-
-	/* Lists */
-	.chat-editor-mount :global(.chat-prosemirror ul),
-	.chat-editor-mount :global(.chat-prosemirror ol) {
-		@apply mb-1 pl-4.5 text-sm;
-	}
-	.chat-editor-mount :global(.chat-prosemirror ul) {
-		list-style-type: disc;
-	}
-	.chat-editor-mount :global(.chat-prosemirror ol) {
-		list-style-type: decimal;
-	}
-	.chat-editor-mount :global(.chat-prosemirror li) {
-		@apply my-0.5;
-	}
-	.chat-editor-mount :global(.chat-prosemirror li > p) {
-		@apply mb-0.5;
-	}
-
-	/* Inline code */
-	.chat-editor-mount :global(.chat-prosemirror code) {
-		@apply rounded-sm px-1 py-px text-xs font-mono;
-		background: color-mix(in oklab, var(--app-fg) 7%, transparent);
-	}
-
-	/* Code blocks */
-	.chat-editor-mount :global(.chat-prosemirror pre) {
-		@apply rounded-md px-3 py-2 overflow-x-auto my-1 text-xs font-mono;
-		background: color-mix(in oklab, var(--app-fg) 5%, transparent);
-	}
-	.chat-editor-mount :global(.chat-prosemirror pre code) {
-		@apply bg-transparent p-0 rounded-none text-inherit;
-	}
-
-	/* Blockquote */
-	.chat-editor-mount :global(.chat-prosemirror blockquote) {
-		@apply my-1 py-0.5 pl-3 border-l-2;
-		border-color: color-mix(in oklab, var(--app-fg) 18%, transparent);
-		color: color-mix(in oklab, var(--app-fg) 62%, var(--app-bg));
-	}
-
-	/* Strong */
-	.chat-editor-mount :global(.chat-prosemirror strong) {
-		@apply font-semibold;
-	}
-
-	/* Headings */
-	.chat-editor-mount :global(.chat-prosemirror h1) {
-		@apply text-base font-semibold my-1;
-	}
-	.chat-editor-mount :global(.chat-prosemirror h2) {
-		@apply text-sm font-semibold my-1;
-	}
-	.chat-editor-mount :global(.chat-prosemirror h3) {
-		@apply text-[0.8125rem] font-semibold my-1;
-		font-size: 0.8125rem;
-	}
-
-	/* HR */
-	.chat-editor-mount :global(.chat-prosemirror hr) {
-		@apply border-none border-t my-2;
-		border-color: color-mix(in oklab, var(--app-fg) 10%, transparent);
-	}
-
-	/* Syntax highlighting */
-	.chat-editor-mount :global(.hljs-keyword) {
-		color: #c678dd;
-	}
-	.chat-editor-mount :global(.hljs-string) {
-		color: #98c379;
-	}
-	.chat-editor-mount :global(.hljs-number) {
-		color: #d19a66;
-	}
-	.chat-editor-mount :global(.hljs-comment) {
-		color: #5c6370;
-		font-style: italic;
-	}
-	.chat-editor-mount :global(.hljs-function) {
-		color: #61afef;
-	}
-	.chat-editor-mount :global(.hljs-title) {
-		color: #61afef;
-	}
-	.chat-editor-mount :global(.hljs-built_in) {
-		color: #e5c07b;
+		margin: 0;
 	}
 </style>

@@ -3,12 +3,15 @@
 		appVersion,
 		showChangelog,
 		streamingBehavior,
+		composerNewline,
+		composerSendKey,
 		showUpdateToastPref,
 		updateAvailable,
 		updateCheck,
 		showUpdateModal
 	} from '$lib/stores';
 	import type { StreamingBehavior } from '$lib/stores';
+	import type { ComposerNewline, ComposerSendKey } from '$lib/composerKeys';
 	import { t, locale, changeLocale, supportedLocales } from '$lib/i18n';
 	import { session } from '$lib/session';
 	import { toast } from 'svelte-sonner';
@@ -33,6 +36,17 @@
 	}
 
 	let { showPwaSettings = false }: Props = $props();
+
+	const newlineOptions: { value: ComposerNewline; label: string }[] = [
+		{ value: 'shift-enter', label: 'Shift+Enter' },
+		{ value: 'ctrl-enter', label: 'Ctrl+Enter' },
+		{ value: 'alt-enter', label: 'Alt+Enter' },
+		{ value: 'enter', label: 'Enter' }
+	];
+	const sendKeyOptions: { value: ComposerSendKey; label: string }[] = [
+		{ value: 'ctrl-enter', label: 'Ctrl+Enter' },
+		{ value: 'alt-enter', label: 'Alt+Enter' }
+	];
 
 	const REPO_URL = 'https://github.com/Kairitsu/computer';
 
@@ -224,6 +238,52 @@
 		<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 			{$streamingBehavior === 'queue' ? $t('general.queueDesc') : $t('general.interruptDesc')}
 		</p>
+
+		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+			{$t('general.composerNewline')}
+		</h3>
+		<div class="segmented" role="group" aria-label={$t('general.composerNewline')}>
+			{#each newlineOptions as opt (opt.value)}
+				<button
+					type="button"
+					class:active={$composerNewline === opt.value}
+					onclick={() => composerNewline.set(opt.value)}
+				>
+					{opt.label}
+				</button>
+			{/each}
+		</div>
+		<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+			{$composerNewline === 'shift-enter'
+				? $t('general.composerNewlineDescShift')
+				: $composerNewline === 'ctrl-enter'
+					? $t('general.composerNewlineDescCtrl')
+					: $composerNewline === 'alt-enter'
+						? $t('general.composerNewlineDescAlt')
+						: $t('general.composerNewlineDescEnter')}
+		</p>
+
+		{#if $composerNewline === 'enter'}
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+				{$t('general.composerSendKey')}
+			</h3>
+			<div class="segmented" role="group" aria-label={$t('general.composerSendKey')}>
+				{#each sendKeyOptions as opt (opt.value)}
+					<button
+						type="button"
+						class:active={$composerSendKey === opt.value}
+						onclick={() => composerSendKey.set(opt.value)}
+					>
+						{opt.label}
+					</button>
+				{/each}
+			</div>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+				{$composerSendKey === 'alt-enter'
+					? $t('general.composerSendDescAlt')
+					: $t('general.composerSendDescCtrl')}
+			</p>
+		{/if}
 
 		{#if $session?.role === 'admin' && processSettings}
 			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
