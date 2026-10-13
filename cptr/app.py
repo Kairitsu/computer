@@ -255,10 +255,10 @@ async def health():
 
 @app.get("/api/changelog")
 async def get_changelog():
-    """Return parsed CHANGELOG.md as structured JSON (max 5 versions)."""
+    """Return every parsed CHANGELOG.md version, newest first."""
     from cptr.utils.changelog import CHANGELOG
 
-    return {key: CHANGELOG[key] for idx, key in enumerate(CHANGELOG) if idx < 5}
+    return dict(CHANGELOG)
 
 
 # PWA manifest (backend-driven so each instance has its own identity)
