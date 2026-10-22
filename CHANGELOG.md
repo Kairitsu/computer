@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [2.8.0] - 2026-10-22
+
+### Fixed
+
+- **额度里的项目显示原名** 订阅额度下面的分项使用产品原名。网页聊天是 Grok Chat，图片是 Grok Imagine，编程是已经在用的 Grok Build。以后接口里出现新的项目，同样按原名显示。只有编号、对不上名字时，显示这个编号。
+
 ## [2.7.0] - 2026-10-22
 
 ### Fixed

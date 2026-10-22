@@ -36,8 +36,27 @@ EMPTY_GRPC_WEB_FRAME = b"\x00\x00\x00\x00\x00"
 TIMEOUT_SECONDS = 12
 CACHE_SECONDS = 60
 
-PRODUCT_LABELS = {1: "API", 2: "Grok Build", 4: "Other"}
-JSON_PRODUCT_IDS = {"Api": 1, "API": 1, "GrokBuild": 2, "Grok Build": 2, "GrokChat": 4}
+# grok.com usage proto enum. The RPC sends these numbers and no name.
+# 1 API, 2 Grok Build, 3 Grok Plugins, 4 Grok Chat, 5 Grok Imagine, 6 Grok Voice.
+PRODUCT_LABELS = {
+    1: "API",
+    2: "Grok Build",
+    3: "Grok Plugins",
+    4: "Grok Chat",
+    5: "Grok Imagine",
+    6: "Grok Voice",
+}
+
+# Compact wire names (GrokChat, PRODUCT_GROK_BUILD, Api) for the same enum.
+_COMPACT_IDS = {
+    "api": 1,
+    "xaiapi": 1,
+    "grokbuild": 2,
+    "grokplugins": 3,
+    "grokchat": 4,
+    "grokimagine": 5,
+    "grokvoice": 6,
+}
 
 PLAN_CACHE_SECONDS = 30 * 60
 
@@ -255,6 +274,54 @@ def _timestamp(message: bytes) -> int | None:
     return None
 
 
+def _compact_name(name: str) -> str:
+    raw = name.strip()
+    if raw.upper().startswith("PRODUCT_"):
+        raw = raw[len("PRODUCT_") :]
+    return "".join(ch for ch in raw.lower() if ch.isalnum())
+
+
+def _humanize(raw: str) -> str:
+    """Split a wire name into words: GrokAppBuilder → Grok App Builder."""
+    chars: list[str] = []
+    previous = ""
+    for ch in raw.replace("-", " ").replace("_", " "):
+        if ch.isupper() and previous.islower():
+            chars.append(" ")
+        chars.append(ch)
+        previous = ch
+    words = []
+    for word in "".join(chars).split():
+        if word.isupper():
+            words.append(word[:1] + word[1:].lower())
+        elif word[:1].islower():
+            words.append(word[:1].upper() + word[1:])
+        else:
+            words.append(word)
+    return " ".join(words)
+
+
+def _product_id_from_name(name: str) -> int:
+    return _COMPACT_IDS.get(_compact_name(name), 0)
+
+
+def product_label(name: str | None = None, product_id: int | None = None) -> str:
+    """Official product name. A number is used only when no name is known."""
+    raw = (name or "").strip()
+    if raw.upper().startswith("PRODUCT_"):
+        raw = raw[len("PRODUCT_") :]
+    compact = _compact_name(raw)
+    if compact in _COMPACT_IDS:
+        return PRODUCT_LABELS[_COMPACT_IDS[compact]]
+    if raw:
+        return _humanize(raw)
+    if product_id in PRODUCT_LABELS:
+        return PRODUCT_LABELS[product_id]
+    if product_id is not None:
+        return str(product_id)
+    return ""
+
+
 def _product(message: bytes) -> dict | None:
     product_id = None
     used = None
@@ -267,7 +334,7 @@ def _product(message: bytes) -> dict | None:
         return None
     return {
         "id": product_id,
-        "label": PRODUCT_LABELS.get(product_id, f"Product {product_id}"),
+        "label": product_label(product_id=product_id),
         "used_percent": _clamp(used or 0.0),
     }
 
@@ -356,20 +423,78 @@ def _iso_seconds(value: object) -> int | None:
         return None
 
 
+def _cli_product_rows(payload: dict) -> list[dict]:
+    root = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if not isinstance(root, dict):
+        return []
+    rows = []
+    for item in root.get("productUsage") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("product") or "").strip()
+        if not name:
+            continue
+        rows.append(
+            {
+                "id": _product_id_from_name(name),
+                "label": product_label(name),
+                "used_percent": _clamp(item.get("usagePercent") or 0.0),
+            }
+        )
+    return rows
+
+
+def _label_unnamed_products(products: list[dict], payload: dict) -> None:
+    """Fill labels for proto ids outside the known enum, using CLI wire names."""
+    unknown = [
+        product
+        for product in products
+        if isinstance(product, dict) and product.get("id") not in PRODUCT_LABELS
+    ]
+    if not unknown:
+        return
+    known_ids = {
+        product.get("id")
+        for product in products
+        if isinstance(product, dict) and product.get("id") in PRODUCT_LABELS
+    }
+    pool = [row for row in _cli_product_rows(payload) if row["id"] not in known_ids]
+    for product in unknown:
+        matches = [row for row in pool if row["used_percent"] == product.get("used_percent")]
+        if len(matches) != 1:
+            continue
+        product["label"] = matches[0]["label"]
+        pool.remove(matches[0])
+    still = [
+        product
+        for product in unknown
+        if product.get("label") == str(product.get("id"))
+    ]
+    if still and len(still) == len(pool):
+        same_order = [product.get("used_percent") for product in still] == [
+            row["used_percent"] for row in pool
+        ]
+        if same_order:
+            for product, row in zip(still, pool):
+                product["label"] = row["label"]
+
+
 def parse_cli_billing(payload: dict) -> dict:
     """Parse the CLI proxy's JSON billing response."""
     root = payload.get("config") if isinstance(payload.get("config"), dict) else payload
     products = []
-    for item in root.get("productUsage") or []:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("product") or "")
-        product_id = JSON_PRODUCT_IDS.get(name, 0)
+    next_unknown = -1
+    for row in _cli_product_rows(payload):
+        product_id = row["id"]
+        # Proto ids start at 1. A wire name with no enum gets its own key.
+        if not product_id:
+            product_id = next_unknown
+            next_unknown -= 1
         products.append(
             {
                 "id": product_id,
-                "label": name or PRODUCT_LABELS.get(product_id, "Other"),
-                "used_percent": _clamp(item.get("usagePercent") or 0.0),
+                "label": row["label"],
+                "used_percent": row["used_percent"],
             }
         )
     current = root.get("currentPeriod") if isinstance(root.get("currentPeriod"), dict) else {}
@@ -422,6 +547,39 @@ async def _fetch_cli(client: httpx.AsyncClient, token: str) -> dict:
     )
     response.raise_for_status()
     return parse_cli_billing(response.json())
+
+
+async def _fill_unnamed_product_labels(
+    client: httpx.AsyncClient, token: str, snapshot: dict
+) -> None:
+    """Name a proto id the known enum does not cover.
+
+    The grok.com RPC sends only a number. The CLI billing JSON has the
+    original product string, matched by the same usage percent.
+    """
+    products = snapshot.get("products")
+    if not isinstance(products, list):
+        return
+    if not any(
+        isinstance(item, dict) and item.get("id") not in PRODUCT_LABELS for item in products
+    ):
+        return
+    try:
+        response = await client.get(
+            CLI_BILLING_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "x-grok-client-mode": "cli",
+                "Accept": "application/json",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError, AttributeError) as error:
+        log.info("SuperGrok product names unavailable: %s", error)
+        return
+    if isinstance(payload, dict):
+        _label_unnamed_products(products, payload)
 
 
 # ── Plan name ───────────────────────────────────────────────
@@ -527,6 +685,8 @@ async def get_supergrok_quota(force: bool = False) -> dict | None:
                         "error": f"{type(cli_error).__name__}: {cli_error}"[:200],
                         "fetched_at": int(time.time()),
                     }
+            else:
+                await _fill_unnamed_product_labels(client, token, value)
             value["plan"] = await _plan(client, token)
 
     _cache["at"] = now
