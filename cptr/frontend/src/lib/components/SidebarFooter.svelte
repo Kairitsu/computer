@@ -48,9 +48,7 @@
 			alt="Avatar"
 			class="w-5 h-5 rounded-full object-cover shrink-0"
 		/>
-		<span class="truncate"
-			>{$session?.display_name || $session?.username || $t('sidebar.settings')}</span
-		>
+		<span class="truncate">{$session?.username || $t('sidebar.settings')}</span>
 		{#if $quotaSummary.source !== 'none'}
 			<span
 				class="ml-auto shrink-0 text-xs font-semibold tabular-nums"
@@ -90,7 +88,7 @@
 			...($session
 				? [
 						{
-							label: $session.display_name || $session.username,
+							label: $session.username,
 							image: $session.profile_image_url || '/user.png',
 							onclick: () => openSettings('account')
 						}

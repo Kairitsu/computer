@@ -25,6 +25,7 @@ from cptr.utils.config import (
     verify_password,
 )
 from cptr.models import User, Auth, Config
+from cptr.models.users import is_login_username
 from cptr.utils import totp
 from cptr.utils.password_grant import consume_password_grant, issue_password_grant
 
@@ -124,20 +125,24 @@ async def get_auth(request: Request):
             response.delete_cookie(COOKIE_NAME, path="/")
             return response
 
+        auth_row = await Auth.get_by_user_id(auth.user_id)
+        username = auth_row.username if auth_row and auth_row.username else auth.username
+
         data = {
             "authenticated": True,
             "user_id": auth.user_id,
-            "username": auth.username,
+            "username": username,
             "display_name": user.display_name,
             "role": user.role,
             "profile_image_url": user.profile_image_url,
             "exp": int(auth.exp * 1000),
         }
 
-        # Sliding session: refresh token if past halfway to expiry
+        # Sliding session: refresh token if past halfway to expiry.
+        # The cookie username follows the database, so a rename survives the refresh.
         remaining = auth.exp - time.time()
-        if remote_user or remaining < SESSION_MAX_AGE / 2:
-            new_token = create_token(auth.user_id, auth.username, user.role)
+        if remote_user or remaining < SESSION_MAX_AGE / 2 or username != auth.username:
+            new_token = create_token(auth.user_id, username, user.role)
             return _ok_with_cookie(request, new_token, data)
 
         return data
@@ -456,6 +461,48 @@ class TotpDisableRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     display_name: Optional[str] = None
+
+
+class UpdateUsernameRequest(BaseModel):
+    username: str
+
+
+def _require_user(request: Request):
+    token = request.cookies.get(COOKIE_NAME)
+    return check_access(
+        client_host=request.client.host if request.client else "127.0.0.1",
+        jwt_token=token,
+    )
+
+
+@router.put("/username")
+async def update_username(request: Request, body: UpdateUsernameRequest):
+    """Change the signed-in user's login name. No password. Stays signed in."""
+    auth_info = _require_user(request)
+    if auth_info is None or not auth_info.user_id:
+        return JSONResponse({"error": "not authenticated"}, 401)
+
+    username = body.username.strip()
+    if not is_login_username(username):
+        return JSONResponse({"error": "username invalid"}, 400)
+
+    auth_row = await Auth.get_by_user_id(auth_info.user_id)
+    if auth_row is None:
+        return JSONResponse({"error": "not authenticated"}, 401)
+    if auth_row.password is None:
+        return JSONResponse({"error": "username managed elsewhere"}, 403)
+    if username == auth_row.username:
+        return {"ok": True, "username": username}
+    if await Auth.username_exists(username):
+        return JSONResponse({"error": "username taken"}, 409)
+    if not await Auth.update_username(auth_info.user_id, username):
+        return JSONResponse({"error": "username taken"}, 409)
+
+    return _ok_with_cookie(
+        request,
+        create_token(auth_info.user_id, username, role=auth_info.role),
+        {"ok": True, "username": username},
+    )
 
 
 @router.put("/profile")

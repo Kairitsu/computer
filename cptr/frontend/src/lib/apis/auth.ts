@@ -82,6 +82,13 @@ export const deleteAvatar = () => fetchJSON('/api/auth/avatar', { method: 'DELET
 export const updateProfile = (display_name: string | null) =>
 	fetchJSON('/api/auth/profile', { ...jsonBody({ display_name }), method: 'PUT' });
 
+/** Change the login username. The server keeps this browser signed in. */
+export const updateUsername = (username: string) =>
+	fetchJSON<{ ok: boolean; username: string }>('/api/auth/username', {
+		...jsonBody({ username }),
+		method: 'PUT'
+	});
+
 export interface TotpStatus {
 	enabled: boolean;
 	recovery_codes_left: number;

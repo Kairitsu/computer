@@ -61,14 +61,12 @@
 			? 'font-medium text-gray-900 dark:text-gray-100'
 			: 'text-gray-600 dark:text-gray-400'}">{chat.title}</span
 	>
-	<span
-		class="text-[0.6875rem] text-gray-400 dark:text-gray-600 shrink-0 tabular-nums {onmenu
-			? 'group-hover/chat:hidden'
-			: ''}">{formatTime(chat.updated_at)}</span
+	<span class="chat-time text-[0.6875rem] text-gray-400 dark:text-gray-600 shrink-0 tabular-nums"
+		>{formatTime(chat.updated_at)}</span
 	>
 	{#if onmenu}
 		<button
-			class="hidden group-hover/chat:flex items-center justify-center w-5 h-5 rounded shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/8 transition-all duration-75"
+			class="chat-menu items-center justify-center w-5 h-5 rounded shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/8 transition-all duration-75"
 			onclick={(e) => {
 				e.stopPropagation();
 				onmenu?.(e);
@@ -91,5 +89,17 @@
 
 	.chat-item.selected {
 		background: color-mix(in oklab, var(--app-accent) 12%, transparent);
+	}
+
+	.chat-time,
+	.chat-menu {
+		display: none;
+	}
+
+	.chat-item:hover .chat-time,
+	.chat-item:focus-within .chat-time,
+	.chat-item:hover .chat-menu,
+	.chat-item:focus-within .chat-menu {
+		display: inline-flex;
 	}
 </style>

@@ -30,12 +30,17 @@
 
 	const HOME = '';
 	const PAGE_SIZE = 50;
+	const VISIBLE_STEP = 12;
+
+	type DayBucket = 'today' | 'yesterday' | 'dayBefore' | 'earlier';
+	const DAY_ORDER: DayBucket[] = ['today', 'yesterday', 'dayBefore', 'earlier'];
 
 	type ListedChat = ChatInfo & { workspace: string };
 
 	let buckets = $state<Map<string, { chats: ChatInfo[]; hasMore: boolean }>>(new Map());
 	let loading = $state(false);
 	let loadingMore = $state(false);
+	let visibleCount = $state(VISIBLE_STEP);
 	let chatMenu = $state<{ chatId: string; workspace: string; anchor: HTMLElement } | null>(null);
 	let unbindSocketListener: (() => void) | null = null;
 	let loadGeneration = 0;
@@ -60,15 +65,47 @@
 				merged.set(chat.id, { ...chat, workspace });
 			}
 		}
-		return [...merged.values()].sort(compareChats);
+		return [...merged.values()].sort((a, b) => b.updated_at - a.updated_at);
 	});
 
-	const hasMore = $derived([...buckets.values()].some((bucket) => bucket.hasMore));
+	const visibleChats = $derived(chats.slice(0, visibleCount));
 
-	function compareChats(a: ChatInfo, b: ChatInfo) {
-		const aUnread = !a.is_active && (a.last_read_at === null || a.updated_at > a.last_read_at);
-		const bUnread = !b.is_active && (b.last_read_at === null || b.updated_at > b.last_read_at);
-		return Number(bUnread) - Number(aUnread) || b.updated_at - a.updated_at;
+	const hasMore = $derived([...buckets.values()].some((bucket) => bucket.hasMore));
+	const canShowMore = $derived(visibleCount < chats.length || hasMore);
+
+	const dayGroups = $derived.by(() => {
+		const labels: Record<DayBucket, string> = {
+			today: $t('sidebar.today'),
+			yesterday: $t('sidebar.yesterday'),
+			dayBefore: $t('sidebar.dayBefore'),
+			earlier: $t('sidebar.earlier')
+		};
+		const grouped = new Map<DayBucket, ListedChat[]>();
+		for (const chat of visibleChats) {
+			const bucket = dayBucket(chat.updated_at);
+			const list = grouped.get(bucket);
+			if (list) list.push(chat);
+			else grouped.set(bucket, [chat]);
+		}
+		return DAY_ORDER.filter((bucket) => grouped.has(bucket)).map((bucket) => ({
+			bucket,
+			label: labels[bucket],
+			chats: grouped.get(bucket) ?? []
+		}));
+	});
+
+	function startOfLocalDay(ts: number): number {
+		const date = new Date(ts);
+		date.setHours(0, 0, 0, 0);
+		return date.getTime();
+	}
+
+	function dayBucket(ts: number): DayBucket {
+		const days = Math.round((startOfLocalDay(Date.now()) - startOfLocalDay(ts)) / 86_400_000);
+		if (days <= 0) return 'today';
+		if (days === 1) return 'yesterday';
+		if (days === 2) return 'dayBefore';
+		return 'earlier';
 	}
 
 	function sourcePaths(): string[] {
@@ -117,24 +154,31 @@
 
 	async function loadMore() {
 		if (loadingMore) return;
-		const pending = [...buckets.entries()].filter(([, bucket]) => bucket.hasMore);
-		if (!pending.length) return;
-		loadingMore = true;
-		try {
-			const pages = await Promise.all(
-				pending.map(async ([path, bucket]) => {
-					const page = await fetchSource(path, bucket.chats.length);
-					const next: { chats: ChatInfo[]; hasMore: boolean } = {
-						chats: [...bucket.chats, ...page.chats],
-						hasMore: page.hasMore
-					};
-					return [path, next] as [string, { chats: ChatInfo[]; hasMore: boolean }];
-				})
-			);
-			buckets = new Map([...buckets, ...pages]);
-		} finally {
-			loadingMore = false;
+		const nextCount = visibleCount + VISIBLE_STEP;
+		if (nextCount > chats.length && hasMore) {
+			const pending = [...buckets.entries()].filter(([, bucket]) => bucket.hasMore);
+			if (pending.length) {
+				loadingMore = true;
+				try {
+					const pages = await Promise.all(
+						pending.map(async ([path, bucket]) => {
+							const page = await fetchSource(path, bucket.chats.length);
+							const next: { chats: ChatInfo[]; hasMore: boolean } = {
+								chats: [...bucket.chats, ...page.chats],
+								hasMore: page.hasMore
+							};
+							return [path, next] as [string, { chats: ChatInfo[]; hasMore: boolean }];
+						})
+					);
+					buckets = new Map([...buckets, ...pages]);
+				} catch {
+					return;
+				} finally {
+					loadingMore = false;
+				}
+			}
 		}
+		visibleCount = nextCount;
 	}
 
 	function closeMobileSidebar() {
@@ -150,7 +194,11 @@
 
 	function openChatMenu(e: MouseEvent, chat: ListedChat) {
 		e.stopPropagation();
-		chatMenu = { chatId: chat.id, workspace: chat.workspace, anchor: e.currentTarget as HTMLElement };
+		chatMenu = {
+			chatId: chat.id,
+			workspace: chat.workspace,
+			anchor: e.currentTarget as HTMLElement
+		};
 	}
 
 	function closeChatMenu() {
@@ -268,8 +316,9 @@
 	});
 </script>
 
-<div class="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
+<div class="chat-scroll flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
 	{#if $chatEnabled}
+		<div class="history-label">{$t('sidebar.history')}</div>
 		{#if loading && chats.length === 0}
 			<div class="chat-loading">
 				<span class="chat-loading-dot"></span>
@@ -279,15 +328,19 @@
 		{:else if chats.length === 0}
 			<p class="chat-empty">{$t('sidebar.noChats')}</p>
 		{:else}
-			{#each chats as chat (chat.id)}
-				<ChatItem
-					{chat}
-					isSelected={chat.id === currentChatId && (chat.workspace || HOME) === (currentPath || HOME)}
-					onclick={() => openChat(chat)}
-					onmenu={(e) => openChatMenu(e, chat)}
-				/>
+			{#each dayGroups as group (group.bucket)}
+				<div class="day-label">{group.label}</div>
+				{#each group.chats as chat (chat.id)}
+					<ChatItem
+						{chat}
+						isSelected={chat.id === currentChatId &&
+							(chat.workspace || HOME) === (currentPath || HOME)}
+						onclick={() => openChat(chat)}
+						onmenu={(e) => openChatMenu(e, chat)}
+					/>
+				{/each}
 			{/each}
-			{#if hasMore}
+			{#if canShowMore}
 				<button class="chat-show-more" disabled={loadingMore} onclick={loadMore}>
 					{$t('sidebar.showMore')}
 				</button>
@@ -326,6 +379,25 @@
 {/if}
 
 <style>
+	.history-label {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		padding: 0.125rem 0.5rem 0.375rem;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		color: var(--app-fg-subtle);
+		background: var(--app-sidebar-bg, var(--app-bg));
+	}
+
+	.day-label {
+		padding: 0.625rem 0.5rem 0.125rem;
+		font-size: 0.6875rem;
+		font-weight: 500;
+		color: var(--app-fg-subtle);
+	}
+
 	.chat-empty {
 		display: block;
 		padding: 0.25rem 0.5rem;

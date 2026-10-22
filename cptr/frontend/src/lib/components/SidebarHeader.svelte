@@ -16,7 +16,7 @@
 
 <div
 	data-intro="sidebar-header"
-	class="flex items-center justify-between h-9 pl-3.5 pr-1.5 shrink-0 border-b border-gray-200 dark:border-white/6"
+	class="flex items-center justify-between min-h-11 py-2.5 pl-3.5 pr-1.5 shrink-0 border-b border-gray-200 dark:border-white/6"
 	style="border-color: var(--app-border);"
 >
 	<a

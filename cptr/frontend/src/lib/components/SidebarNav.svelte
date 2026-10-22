@@ -16,8 +16,8 @@
 	}
 </script>
 
-{#if $chatEnabled}
-	<div class="px-1.5 mt-1 shrink-0" data-intro="sidebar-nav">
+<div class="sidebar-nav" data-intro="sidebar-nav">
+	{#if $chatEnabled}
 		<button
 			class="nav-item group flex items-center gap-2 w-full h-8 px-2 rounded-lg text-[0.8125rem] font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors duration-100"
 			onclick={newChat}
@@ -27,10 +27,7 @@
 				>{$t('sidebar.newChat')}</span
 			>
 		</button>
-	</div>
-{/if}
-
-<div class="px-1.5 shrink-0" class:mt-1={!$chatEnabled} data-intro="sidebar-nav">
+	{/if}
 	<button
 		class="nav-item group flex items-center gap-2 w-full h-8 px-2 rounded-lg text-[0.8125rem] text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors duration-100"
 		onclick={() => showSearch.set(true)}
@@ -47,6 +44,17 @@
 </div>
 
 <style>
+	.sidebar-nav {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		flex-shrink: 0;
+		margin-top: 0.75rem;
+		margin-bottom: 1rem;
+		padding-left: 0.375rem;
+		padding-right: 0.375rem;
+	}
+
 	.nav-item:hover {
 		background: var(--app-hover);
 	}

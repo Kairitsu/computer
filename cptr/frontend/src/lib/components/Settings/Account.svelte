@@ -7,7 +7,7 @@
 		updatePassword as apiUpdatePassword,
 		uploadAvatar,
 		deleteAvatar,
-		updateProfile,
+		updateUsername,
 		getTotpStatus,
 		setupTotp,
 		enableTotp,
@@ -22,6 +22,7 @@
 
 	type PasswordStep = 'idle' | 'current' | 'forgot' | 'new';
 	type ForgotMethod = 'totp' | 'recovery';
+	type UsernameStep = 'idle' | 'edit' | 'confirm';
 
 	let passwordStep = $state<PasswordStep>('idle');
 	let forgotMethod = $state<ForgotMethod>('totp');
@@ -31,8 +32,66 @@
 	let passwordGrant = $state('');
 	let updatingPassword = $state(false);
 	let uploadingAvatar = $state(false);
-	let displayName = $state($session?.display_name ?? '');
-	let savingProfile = $state(false);
+	let usernameStep = $state<UsernameStep>('idle');
+	let usernameDraft = $state('');
+	let savingUsername = $state(false);
+
+	function isLoginUsername(value: string): boolean {
+		return /^[\p{L}\p{N}_.-]{1,64}$/u.test(value);
+	}
+
+	function startUsernameEdit() {
+		usernameDraft = $session?.username ?? '';
+		usernameStep = 'edit';
+	}
+
+	function cancelUsernameEdit() {
+		usernameDraft = '';
+		usernameStep = 'idle';
+	}
+
+	function reviewUsername() {
+		const trimmed = usernameDraft.trim();
+		if (!trimmed || trimmed === ($session?.username ?? '')) {
+			cancelUsernameEdit();
+			return;
+		}
+		if (!isLoginUsername(trimmed)) {
+			toast.error($t('account.usernameInvalid'));
+			return;
+		}
+		usernameDraft = trimmed;
+		usernameStep = 'confirm';
+	}
+
+	function usernameError(e: unknown) {
+		if (!(e instanceof ApiError)) {
+			toast.error($t('account.failedToUpdate'));
+			return;
+		}
+		const known: Record<string, string> = {
+			'username taken': 'account.usernameTaken',
+			'username invalid': 'account.usernameInvalid',
+			'username managed elsewhere': 'account.usernameManaged'
+		};
+		const key = known[e.message];
+		toast.error(key ? $t(key) : e.message);
+	}
+
+	async function confirmUsername() {
+		if (usernameStep !== 'confirm' || savingUsername) return;
+		savingUsername = true;
+		try {
+			const result = await updateUsername(usernameDraft);
+			if ($session) setSession({ ...$session, username: result.username });
+			cancelUsernameEdit();
+			toast.success($t('account.usernameUpdated'));
+		} catch (e) {
+			usernameError(e);
+		} finally {
+			savingUsername = false;
+		}
+	}
 
 	let avatarUrl = $derived($session?.profile_image_url);
 
@@ -125,23 +184,6 @@
 			toast.success($t('account.totpCodesCopied'));
 		} catch {
 			toast.error($t('account.failedToUpdate'));
-		}
-	}
-
-	async function saveDisplayName() {
-		const trimmed = displayName.trim();
-		if (trimmed === ($session?.display_name ?? '')) return;
-		savingProfile = true;
-		try {
-			await updateProfile(trimmed || null);
-			if ($session) {
-				setSession({ ...$session, display_name: trimmed || null });
-			}
-			toast.success($t('account.displayNameUpdated'));
-		} catch (e) {
-			toast.error(e instanceof ApiError ? e.message : $t('account.failedToUpdate'));
-		} finally {
-			savingProfile = false;
 		}
 	}
 
@@ -333,9 +375,7 @@
 			{/if}
 		</button>
 		<div class="flex flex-col gap-1">
-			<span class="text-sm font-medium text-gray-900 dark:text-white"
-				>{$session?.display_name || $session?.username}</span
-			>
+			<span class="text-sm font-medium text-gray-900 dark:text-white">{$session?.username}</span>
 			<div class="flex flex-wrap items-center gap-1.5">
 				<button
 					type="button"
@@ -355,14 +395,66 @@
 		</div>
 	</div>
 
-	<!-- Display Name -->
-	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">{$t('account.displayName')}</h3>
-	<input
-		type="text"
-		placeholder={$t('account.displayNamePlaceholder')}
-		bind:value={displayName}
-		class="settings-field mb-5 w-full"
-	/>
+	<!-- Login username. Hidden until the user asks to change it, then confirmed with a second click. -->
+	<div class="mb-5">
+		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">{$t('account.username')}</h3>
+		{#if usernameStep === 'idle'}
+			<p class="text-sm text-gray-900 dark:text-white">{$session?.username}</p>
+			<button type="button" class="settings-action mt-2 self-start" onclick={startUsernameEdit}>
+				{$t('account.changeUsername')}
+			</button>
+		{:else if usernameStep === 'edit'}
+			<input
+				type="text"
+				bind:value={usernameDraft}
+				autocomplete="username"
+				spellcheck="false"
+				class="settings-field w-full"
+				onkeydown={(e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						reviewUsername();
+					}
+				}}
+			/>
+			<div class="mt-2 flex flex-wrap gap-1.5">
+				<button type="button" class="settings-action" onclick={reviewUsername}>
+					{$t('account.usernameNext')}
+				</button>
+				<button type="button" class="settings-action" onclick={cancelUsernameEdit}>
+					{$t('common.cancel')}
+				</button>
+			</div>
+		{:else}
+			<p class="text-[0.75rem] leading-relaxed text-gray-500 dark:text-gray-500">
+				{$t('account.usernameConfirmHint', {
+					from: $session?.username ?? '',
+					to: usernameDraft
+				})}
+			</p>
+			<div class="mt-2 flex flex-wrap gap-1.5">
+				<button
+					type="button"
+					class="settings-action"
+					disabled={savingUsername}
+					onclick={confirmUsername}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') e.preventDefault();
+					}}
+				>
+					{#if savingUsername}<Spinner size={14} />{:else}{$t('account.usernameConfirm')}{/if}
+				</button>
+				<button
+					type="button"
+					class="settings-action"
+					disabled={savingUsername}
+					onclick={() => (usernameStep = 'edit')}
+				>
+					{$t('account.usernameBack')}
+				</button>
+			</div>
+		{/if}
+	</div>
 
 	<!-- Password: hidden until the user asks to change it, then verified before the new one. -->
 	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-1">{$t('account.password')}</h3>
@@ -607,20 +699,4 @@
 			{#if totpBusy}<Spinner size={14} />{:else}{$t('account.totpEnable')}{/if}
 		</button>
 	{/if}
-
-	<!-- Save -->
-	<div class="mt-auto pt-6 flex justify-end">
-		<button
-			type="button"
-			onclick={saveDisplayName}
-			disabled={savingProfile}
-			class="settings-action"
-		>
-			{#if savingProfile}
-				{$t('settings.saving')}
-			{:else}
-				{$t('settings.save')}
-			{/if}
-		</button>
-	</div>
 </div>

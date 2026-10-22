@@ -4,14 +4,32 @@ from __future__ import annotations
 
 import json
 import time
+import unicodedata
 import uuid
 
 from sqlalchemy import BigInteger, Column, Float, ForeignKey, Text, select, update, delete
 from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship
 
 from cptr.models.base import Base
 from cptr.utils.db import get_db
+
+_USERNAME_EXTRA = frozenset("_.-")
+
+
+def is_login_username(value: str) -> bool:
+    """True for a 1–64 character login name of letters, numbers, `_`, `-`, or `.`."""
+    if not value or len(value) > 64:
+        return False
+    for char in value:
+        if char in _USERNAME_EXTRA:
+            continue
+        category = unicodedata.category(char)
+        if category.startswith("L") or category.startswith("N"):
+            continue
+        return False
+    return True
 
 
 def _uuid() -> str:
@@ -206,7 +224,11 @@ class Auth(Base):
             await db.execute(
                 update(Auth).where(Auth.user_id == user_id).values(username=new_username)
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                return False
             return True
 
     @staticmethod
