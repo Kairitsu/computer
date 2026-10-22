@@ -43,6 +43,14 @@
 		widescreenMode
 	} from '$lib/stores';
 	import { getPathDisplayName } from '$lib/utils/paths';
+	import {
+		BOTTOM_SLACK_PX,
+		isTranscriptScrollKey,
+		isUpwardKey,
+		isUpwardTouch,
+		isUpwardWheel,
+		reduceScroll
+	} from '$lib/chatScrollFollow';
 
 	import ChatInput from './ChatInput.svelte';
 	import UserMessage from './UserMessage.svelte';
@@ -116,6 +124,13 @@
 	let statusButtonEl: HTMLButtonElement | undefined = $state();
 	let sending = $state(false);
 	let autoScroll = $state(true);
+	let lastScrollTop = 0;
+	let programmaticScroll = false;
+	let pointerDown = false;
+	let userScrollUntil = 0;
+	let touchY = 0;
+	let scheduledFrames: number[] = [];
+	let removePointerListeners: (() => void) | null = null;
 	let cancelledMessageId: string | null = null;
 	let loading = $state(!!initialChatId);
 	let chatTitle = $state('');
@@ -267,7 +282,7 @@
 		tick().then(() => {
 			if (messagesEl) {
 				const newScrollHeight = messagesEl.scrollHeight;
-				messagesEl.scrollTop += newScrollHeight - prevScrollHeight;
+				assignScrollTop(messagesEl.scrollTop + (newScrollHeight - prevScrollHeight));
 			}
 			loadingMore = false;
 		});
@@ -399,10 +414,10 @@
 		if (savedScroll >= 0 && !autoScroll) {
 			await tick();
 			if (messagesEl) {
-				messagesEl.scrollTop = savedScroll;
+				assignScrollTop(savedScroll);
 				// Also restore after rAF to beat any competing scroll operations
-				requestAnimationFrame(() => {
-					if (messagesEl) messagesEl.scrollTop = savedScroll;
+				scheduleFrame(() => {
+					if (messagesEl && !autoScroll) assignScrollTop(savedScroll);
 				});
 			}
 		}
@@ -596,9 +611,24 @@
 			offChat();
 			offConnect();
 		};
+
+		const clearPointer = () => {
+			pointerDown = false;
+		};
+		window.addEventListener('pointerup', clearPointer);
+		window.addEventListener('pointercancel', clearPointer);
+		window.addEventListener('keydown', handleMessagesKeydown);
+		removePointerListeners = () => {
+			window.removeEventListener('pointerup', clearPointer);
+			window.removeEventListener('pointercancel', clearPointer);
+			window.removeEventListener('keydown', handleMessagesKeydown);
+		};
 	});
 
 	onDestroy(() => {
+		cancelScheduledScroll();
+		removePointerListeners?.();
+		removePointerListeners = null;
 		unbindSocketListeners?.();
 		unbindSocketListeners = null;
 		if (taskClearTimer) clearTimeout(taskClearTimer);
@@ -675,41 +705,118 @@
 	});
 
 	// ── Auto-scroll ─────────────────────────────────────────────
+	// The reader wins. While they sit at the bottom, new text may follow.
+	// An upward wheel, touch, key, or drag stops that follow immediately.
+	// Writes we make ourselves must not count as the reader returning.
+
+	function armUserScroll() {
+		userScrollUntil = performance.now() + 1200;
+	}
+
+	function isUserScroll() {
+		return pointerDown || performance.now() < userScrollUntil;
+	}
+
+	function cancelScheduledScroll() {
+		for (const id of scheduledFrames) cancelAnimationFrame(id);
+		scheduledFrames = [];
+	}
+
+	function scheduleFrame(fn: () => void) {
+		const id = requestAnimationFrame(() => {
+			scheduledFrames = scheduledFrames.filter((frameId) => frameId !== id);
+			fn();
+		});
+		scheduledFrames.push(id);
+	}
+
+	function assignScrollTop(top: number) {
+		if (!messagesEl) return;
+		programmaticScroll = true;
+		messagesEl.scrollTop = top;
+		programmaticScroll = false;
+		lastScrollTop = messagesEl.scrollTop;
+	}
+
+	function disarmFollow() {
+		cancelScheduledScroll();
+		autoScroll = false;
+	}
 
 	function scrollToBottom() {
-		if (!messagesEl) return;
-		messagesEl.scrollTop = messagesEl.scrollHeight;
+		if (!messagesEl || !autoScroll) return;
+		const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+		// A drag already left the bottom. Do not pull it back on this frame.
+		if (pointerDown && distance > BOTTOM_SLACK_PX) {
+			disarmFollow();
+			return;
+		}
+		assignScrollTop(messagesEl.scrollHeight);
 		// Follow-up scroll to account for content-visibility re-layouts
-		requestAnimationFrame(() => {
-			if (messagesEl) {
-				messagesEl.scrollTop = messagesEl.scrollHeight;
-			}
+		scheduleFrame(() => {
+			if (!messagesEl || !autoScroll) return;
+			assignScrollTop(messagesEl.scrollHeight);
 		});
 	}
 
-	let lastScrollTop = 0;
-
 	function handleMessagesScroll() {
 		if (!messagesEl) return;
-		const { scrollTop, scrollHeight, clientHeight } = messagesEl;
+		const userInitiated = !programmaticScroll && isUserScroll();
+		if (userInitiated) armUserScroll();
+		const next = reduceScroll(
+			{ pinned: autoScroll, lastScrollTop },
+			{
+				scrollTop: messagesEl.scrollTop,
+				scrollHeight: messagesEl.scrollHeight,
+				clientHeight: messagesEl.clientHeight,
+				programmatic: programmaticScroll,
+				userInitiated
+			}
+		);
+		if (autoScroll && !next.pinned) cancelScheduledScroll();
+		lastScrollTop = next.lastScrollTop;
+		autoScroll = next.pinned;
+	}
 
-		// If the user scrolled upward, immediately disengage auto-scroll
-		if (scrollTop < lastScrollTop) {
-			autoScroll = false;
-		} else {
-			// Re-engage only when very close to the bottom
-			autoScroll = scrollHeight - scrollTop <= clientHeight + 200;
-		}
+	function handleMessagesWheel(event: WheelEvent) {
+		if (event.ctrlKey || event.metaKey) return;
+		armUserScroll();
+		if (isUpwardWheel(event.deltaY)) disarmFollow();
+	}
 
-		lastScrollTop = scrollTop;
+	function handleMessagesTouchStart(event: TouchEvent) {
+		touchY = event.touches[0]?.clientY ?? touchY;
+		armUserScroll();
+	}
+
+	function handleMessagesTouchMove(event: TouchEvent) {
+		const y = event.touches[0]?.clientY ?? touchY;
+		armUserScroll();
+		if (isUpwardTouch(touchY, y)) disarmFollow();
+		touchY = y;
+	}
+
+	function handleMessagesPointerDown() {
+		pointerDown = true;
+		armUserScroll();
+	}
+
+	function handleMessagesKeydown(event: KeyboardEvent) {
+		if (!active || !messagesEl) return;
+		const target = event.target;
+		if (!(target instanceof Node) || !messagesEl.contains(target)) return;
+		if (!isTranscriptScrollKey(event.key)) return;
+		armUserScroll();
+		if (isUpwardKey(event.key, event.shiftKey)) disarmFollow();
 	}
 
 	$effect(() => {
-		if (activePath.length && messagesEl && autoScroll) {
-			requestAnimationFrame(() => {
-				scrollToBottom();
-			});
-		}
+		const path = activePath;
+		const tail = path[path.length - 1]?.msg;
+		const followKey = `${path.length}:${tail?.id ?? ''}:${tail?.content.length ?? 0}:${tail?.output?.length ?? 0}:${tail?.done ? 1 : 0}`;
+		if (!path.length || !autoScroll || !messagesEl || followKey === '') return;
+		scheduleFrame(() => scrollToBottom());
+		return () => cancelScheduledScroll();
 	});
 
 	// ── Actions ─────────────────────────────────────────────────
@@ -1326,6 +1433,10 @@
 				class="flex-1 overflow-y-auto"
 				style="background: var(--app-bg); color: var(--app-fg);"
 				onscroll={handleMessagesScroll}
+				onwheelcapture={handleMessagesWheel}
+				ontouchstartcapture={handleMessagesTouchStart}
+				ontouchmovecapture={handleMessagesTouchMove}
+				onpointerdowncapture={handleMessagesPointerDown}
 			>
 				<div
 					class="{$widescreenMode
