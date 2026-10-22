@@ -70,8 +70,6 @@
 		active?: boolean;
 		ontabupdate?: (tabId: string, chatId: string, label: string) => void;
 		onopenchat?: (chatId?: string) => void;
-		/** New-chat landing only: choose which workspace the chat is created in. */
-		onworkspacechange?: (path: string) => void;
 	}
 	let {
 		workspace = '',
@@ -79,8 +77,7 @@
 		tabId,
 		active = true,
 		ontabupdate,
-		onopenchat,
-		onworkspacechange
+		onopenchat
 	}: Props = $props();
 
 	let inputText = $state('');
@@ -138,13 +135,24 @@
 	let unbindSocketListeners: (() => void) | null = null;
 
 	onMount(() => {
-		if (initialChatId || typeof sessionStorage === 'undefined') return;
-		const key = `cptr:intent:chatDraft:${workspace}`;
-		const draft = sessionStorage.getItem(key);
-		if (draft) {
-			inputText = draft;
-			sessionStorage.removeItem(key);
+		const applyDraft = (text: string) => {
+			if (initialChatId || workspace || !text) return;
+			inputText = text;
+		};
+		const onDraft = (event: Event) => {
+			const text = (event as CustomEvent<string>).detail;
+			if (typeof text === 'string') applyDraft(text);
+		};
+		window.addEventListener('cptr:chat-draft', onDraft);
+		if (!initialChatId && typeof sessionStorage !== 'undefined') {
+			const key = `cptr:intent:chatDraft:${workspace}`;
+			const draft = sessionStorage.getItem(key);
+			if (draft) {
+				applyDraft(draft);
+				sessionStorage.removeItem(key);
+			}
 		}
+		return () => window.removeEventListener('cptr:chat-draft', onDraft);
 	});
 
 	// ── Windowed rendering ──────────────────────────────────────
@@ -1413,7 +1421,6 @@
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
-					{onworkspacechange}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}

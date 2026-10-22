@@ -3,8 +3,6 @@
 	import { goto } from '$app/navigation';
 	import {
 		currentWorkspace,
-		workspaceList,
-		addWorkspace,
 		setActiveGroup,
 		setSplitRatio,
 		moveTabToNewSplit,
@@ -22,13 +20,10 @@
 		releaseClosedChatTab,
 		focusDefaultHomeTab,
 		openNewSessionTab,
-		openProjectSessionTab,
 		openHomeStripChat,
-		switchSessionWorkspace,
-		isSessionHomepage,
 		rememberWorkspace
 	} from '$lib/stores';
-	import type { Tab, EditorGroup, EditorLayout, SplitDirection, WorkspaceState } from '$lib/stores';
+	import type { Tab, EditorGroup, EditorLayout, SplitDirection } from '$lib/stores';
 	import { chatEnabled } from '$lib/stores/chat';
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
@@ -37,16 +32,10 @@
 	import { deleteSharePayload, getSharePayload } from '$lib/intents/payloadStore';
 	import type { LaunchIntent, ShareBehavior, SharePayload } from '$lib/intents/types';
 	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
-	import DirectoryPicker from '$lib/components/DirectoryPicker.svelte';
 	import GroupTabBar from '$lib/components/GroupTabBar.svelte';
-	import WorkspacePicker from '$lib/components/WorkspacePicker.svelte';
+	import { getWelcome } from '$lib/apis/state';
 	import { TAB_DRAG_MIME } from '$lib/constants';
 	import { isSupportedWorkspacePath } from '$lib/utils/paths';
-
-	let showPicker = $state(false);
-	let pendingIntent = $state<LaunchIntent | null>(null);
-	let folderPickerIntent = $state<LaunchIntent | null>(null);
-	let folderPickerWorkspace = $state<string | null>(null);
 	// The permanent Home tab is always a new chat. Chats open in tabs of their own,
 	// including the one Home starts when its first message is sent.
 	const activeHomeGroup = $derived(
@@ -98,11 +87,9 @@
 		return `home-${Date.now()}-${++homeTabCount}`;
 	}
 
-	/** Tab bar "+": a new session in the same workspace as the active tab. */
+	/** Tab bar "+": a new chat in the home directory. */
 	function openHomeChatTab(groupId = $homeState.activeGroupId) {
-		const group = $homeState.groups.find((item) => item.id === groupId);
-		const active = group?.tabs.find((tab) => tab.id === group.activeTabId);
-		openNewSessionTab(active?.workspace ?? '', groupId);
+		openNewSessionTab('', groupId);
 	}
 
 	function closeHomeTab(tabId: string, groupId = $homeState.activeGroupId) {
@@ -167,8 +154,8 @@
 	];
 
 	// ── URL intents ────────────────────────────────────────────────
-	// ?workspace= used to open the folder view. It now opens a project session
-	// tab on the same strip as the default new-chat home, then leaves the URL.
+	// ?workspace= no longer opens a project page. The parameter is removed and
+	// the chat stays on the home directory session.
 
 	let lastHandledHref = '';
 	type LaunchQueueWindow = Window & {
@@ -264,9 +251,6 @@
 		const parsed = urlIntent(url);
 		const bareWorkspace = !parsed ? url.searchParams.get('workspace') : null;
 		if (parsed) await handleIntent(parsed);
-		else if (bareWorkspace && isSupportedWorkspacePath(bareWorkspace)) {
-			await openProjectSessionTab(bareWorkspace);
-		}
 		if (!parsed && !bareWorkspace) return;
 		const next = clearIntentUrl(url);
 		if (next !== url.pathname + url.search) {
@@ -275,144 +259,98 @@
 	}
 
 	async function handleIntent(intent: LaunchIntent) {
-		if (intent.kind === 'openWorkspace') {
-			showPicker = true;
-			return;
-		}
-
-		const targetWorkspace = intent.workspace;
-		const needsWorkspace = intentNeedsExplicitWorkspace(intent.kind);
-		if (needsWorkspace && !targetWorkspace) {
-			pendingIntent = intent;
-			return;
-		}
-
 		switch (intent.kind) {
+			case 'openWorkspace':
 			case 'newNote':
-				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
-				else focusDefaultHomeTab();
-				break;
 			case 'newChat':
-				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
-				else focusDefaultHomeTab();
+			case 'openFile':
+			case 'openDir':
+				focusDefaultHomeTab();
 				break;
 			case 'search':
 				showSearch.set(true);
 				break;
 			case 'openChat':
-				if (intent.chatId && targetWorkspace) {
-					await rememberWorkspace(targetWorkspace);
-					openHomeStripChat(intent.chatId, targetWorkspace);
-				} else if (targetWorkspace) {
-					await openProjectSessionTab(targetWorkspace);
-				} else if (intent.chatId) {
-					const chat = await getChat(intent.chatId).catch(() => null);
-					const chatWorkspace = chat?.chat.meta?.workspace;
-					if (typeof chatWorkspace === 'string' && chatWorkspace) {
-						await rememberWorkspace(chatWorkspace);
-						openHomeStripChat(intent.chatId, chatWorkspace);
-					} else {
-						openHomeStripChat(intent.chatId);
-					}
-				} else {
-					focusDefaultHomeTab();
-				}
-				break;
-			case 'openFile':
-				if (targetWorkspace) await openProjectSessionTab(targetWorkspace);
-				else if (intent.filePath) {
-					const parent = intent.filePath.replace(/\/[^/]+$/, '');
-					if (parent) await openProjectSessionTab(parent);
-				}
-				break;
-			case 'openDir':
-				await openProjectSessionTab(targetWorkspace || intent.dirPath || '');
+				await openIntentChat(intent);
 				break;
 			case 'share':
-				await handleShareIntent(intent, targetWorkspace!);
+				await handleShareIntent(intent);
 				break;
 			case 'importFiles':
-				await importIntentFiles(intent, targetWorkspace!);
+				await importIntentFiles(intent);
 				break;
 		}
 	}
 
-	function intentNeedsExplicitWorkspace(kind: LaunchIntent['kind']): boolean {
-		return ['newNote', 'openFile', 'openDir', 'share', 'importFiles'].includes(kind);
-	}
-
-	async function handleShareIntent(intent: LaunchIntent, workspacePath: string) {
-		const behavior = intent.shareBehavior ?? get(pwaPreferences).shareBehavior;
-		if (behavior === 'ask') {
-			pendingIntent = intent;
+	async function openIntentChat(intent: LaunchIntent) {
+		if (!intent.chatId) {
+			focusDefaultHomeTab();
 			return;
 		}
+		if (intent.workspace) {
+			await rememberWorkspace(intent.workspace);
+			openHomeStripChat(intent.chatId, intent.workspace);
+			return;
+		}
+		const chat = await getChat(intent.chatId).catch(() => null);
+		const chatWorkspace = chat?.chat.meta?.workspace;
+		if (typeof chatWorkspace === 'string' && chatWorkspace) {
+			await rememberWorkspace(chatWorkspace);
+			openHomeStripChat(intent.chatId, chatWorkspace);
+		} else {
+			openHomeStripChat(intent.chatId);
+		}
+	}
 
+	async function handleShareIntent(intent: LaunchIntent) {
 		let share = intent.share;
 		if (intent.payloadId) {
 			share = (await getSharePayload(intent.payloadId)) ?? share;
 			await deleteSharePayload(intent.payloadId).catch(() => {});
 		}
 		if (!share) return;
-
-		sessionStorage.setItem(`cptr:intent:chatDraft:${workspacePath}`, shareMarkdown(share));
-		await openProjectSessionTab(workspacePath);
+		const markdown = shareMarkdown(share);
+		sessionStorage.setItem('cptr:intent:chatDraft:', markdown);
+		window.dispatchEvent(new CustomEvent('cptr:chat-draft', { detail: markdown }));
+		focusDefaultHomeTab();
 	}
 
-	async function importIntentFiles(intent: LaunchIntent, workspacePath: string) {
+	async function homeDirectory(): Promise<string> {
+		try {
+			const welcome = await getWelcome();
+			const suggestions = (welcome as { suggestions?: { path?: string }[] }).suggestions;
+			const home = suggestions?.[0]?.path;
+			if (typeof home === 'string' && home) return home;
+		} catch {
+			// The import has no folder to land in.
+		}
+		return '';
+	}
+
+	async function resolveImportDirectory(intent: LaunchIntent): Promise<string> {
+		if (intent.targetDir) return intent.targetDir;
+		const prefs = get(pwaPreferences);
+		const configured = prefs.importFolder?.trim() ?? '';
+		if (prefs.importDestination === 'configuredFolder' && configured.startsWith('/')) return configured;
+		const root = intent.workspace || (await homeDirectory());
+		if (!root) return '';
+		if (prefs.importDestination === 'configuredFolder' && configured) {
+			return `${root}/${configured.replace(/^\/+/, '')}`;
+		}
+		return root;
+	}
+
+	async function importIntentFiles(intent: LaunchIntent) {
 		const files = intent.importFiles?.files;
 		if (!files?.length) return;
-		const prefs = get(pwaPreferences);
-		if (prefs.importDestination === 'askFolder' && !intent.targetDir) {
-			folderPickerIntent = intent;
-			folderPickerWorkspace = workspacePath;
-			showPicker = true;
-			return;
-		}
-		const directory = resolveImportDirectory(workspacePath, intent.targetDir);
+		const directory = await resolveImportDirectory(intent);
+		if (!directory) return;
 		for (const file of files) {
 			const form = new FormData();
 			form.append('file', file, file.name);
 			form.append('directory', directory);
 			await uploadFilesApi(directory, form);
 		}
-	}
-
-	function resolveImportDirectory(workspacePath: string, targetDir?: string): string {
-		if (targetDir) return targetDir;
-		const prefs = get(pwaPreferences);
-		if (prefs.importDestination !== 'configuredFolder' || !prefs.importFolder?.trim()) {
-			return workspacePath;
-		}
-		const folder = prefs.importFolder.trim();
-		if (folder.startsWith('/')) return folder;
-		return `${workspacePath}/${folder.replace(/^\/+/, '')}`;
-	}
-
-	async function chooseIntentWorkspace(path: string, behavior?: ShareBehavior) {
-		if (!pendingIntent) return;
-		addWorkspace(path);
-		const intent: LaunchIntent = {
-			...pendingIntent,
-			workspace: path,
-			shareBehavior: behavior ?? pendingIntent.shareBehavior
-		};
-		pendingIntent = null;
-		currentWorkspace.set(null);
-		await handleIntent(intent);
-	}
-
-	function handlePickedImportFolder(path: string) {
-		if (!folderPickerIntent || !folderPickerWorkspace) return;
-		const intent: LaunchIntent = {
-			...folderPickerIntent,
-			workspace: folderPickerWorkspace,
-			targetDir: path
-		};
-		folderPickerIntent = null;
-		folderPickerWorkspace = null;
-		showPicker = false;
-		void handleIntent(intent);
 	}
 
 	$effect(() => {
@@ -723,9 +661,6 @@
 							tabId={tab.id}
 							workspace={tab.workspace ?? ''}
 							active={tab.id === homePane.activeTabId}
-							onworkspacechange={isSessionHomepage(tab)
-								? (path) => switchSessionWorkspace(path, homePane.id)
-								: undefined}
 							ontabupdate={updateHomeChatTab}
 							onopenchat={(chatId) => {
 								if (chatId) openHomeStripChat(chatId, tab.workspace);
@@ -857,26 +792,6 @@
 		{/if}
 	</div>
 {/snippet}
-
-{#if pendingIntent}
-	<WorkspacePicker
-		intent={pendingIntent}
-		workspaces={$workspaceList}
-		onchoose={chooseIntentWorkspace}
-		oncancel={() => (pendingIntent = null)}
-	/>
-{/if}
-
-{#if showPicker}
-	<DirectoryPicker
-		onclose={() => {
-			showPicker = false;
-			folderPickerIntent = null;
-			folderPickerWorkspace = null;
-		}}
-		onselect={folderPickerIntent ? handlePickedImportFolder : undefined}
-	/>
-{/if}
 
 <style>
 	@reference "../app.css";

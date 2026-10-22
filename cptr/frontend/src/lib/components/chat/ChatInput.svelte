@@ -19,8 +19,6 @@
 	import UsageIndicator from './UsageIndicator.svelte';
 	import Popover from '../common/Popover.svelte';
 	import { chatModels } from '$lib/stores/chat';
-	import { workspaceList } from '$lib/stores';
-	import { getPathDisplayName } from '$lib/utils/paths';
 	import SendButton from './SendButton.svelte';
 	import PlusMenu from './PlusMenu.svelte';
 	import QueuedMessageItem from './QueuedMessageItem.svelte';
@@ -70,8 +68,6 @@
 		onqueuedelete?: (id: string) => void;
 		onsettingschange?: () => void;
 		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
-		/** New-chat landing only: pick the workspace the chat will belong to. */
-		onworkspacechange?: (path: string) => void;
 	}
 	let {
 		inputText = $bindable(),
@@ -102,17 +98,14 @@
 		onqueueedit,
 		onqueuedelete,
 		onsettingschange,
-		ontoolapprovalchange,
-		onworkspacechange
+		ontoolapprovalchange
 	}: Props = $props();
 
 	let editorEl: HTMLDivElement | undefined = $state();
 	let editor: Editor | null = $state(null);
 	let selectedSlashCommandIndex = $state(0);
 	let modelSelector: ModelHubMenu | undefined = $state();
-	let workspaceChipEl: HTMLButtonElement | undefined = $state();
 	let approvalChipEl: HTMLButtonElement | undefined = $state();
-	let workspaceMenuOpen = $state(false);
 	let approvalMenuOpen = $state(false);
 	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
 	// Grok's auto mode is its auto-review: risky calls are refused rather than asked about.
@@ -138,9 +131,6 @@
 		approvalModes.find((mode) => mode.value === toolApprovalMode)?.label ??
 			$t('plusMenu.toolPermissions')
 	);
-	const workspaceLabel = $derived(
-		workspace ? getPathDisplayName(workspace, 'workspace') : $t('sidebar.defaultWorkspace')
-	);
 	const modelContextWindow = $derived(selectedChatModel?.context_window);
 	// A window the agent CLI does not offer is not sent to it, so the CLI default applies.
 	const usageContextWindow = $derived(
@@ -158,10 +148,6 @@
 		else onsettingschange?.();
 	}
 
-	function selectWorkspace(path: string) {
-		workspaceMenuOpen = false;
-		onworkspacechange?.(path);
-	}
 	function isMobileInput(): boolean {
 		return (
 			typeof window !== 'undefined' &&
@@ -897,21 +883,6 @@
 	<!-- Composer chips: one row when the composer is wide; one chip per row when it is narrow. -->
 	<div class="composer-chips-wrap">
 		<div class="composer-chips mb-2 flex items-center gap-2 px-0.5" data-intro="chips">
-			<button
-				bind:this={workspaceChipEl}
-				type="button"
-				class="composer-chip min-w-0"
-				class:static-chip={!onworkspacechange}
-				disabled={!onworkspacechange}
-				title={workspace || workspaceLabel}
-				onclick={() => (workspaceMenuOpen = !workspaceMenuOpen)}
-			>
-				<Icon name={workspace ? 'folder' : 'home'} size={13} class="shrink-0" />
-				<span class="truncate">{workspaceLabel}</span>
-				{#if onworkspacechange}
-					<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
-				{/if}
-			</button>
 			<div class="composer-chips-side ml-auto flex min-w-0 items-center gap-1.5">
 				<UsageIndicator
 					{contextUsage}
@@ -929,37 +900,6 @@
 			</div>
 		</div>
 	</div>
-
-	{#if workspaceMenuOpen && workspaceChipEl && onworkspacechange}
-		<Popover anchor={workspaceChipEl} width="15rem" onclose={() => (workspaceMenuOpen = false)}>
-			<button type="button" class="menu-option" onclick={() => selectWorkspace('')}>
-				<Icon name="home" size={13} class="shrink-0" />
-				<span class="flex-1 truncate text-left">{$t('sidebar.defaultWorkspace')}</span>
-				{#if !workspace}<Icon name="check" size={12} class="shrink-0 menu-check" />{/if}
-			</button>
-			{#if $workspaceList.length > 0}
-				<div class="app-divider h-px mx-1 my-0.5"></div>
-				<div class="max-h-56 overflow-y-auto">
-					{#each $workspaceList as ws (ws.path)}
-						<button
-							type="button"
-							class="menu-option"
-							title={ws.path}
-							onclick={() => selectWorkspace(ws.path)}
-						>
-							<Icon name="folder" size={13} class="shrink-0" />
-							<span class="flex-1 truncate text-left">{ws.name}</span>
-							{#if workspace === ws.path}<Icon
-									name="check"
-									size={12}
-									class="shrink-0 menu-check"
-								/>{/if}
-						</button>
-					{/each}
-				</div>
-			{/if}
-		</Popover>
-	{/if}
 
 	<div class="app-surface rounded-3xl shadow-lg border transition px-1" data-intro="composer">
 		<!-- Uploaded Files Preview -->
@@ -1152,34 +1092,6 @@
 <style>
 	@reference "../../../app.css";
 
-	/* ── Composer chips (Grok-style) ───────────── */
-	.composer-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-		height: 1.875rem;
-		max-width: 14rem;
-		padding: 0 0.75rem;
-		border-radius: 0.75rem;
-		border: 1px solid color-mix(in oklab, var(--app-fg) 10%, transparent);
-		background: var(--app-bg);
-		color: var(--app-fg-muted);
-		font-size: 0.75rem;
-		box-shadow: 0 1px 2px color-mix(in oklab, black 5%, transparent);
-		transition:
-			border-color 0.1s,
-			color 0.1s;
-	}
-
-	.composer-chip:hover:not(:disabled) {
-		color: var(--app-fg);
-		border-color: color-mix(in oklab, var(--app-fg) 20%, transparent);
-	}
-
-	.composer-chip.static-chip {
-		cursor: default;
-	}
-
 	/* The chips query the composer width, not the viewport, so a narrow window
 	   stacks them even when the screen itself is wide. */
 	.composer-chips-wrap {
@@ -1199,16 +1111,6 @@
 			flex-direction: column;
 			align-items: flex-start;
 			gap: 0.5rem;
-		}
-
-		.composer-chip {
-			max-width: 100%;
-			width: fit-content;
-		}
-
-		.composer-chip > span {
-			max-width: none;
-			min-width: 0;
 		}
 
 		.composer-chips :global(.usage-chip),

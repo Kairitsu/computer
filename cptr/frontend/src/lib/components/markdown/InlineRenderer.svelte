@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Token } from 'marked';
-	import { openDirectoryAsSession } from '$lib/stores';
 	import { t } from '$lib/i18n';
 
 	interface Props {
@@ -69,13 +68,9 @@
 			{@const filePath = isDirectory ? rawPath.slice(0, -1) : rawPath}
 			{@const fileName = filePath.split('/').pop() || filePath}
 			{#if isDirectory}
-				<button
-					class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium cursor-pointer border-none text-blue-500 dark:text-blue-400 hover:bg-blue-500/8 transition-colors align-baseline"
+				<span
+					class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium text-blue-500 dark:text-blue-400 align-baseline"
 					title={filePath}
-					onclick={(e) => {
-						e.preventDefault();
-						openDirectoryAsSession(filePath);
-					}}
 				>
 					<svg
 						class="w-3.5 h-3.5 shrink-0"
@@ -91,7 +86,7 @@
 						/>
 					</svg>
 					{fileName}
-				</button>
+				</span>
 			{:else}
 				<span
 					class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium text-blue-500 dark:text-blue-400 align-baseline"

@@ -1,10 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { addWorkspace, openProjectSessionTab } from '$lib/stores';
-
 	import { formatChord, keybindings } from '$lib/stores/keybindings';
 	import { t } from '$lib/i18n';
-	import DirectoryPicker from './DirectoryPicker.svelte';
 
 	interface Props {
 		oncomplete: () => void;
@@ -13,27 +9,14 @@
 	let { oncomplete }: Props = $props();
 
 	let step = $state(0);
-	const totalSteps = 3;
-
-	// ── Step 2: Folder ──────────────────────────────────────────
-	let selectedPath = $state('');
-	let showPicker = $state(false);
+	const totalSteps = 2;
 
 	function next() {
 		if (step < totalSteps - 1) step++;
 	}
 
-	function skipFolder() {
-		next();
-	}
-
-	async function finish() {
+	function finish() {
 		oncomplete();
-
-		if (selectedPath) {
-			await openProjectSessionTab(selectedPath);
-			await goto('/');
-		}
 	}
 
 	let searchShortcut = $derived(formatChord($keybindings.quickOpen));
@@ -72,38 +55,6 @@
 				</button>
 			</div>
 		{:else if step === 1}
-			<!-- Open folder -->
-			<div class="animate-in">
-				<h2 class="text-xs text-gray-400 dark:text-gray-600 mb-1">
-					{$t('onboarding.openFolder')}
-				</h2>
-				<p class="text-[0.8125rem] text-gray-500 dark:text-gray-500 mb-4 leading-relaxed">
-					{$t('onboarding.openFolderDesc')}
-				</p>
-
-				{#if selectedPath}
-					<p class="text-[0.75rem] font-mono text-gray-700 dark:text-gray-300 mb-3">
-						{selectedPath}
-					</p>
-				{/if}
-
-				<button
-					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
-					onclick={() => (showPicker = true)}
-				>
-					{$t('onboarding.openFolder')}
-				</button>
-
-				<div class="mt-4">
-					<button
-						class="text-[0.6875rem] text-gray-400 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors duration-100"
-						onclick={skipFolder}
-					>
-						{$t('onboarding.skip')}
-					</button>
-				</div>
-			</div>
-		{:else if step === 2}
 			<!-- Ready -->
 			<div class="animate-in">
 				<h2 class="text-xs text-gray-400 dark:text-gray-600 mb-1">
@@ -135,18 +86,6 @@
 		{/if}
 	</div>
 </div>
-
-{#if showPicker}
-	<DirectoryPicker
-		onclose={() => (showPicker = false)}
-		onselect={(path) => {
-			selectedPath = path;
-			addWorkspace(path);
-			showPicker = false;
-			next();
-		}}
-	/>
-{/if}
 
 <style>
 	.animate-in {

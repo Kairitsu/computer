@@ -16,11 +16,9 @@
 	import { session } from '$lib/session';
 	import { toast } from 'svelte-sonner';
 	import {
-		getAdminConfig,
 		getChatRetention,
 		previewChatRetention,
 		updateChatRetention,
-		updateConfig,
 		type ChatRetention
 	} from '$lib/apis/admin';
 	import { requestConfirm } from '$lib/stores/confirm';
@@ -96,40 +94,12 @@
 		input.value = String(retention.days);
 	}
 
-	// Workspace setting, server-wide; admins set it.
-	let autoGitignoreDotCptr = $state<boolean | null>(null);
-	let savingWorkspace = $state(false);
-
 	$effect(() => {
 		if ($session?.role !== 'admin' || processSettings) return;
 		getGrokProcessSettings()
 			.then((settings) => (processSettings = settings))
 			.catch(() => {});
 	});
-
-	$effect(() => {
-		if ($session?.role !== 'admin' || autoGitignoreDotCptr !== null) return;
-		getAdminConfig()
-			.then(
-				(config) => (autoGitignoreDotCptr = config['workspace.auto_gitignore_dot_cptr'] !== false)
-			)
-			.catch(() => toast.error($t('admin.failedToLoadConfig')));
-	});
-
-	async function saveAutoGitignore(value: boolean) {
-		const previous = autoGitignoreDotCptr;
-		autoGitignoreDotCptr = value;
-		savingWorkspace = true;
-		try {
-			await updateConfig({ 'workspace.auto_gitignore_dot_cptr': value });
-			toast.success($t('settings.saved'));
-		} catch {
-			autoGitignoreDotCptr = previous;
-			toast.error($t('admin.failedToSave'));
-		} finally {
-			savingWorkspace = false;
-		}
-	}
 
 	async function saveProcessSetting(key: keyof GrokProcessSettings, input: HTMLInputElement) {
 		if (!processSettings) return;
@@ -330,23 +300,6 @@
 			</label>
 			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 				{$t('general.chatRetentionDesc')}
-			</p>
-		{/if}
-
-		{#if $session?.role === 'admin' && autoGitignoreDotCptr !== null}
-			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('admin.workspace')}</h3>
-			<label class="flex items-center justify-between cursor-pointer">
-				<span class="text-xs text-gray-600 dark:text-gray-400"
-					>{$t('admin.workspaceAutoGitignoreDotCptr')}</span
-				>
-				<ToggleSwitch
-					value={autoGitignoreDotCptr}
-					onchange={saveAutoGitignore}
-					disabled={savingWorkspace}
-				/>
-			</label>
-			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
-				{$t('admin.workspaceAutoGitignoreDotCptrHint')}
 			</p>
 		{/if}
 

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { sidebarOpen, sidebarWidth } from '$lib/stores';
-	import DirectoryPicker from './DirectoryPicker.svelte';
 	import SidebarFooter from './SidebarFooter.svelte';
 	import SidebarHeader from './SidebarHeader.svelte';
 	import SidebarNav from './SidebarNav.svelte';
@@ -9,7 +8,6 @@
 	import SystemInfoModal from './SystemInfoModal.svelte';
 	import { t } from '$lib/i18n';
 
-	let showPicker = $state(false);
 	let showSettings = $state(false);
 	let showSystemInfo = $state(false);
 	let settingsTab = $state<string>('general');
@@ -79,13 +77,9 @@
 		></div>
 		<SidebarHeader />
 		<SidebarNav />
-		<SidebarWorkspaceList onaddworkspace={() => (showPicker = true)} />
+		<SidebarWorkspaceList />
 		<SidebarFooter onsettings={openSettings} onsysteminfo={openSystemInfo} />
 	</aside>
-{/if}
-
-{#if showPicker}
-	<DirectoryPicker onclose={() => (showPicker = false)} />
 {/if}
 
 {#if showSettings}

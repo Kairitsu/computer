@@ -924,8 +924,7 @@ if (typeof BroadcastChannel !== 'undefined') {
 // ── Workspace actions ───────────────────────────────────────────
 
 /**
- * Register a workspace path in the sidebar list.
- * Opening the project itself is openProjectSessionTab(), which adds a session tab.
+ * Remember a folder that already has chats, so those chats stay in the sidebar list.
  */
 export function addWorkspace(path: string): void {
 	const name = getPathDisplayName(path, path);
@@ -1022,30 +1021,15 @@ export function openNewSessionTab(workspace = '', groupId?: string): void {
 	updateHomeGroup(gid, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
 }
 
-/** A folder link opens the project session that contains it, not the folder listing. */
-export function openDirectoryAsSession(path: string): void {
-	const cleaned = path.replace(/\/+$/, '');
-	if (!cleaned) return;
-	let best = '';
-	for (const ws of get(workspaceList)) {
-		const root = ws.path.replace(/\/+$/, '');
-		if ((cleaned === root || cleaned.startsWith(root + '/')) && root.length > best.length) {
-			best = root;
-		}
-	}
-	void openProjectSessionTab(best || cleaned);
-}
+/** Folder links no longer open a project session. */
+export function openDirectoryAsSession(_path: string): void {}
 
-/** Open another project session homepage. Repeating the same project opens another tab. */
-export async function openProjectSessionTab(workspace: string, groupId?: string): Promise<void> {
-	const requested = workspace.trim();
-	if (!requested) {
-		focusDefaultHomeTab();
-		return;
-	}
-	showSessionHome();
-	const path = await rememberWorkspace(requested);
-	openNewSessionTab(path, groupId);
+/** Project pages are gone. A request to open one returns to the home chat. */
+export async function openProjectSessionTab(
+	_workspace?: string,
+	_groupId?: string
+): Promise<void> {
+	focusDefaultHomeTab();
 }
 
 /** Open a saved chat in the home tab strip, or switch to the tab already showing it. */
@@ -1079,16 +1063,9 @@ export function openHomeStripChat(chatId: string, workspace?: string, groupId?: 
 	updateHomeGroup(gid, (tabs) => ({ tabs: [...tabs, tab], activeTabId: tab.id }));
 }
 
-/**
- * Workspace chip on a session homepage.
- * Default workspace returns to the existing new-chat home. A project always opens a new tab.
- */
-export function switchSessionWorkspace(path: string, groupId?: string): void {
-	if (!path) {
-		focusDefaultHomeTab();
-		return;
-	}
-	void openProjectSessionTab(path, groupId);
+/** The workspace switcher is gone. Stay on the home chat. */
+export function switchSessionWorkspace(_path?: string, _groupId?: string): void {
+	focusDefaultHomeTab();
 }
 
 /** Remove home-strip tabs showing a chat, for example after it is deleted. */

@@ -4,11 +4,8 @@
 		currentWorkspace,
 		showSearch,
 		requestHomeChat,
-		openProjectSessionTab,
 		openHomeStripChat
 	} from '$lib/stores';
-	import { get } from 'svelte/store';
-	import { getPathDisplayName } from '$lib/utils/paths';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import {
 		unifiedSearch,
@@ -266,24 +263,6 @@
 		return { destroy: () => observer.disconnect() };
 	}
 
-	function getWorkspaceDisplayName(workspacePath: string): string {
-		if (!workspacePath) return $t('sidebar.defaultWorkspace');
-		const workspace = $workspaceList.find((item) => item.path === workspacePath);
-		if (workspace) return workspace.name;
-		return getPathDisplayName(workspacePath, workspacePath);
-	}
-
-	function owningWorkspace(path: string): string | null {
-		let best: string | null = null;
-		for (const ws of get(workspaceList)) {
-			const root = ws.path.endsWith('/') ? ws.path.slice(0, -1) : ws.path;
-			if ((path === root || path.startsWith(root + '/')) && (!best || root.length > best.length)) {
-				best = root;
-			}
-		}
-		return best;
-	}
-
 	function selectChat(chat: ChatSearchResult) {
 		onclose();
 		if (!chat.workspace) {
@@ -296,39 +275,16 @@
 		void goto('/');
 	}
 
-	function openOwningProject(path: string, workspace?: string) {
-		const target = workspace || owningWorkspace(path);
-		if (target) void openProjectSessionTab(target);
+	function selectFile(_file: FileSearchResult) {
+		onclose();
 	}
 
-	function selectFile(file: FileSearchResult) {
+	function selectFileMatch(_match: FileMatch) {
 		onclose();
-		currentWorkspace.set(null);
-		if (file.type === 'directory') {
-			void openProjectSessionTab(file.workspace || file.path);
-		} else {
-			openOwningProject(file.path, file.workspace);
-		}
-		void goto('/');
 	}
 
-	function selectFileMatch(match: FileMatch) {
+	function selectContentMatch(_match: FileMatch, _content: ContentMatch) {
 		onclose();
-		currentWorkspace.set(null);
-		if (match.type === 'directory') {
-			const workspace = owningWorkspace(match.path);
-			if (workspace) void openProjectSessionTab(workspace);
-		} else {
-			openOwningProject(match.path);
-		}
-		void goto('/');
-	}
-
-	function selectContentMatch(match: FileMatch, _content: ContentMatch) {
-		onclose();
-		currentWorkspace.set(null);
-		openOwningProject(match.path);
-		void goto('/');
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -488,9 +444,6 @@
 								class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-100"
 							/>
 						{/if}
-						<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 shrink-0"
-							>{getWorkspaceDisplayName(chat.workspace)}</span
-						>
 					</button>
 				{/each}
 			{:else if showingRecents}
@@ -529,9 +482,6 @@
 									</div>
 								{/if}
 							</div>
-							<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 shrink-0"
-								>{getWorkspaceDisplayName(chat.workspace)}</span
-							>
 						</button>
 					{/each}
 				{/if}
@@ -568,9 +518,6 @@
 							<span
 								class="text-[0.6875rem] text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap"
 								>{parentPath(match.relative_path)}</span
-							>
-							<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 shrink-0 ml-auto"
-								>{getWorkspaceDisplayName(effectiveWorkspace!.path)}</span
 							>
 						</button>
 						{#if match.content_matches.length > 0}
@@ -634,9 +581,6 @@
 								class="text-[0.6875rem] text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap"
 								>{displayRelativePath(match.path, effectiveWorkspace!.path)}</span
 							>
-							<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 shrink-0 ml-auto"
-								>{getWorkspaceDisplayName(effectiveWorkspace!.path)}</span
-							>
 						</button>
 						{#if match.content_matches.length > 0}
 							{@const content = match.content_matches[0]}
@@ -698,9 +642,6 @@
 							<span
 								class="text-[0.6875rem] text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap"
 								>{relPath(file.path, file.workspace)}</span
-							>
-							<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 shrink-0 ml-auto"
-								>{getWorkspaceDisplayName(file.workspace)}</span
 							>
 						</button>
 					{/each}

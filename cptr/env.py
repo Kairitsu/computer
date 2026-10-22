@@ -64,10 +64,6 @@ CHAT_TOOL_COMMAND_MAX_CHARS = int(os.environ.get("CHAT_TOOL_COMMAND_MAX_CHARS", 
 CHAT_COMPACT_TOKEN_THRESHOLD = int(os.environ.get("CHAT_COMPACT_TOKEN_THRESHOLD", "80000"))
 AGENT_SEED_TRANSCRIPT_MAX_CHARS = max(0, _env_int("CHAT_AGENT_SEED_TRANSCRIPT_MAX_CHARS", 12000))
 
-# ── Workspace storage ───────────────────────────────────────
-WORKSPACE_AUTO_GITIGNORE_DOT_CPTR_ENV = os.environ.get("CPTR_AUTO_GITIGNORE_DOT_CPTR")
-WORKSPACE_AUTO_GITIGNORE_DOT_CPTR = _env_bool("CPTR_AUTO_GITIGNORE_DOT_CPTR", "true")
-
 # ── CORS ────────────────────────────────────────────────────
 # Socket.IO CORS allowed origins.
 # Default → "*" (allow all origins)
