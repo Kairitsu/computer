@@ -12,11 +12,13 @@
 	interface Props {
 		chat: ChatInfo;
 		isSelected?: boolean;
+		/** Keep the row action visible while its menu is open. */
+		menuOpen?: boolean;
 		onclick: () => void;
 		/** Optional menu button click handler */
 		onmenu?: (e: MouseEvent) => void;
 	}
-	let { chat, isSelected = false, onclick, onmenu }: Props = $props();
+	let { chat, isSelected = false, menuOpen = false, onclick, onmenu }: Props = $props();
 	let status = $derived($chatStatuses.get(chat.id));
 	let active = $derived(status?.active ?? chat.is_active ?? false);
 	let unread = $derived(
@@ -42,6 +44,7 @@
 <div
 	class="chat-item group/chat flex items-center gap-1.5 w-full h-8 px-2 rounded-lg cursor-pointer transition-colors duration-75"
 	class:selected={isSelected}
+	class:menu-open={menuOpen}
 	role="button"
 	tabindex="0"
 	{onclick}
@@ -98,8 +101,14 @@
 
 	.chat-item:hover .chat-time,
 	.chat-item:focus-within .chat-time,
+	.chat-item.menu-open .chat-time,
 	.chat-item:hover .chat-menu,
-	.chat-item:focus-within .chat-menu {
+	.chat-item:focus-within .chat-menu,
+	.chat-item.menu-open .chat-menu {
 		display: inline-flex;
+	}
+
+	.chat-item.menu-open:not(.selected) {
+		background: var(--app-hover);
 	}
 </style>

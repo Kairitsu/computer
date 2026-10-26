@@ -24,6 +24,10 @@
 		actionIcon?: string;
 		actionLabel?: string;
 		actionOnclick?: (anchor: HTMLElement) => void;
+		/** Keep the menu open after the row is chosen. */
+		keepOpen?: boolean;
+		/** Destructive action, drawn in red. */
+		danger?: boolean;
 	}
 
 	interface Props {
@@ -182,6 +186,9 @@
 
 		if (anchor instanceof HTMLElement) {
 			const rect = anchor.getBoundingClientRect();
+			// A hidden trigger reports 0×0 at the viewport origin. Keep the last
+			// real position instead of jumping the menu to the top of the page.
+			if (rect.width === 0 && rect.height === 0) return;
 			ax = rect.left;
 			anchorTop = rect.top;
 			anchorBottom = rect.bottom;
@@ -335,6 +342,7 @@
 
 	$effect(() => {
 		maxHeight;
+		items;
 		if (menuEl) scheduleSettledUpdates();
 	});
 
@@ -403,10 +411,9 @@
 					<div class="app-divider h-px mx-1 my-0.5"></div>
 				{:else}
 					<div
-						class="group menu-row flex items-center gap-1 w-full h-6 rounded-xl text-xs transition-colors duration-75 {item.active ||
-						item.highlighted
-							? 'app-interactive-active'
-							: ''}"
+						class="group menu-row flex items-center gap-1 w-full rounded-xl text-xs transition-colors duration-75 {item.danger
+							? 'h-8 danger'
+							: 'h-6'} {item.active || item.highlighted ? 'app-interactive-active' : ''}"
 						data-menu-highlighted={item.highlighted ? 'true' : undefined}
 						data-menu-active={item.active ? 'true' : undefined}
 					>
@@ -415,7 +422,7 @@
 							use:tooltip={item.tooltip ? { content: item.tooltip, placement: 'top' } : null}
 							onclick={() => {
 								item.onclick();
-								onclose();
+								if (!item.keepOpen) onclose();
 							}}
 						>
 							{#if item.image}
@@ -477,5 +484,15 @@
 	.menu-row:hover {
 		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
 		color: var(--app-fg);
+	}
+
+	.menu-row.danger {
+		color: #dc2626;
+		font-weight: 600;
+	}
+
+	.menu-row.danger:hover {
+		background: color-mix(in oklab, #dc2626 14%, transparent);
+		color: #b91c1c;
 	}
 </style>

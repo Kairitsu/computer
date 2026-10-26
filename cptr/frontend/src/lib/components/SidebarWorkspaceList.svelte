@@ -24,9 +24,11 @@
 		type ChatInfo
 	} from '$lib/apis/chat';
 	import { t } from '$lib/i18n';
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import ChatItem from './common/ChatItem.svelte';
 	import DropdownMenu from './DropdownMenu.svelte';
+	import Modal from './Modal.svelte';
 
 	const HOME = '';
 	const PAGE_SIZE = 50;
@@ -41,7 +43,17 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let visibleCount = $state(VISIBLE_STEP);
-	let chatMenu = $state<{ chatId: string; workspace: string; anchor: HTMLElement } | null>(null);
+	let chatMenu = $state<{
+		chatId: string;
+		workspace: string;
+		anchor: HTMLElement;
+		step: 'actions' | 'confirm-delete';
+	} | null>(null);
+	let renameTarget = $state<{ chatId: string; original: string } | null>(null);
+	let renameTitle = $state('');
+	let renameInput = $state<HTMLInputElement | undefined>();
+	let renaming = $state(false);
+	let deleting = $state(false);
 	let unbindSocketListener: (() => void) | null = null;
 	let loadGeneration = 0;
 
@@ -197,7 +209,8 @@
 		chatMenu = {
 			chatId: chat.id,
 			workspace: chat.workspace,
-			anchor: e.currentTarget as HTMLElement
+			anchor: e.currentTarget as HTMLElement,
+			step: 'actions'
 		};
 	}
 
@@ -205,45 +218,135 @@
 		chatMenu = null;
 	}
 
+	function askDeleteChat() {
+		if (!chatMenu) return;
+		chatMenu = { ...chatMenu, step: 'confirm-delete' };
+	}
+
 	function listedChat(chatId: string) {
 		return chats.find((chat) => chat.id === chatId);
 	}
 
-	async function handleDeleteChat() {
-		if (!chatMenu) return;
+	async function confirmDeleteChat() {
+		if (!chatMenu || deleting) return;
 		const { chatId, workspace } = chatMenu;
+		const title = listedChat(chatId)?.title ?? '';
+		deleting = true;
 		closeChatMenu();
-		await apiDeleteChat(chatId);
-		buckets = new Map(
-			[...buckets].map(([path, bucket]) => [
-				path,
-				{ ...bucket, chats: bucket.chats.filter((chat) => chat.id !== chatId) }
-			])
-		);
-		closeHomeStripChat(chatId);
-		if (currentPath === workspace && currentChatId === chatId) {
-			if (!workspace) focusDefaultHomeTab();
-			void goto('/');
+		try {
+			await apiDeleteChat(chatId);
+			buckets = new Map(
+				[...buckets].map(([path, bucket]) => [
+					path,
+					{ ...bucket, chats: bucket.chats.filter((chat) => chat.id !== chatId) }
+				])
+			);
+			closeHomeStripChat(chatId);
+			if (currentPath === workspace && currentChatId === chatId) {
+				if (!workspace) focusDefaultHomeTab();
+				void goto('/');
+			}
+			toast.success($t('chat.history.deleted', { title }));
+		} catch {
+			toast.error($t('chat.history.deleteFailed'));
+		} finally {
+			deleting = false;
 		}
 	}
 
-	async function handleRenameChat() {
+	function startRename() {
 		if (!chatMenu) return;
-		const { chatId } = chatMenu;
-		const chat = listedChat(chatId);
-		const title = window.prompt($t('files.rename'), chat?.title)?.trim();
-		if (!title || title === chat?.title) return;
-		await updateChatTitle(chatId, title);
-		buckets = new Map(
-			[...buckets].map(([path, bucket]) => [
-				path,
-				{
-					...bucket,
-					chats: bucket.chats.map((item) => (item.id === chatId ? { ...item, title } : item))
-				}
-			])
-		);
+		const chat = listedChat(chatMenu.chatId);
+		renameTarget = { chatId: chatMenu.chatId, original: chat?.title ?? '' };
+		renameTitle = chat?.title ?? '';
 	}
+
+	function closeRename() {
+		if (renaming) return;
+		renameTarget = null;
+		renameTitle = '';
+	}
+
+	async function submitRename() {
+		if (!renameTarget || renaming) return;
+		const title = renameTitle.trim();
+		const { chatId, original } = renameTarget;
+		if (!title || title === original) {
+			renaming = false;
+			renameTarget = null;
+			renameTitle = '';
+			return;
+		}
+		renaming = true;
+		try {
+			await updateChatTitle(chatId, title);
+			buckets = new Map(
+				[...buckets].map(([path, bucket]) => [
+					path,
+					{
+						...bucket,
+						chats: bucket.chats.map((item) => (item.id === chatId ? { ...item, title } : item))
+					}
+				])
+			);
+			renameTarget = null;
+			renameTitle = '';
+		} catch {
+			toast.error($t('chat.history.renameFailed'));
+		} finally {
+			renaming = false;
+		}
+	}
+
+	$effect(() => {
+		if (!renameTarget) return;
+		void tick().then(() => {
+			renameInput?.focus();
+			renameInput?.select();
+		});
+	});
+
+	const menuItems = $derived.by(() => {
+		if (!chatMenu) return [];
+		if (chatMenu.step === 'confirm-delete') {
+			return [
+				{
+					label: $t('chat.history.deleteConfirm'),
+					icon: 'trash',
+					danger: true,
+					onclick: (): void => {
+						void confirmDeleteChat();
+					}
+				},
+				{
+					label: $t('common.cancel'),
+					onclick: closeChatMenu
+				}
+			];
+		}
+		return [
+			...(chatMenu.workspace
+				? [
+						{
+							label: $t('files.copyPath'),
+							icon: 'copy',
+							onclick: copyChatPath
+						}
+					]
+				: []),
+			{
+				label: $t('files.rename'),
+				icon: 'pencil',
+				onclick: startRename
+			},
+			{
+				label: $t('chat.history.delete'),
+				icon: 'trash',
+				keepOpen: true,
+				onclick: askDeleteChat
+			}
+		];
+	});
 
 	function copyChatPath() {
 		if (!chatMenu?.workspace) return;
@@ -335,6 +438,7 @@
 						{chat}
 						isSelected={chat.id === currentChatId &&
 							(chat.workspace || HOME) === (currentPath || HOME)}
+						menuOpen={chatMenu?.chatId === chat.id}
 						onclick={() => openChat(chat)}
 						onmenu={(e) => openChatMenu(e, chat)}
 					/>
@@ -349,36 +453,67 @@
 	{/if}
 </div>
 
+{#snippet deleteHint()}
+	<p class="delete-hint">
+		{$t('chat.history.deleteConsequence', {
+			title: listedChat(chatMenu?.chatId ?? '')?.title ?? ''
+		})}
+	</p>
+{/snippet}
+
 {#if chatMenu}
 	<DropdownMenu
 		anchor={chatMenu.anchor}
 		align="end"
-		items={[
-			...(chatMenu.workspace
-				? [
-						{
-							label: $t('files.copyPath'),
-							icon: 'copy',
-							onclick: copyChatPath
-						}
-					]
-				: []),
-			{
-				label: $t('files.rename'),
-				icon: 'pencil',
-				onclick: handleRenameChat
-			},
-			{
-				label: $t('chat.history.delete'),
-				icon: 'trash',
-				onclick: handleDeleteChat
-			}
-		]}
+		items={menuItems}
+		header={chatMenu.step === 'confirm-delete' ? deleteHint : undefined}
+		className={chatMenu.step === 'confirm-delete' ? 'min-w-60 w-max max-w-64' : ''}
 		onclose={closeChatMenu}
 	/>
 {/if}
 
+{#if renameTarget}
+	<Modal onclose={closeRename} class="mx-4 flex w-full max-w-sm flex-col p-4">
+		<h2 class="text-sm font-medium" style="color: var(--app-fg);">{$t('files.rename')}</h2>
+		<input
+			bind:this={renameInput}
+			class="settings-field mt-3 w-full"
+			bind:value={renameTitle}
+			autocomplete="off"
+			spellcheck="false"
+			aria-label={$t('files.rename')}
+			onkeydown={(e) => {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					void submitRename();
+				}
+			}}
+		/>
+		<div class="mt-4 flex justify-end gap-2">
+			<button type="button" class="settings-action" onclick={closeRename}>
+				{$t('common.cancel')}
+			</button>
+			<button
+				type="button"
+				class="h-7 rounded-lg bg-gray-900 px-3 text-xs font-medium text-white transition-colors duration-75 hover:bg-gray-800 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-white/90"
+				disabled={renaming}
+				onclick={() => void submitRename()}
+			>
+				{$t('chat.history.renameConfirm')}
+			</button>
+		</div>
+	</Modal>
+{/if}
+
 <style>
+	.delete-hint {
+		padding: 0.5rem 0.625rem 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		line-height: 1.45;
+		color: var(--app-fg);
+	}
+
 	.history-label {
 		position: sticky;
 		top: 0;
