@@ -10,9 +10,9 @@ from fastapi import HTTPException
 
 from cptr.models import Config
 from cptr.utils.anyrouter import (
-    ANYROUTER_CODEX,
-    ANYROUTER_HOME,
+    ANYROUTER_CLAUDE,
     ANYROUTER_PROFILE_ID,
+    CLAUDE_HOME,
     DEFAULT_MODEL as ANYROUTER_DEFAULT_MODEL,
 )
 
@@ -32,25 +32,26 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
 ]
 
 _PROFILE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_VALID_AGENTS = {"grok", "codex"}
+_VALID_AGENTS = {"grok", "claude"}
+_LEGACY_ANYROUTER_AGENTS = {"claude", "codex"}
 _VALID_MODES = {"auto", "enabled", "disabled"}
 _AGENT_DEFAULTS: dict[str, dict[str, str]] = {
     "grok": {"name": "Grok", "command": "grok", "model": ""},
-    "codex": {"name": "AnyRouter", "command": ANYROUTER_CODEX, "model": ANYROUTER_DEFAULT_MODEL},
+    "claude": {"name": "AnyRouter", "command": ANYROUTER_CLAUDE, "model": ANYROUTER_DEFAULT_MODEL},
 }
 
 
 def fixed_anyrouter_profile(mode: str = "auto") -> dict[str, Any]:
-    """The only Codex profile: AnyRouter, on its own CODEX_HOME."""
+    """The only Claude Code profile: AnyRouter, on its own config directory."""
     if mode not in _VALID_MODES:
         mode = "auto"
     return {
         "id": ANYROUTER_PROFILE_ID,
-        "agent": "codex",
+        "agent": "claude",
         "name": "AnyRouter",
         "mode": mode,
-        "command": ANYROUTER_CODEX,
-        "home": str(ANYROUTER_HOME),
+        "command": ANYROUTER_CLAUDE,
+        "home": str(CLAUDE_HOME),
         "models": [],
         "default_model": ANYROUTER_DEFAULT_MODEL,
     }
@@ -67,11 +68,11 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "agent profile id must be a slug up to 64 characters")
 
     agent = str(profile.get("agent") or "").strip()
-    if agent not in _VALID_AGENTS:
-        raise HTTPException(400, "agent must be grok or codex")
-    if agent == "codex":
+    if agent not in _VALID_AGENTS and agent not in _LEGACY_ANYROUTER_AGENTS:
+        raise HTTPException(400, "agent must be grok or claude")
+    if agent in _LEGACY_ANYROUTER_AGENTS:
         if profile_id != ANYROUTER_PROFILE_ID:
-            raise HTTPException(400, "the Codex agent is fixed to AnyRouter")
+            raise HTTPException(400, "the Claude Code agent is fixed to AnyRouter")
         mode = str(profile.get("mode") or "auto").strip()
         return fixed_anyrouter_profile(mode)
     defaults = _AGENT_DEFAULTS[agent]
@@ -136,9 +137,14 @@ def normalize_agent_profiles(raw_profiles: Any) -> list[dict[str, Any]]:
         agent = str(profile.get("agent") or "").strip()
         profile_id = str(profile.get("id") or "").strip()
         # Retired runners stay ignored so an old saved list still loads Grok.
-        if agent not in _VALID_AGENTS and profile_id != ANYROUTER_PROFILE_ID:
+        retired = (
+            agent not in _VALID_AGENTS
+            and agent not in _LEGACY_ANYROUTER_AGENTS
+            and profile_id != ANYROUTER_PROFILE_ID
+        )
+        if retired:
             continue
-        if agent == "codex" or profile_id == ANYROUTER_PROFILE_ID:
+        if agent in _LEGACY_ANYROUTER_AGENTS or profile_id == ANYROUTER_PROFILE_ID:
             anyrouter_mode = str(profile.get("mode") or "auto").strip() or "auto"
             continue
         profiles.append(normalize_agent_profile(profile))

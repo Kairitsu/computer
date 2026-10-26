@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [4.1.0] - 2026-10-26
+
+### Changed
+
+- **AnyRouter 改走 Claude Code** 选中 AnyRouter 时，对话由 Claude Code 发起。模型是这个令牌在这条线路上实际能调用的。已经开过的 AnyRouter 对话还在；下一条消息会新开一个会话，并带上已有的对话内容。Grok 和额度显示不变。
+
 ## [4.0.0] - 2026-10-26
 
 ### Added

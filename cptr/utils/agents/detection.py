@@ -74,7 +74,7 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
     code, version_text = await _run_probe([command, "--version"])
     version = version_text.splitlines()[0] if code == 0 and version_text else None
 
-    if profile.get("agent") == "codex":
+    if profile.get("agent") == "claude":
         return await _detect_anyrouter(command, version)
     if profile.get("agent") != "grok":
         return AgentDetection("error", command, version, "Unknown agent")
@@ -92,7 +92,7 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
 
 
 async def _detect_anyrouter(command: str, version: str | None) -> AgentDetection:
-    from cptr.utils.anyrouter import redact, selectable_model_ids
+    from cptr.utils.anyrouter import reasoning_model_options, redact, selectable_model_ids
 
     try:
         models = await selectable_model_ids()
@@ -106,7 +106,7 @@ async def _detect_anyrouter(command: str, version: str | None) -> AgentDetection
             "AnyRouter did not accept any models for this token.",
             [],
         )
-    return AgentDetection("ready", command, version, None, models, {})
+    return AgentDetection("ready", command, version, None, models, reasoning_model_options(models))
 
 
 async def _probe_grok_models(
@@ -161,7 +161,12 @@ async def get_agent_status(app_state=None, refresh: bool = False) -> dict[str, A
         effective_profile = dict(profile)
         effective_profile["models"] = models
         if models and effective_profile.get("default_model") not in models:
-            effective_profile["default_model"] = models[0]
+            if effective_profile.get("id") == "anyrouter":
+                from cptr.utils.anyrouter import preferred_default
+
+                effective_profile["default_model"] = preferred_default(models)
+            else:
+                effective_profile["default_model"] = models[0]
         entries.append(
             {
                 "id": effective_profile["id"],

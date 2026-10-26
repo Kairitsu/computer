@@ -38,14 +38,14 @@
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok', codex: '/home/ubuntu/.local/bin/codex' }[agent];
+		return { grok: 'grok', claude: '/home/ubuntu/.local/bin/claude' }[agent];
 	}
 
 	function defaultName(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok', codex: 'AnyRouter' }[agent];
+		return { grok: 'Grok', claude: 'AnyRouter' }[agent];
 	}
 
-	const locked = $derived(draft.id === 'anyrouter' || draft.agent === 'codex');
+	const locked = $derived(draft.id === 'anyrouter' || draft.agent === 'claude');
 </script>
 
 <Modal {onclose} class="w-full max-w-md mx-4">
@@ -100,8 +100,8 @@
 					class="settings-field mt-1 w-full"
 				>
 					<option value="grok">Grok</option>
-					{#if draft.agent === 'codex'}
-						<option value="codex">AnyRouter</option>
+					{#if draft.agent === 'claude'}
+						<option value="claude">AnyRouter</option>
 					{/if}
 				</select>
 			</div>
