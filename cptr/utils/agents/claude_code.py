@@ -12,6 +12,7 @@ import codecs
 import json
 import logging
 import os
+import re
 import tempfile
 from collections import deque
 from contextlib import suppress
@@ -334,15 +335,19 @@ def _prompt_tokens(raw: Any) -> int:
 
 
 def _api_error_text(status: Any, message: str) -> str:
-    """Final API failure for the chat, with a plain explanation for AnyRouter's usual ones."""
+    """Final API failure for the chat, with a plain explanation for AnyRouter's usual ones.
+
+    AnyRouter answers a saturated upstream with 503 or with 429 "Service Unavailable".
+    """
     detail = redact(message).strip() or "Claude Code failed"
-    lowered = detail.lower()
-    if str(status) == "503" or "service unavailable" in lowered or " 503 " in f" {lowered} ":
-        return f"AnyRouter 暂时没有可用的上游（503），请稍后再试或换一个模型。\n{detail}"
-    if str(status) == "429" or "rate_limit" in lowered or " 429 " in f" {lowered} ":
-        return f"AnyRouter 限流了这个令牌（429），请过几分钟再试。\n{detail}"
-    if str(status) in {"401", "403"}:
-        return f"AnyRouter 拒绝了令牌（{status}），请检查 {KEY_FILE}。\n{detail}"
+    code = str(status or "")
+    if not code:
+        match = re.search(r"\b(401|403|429|503)\b", detail)
+        code = match.group(1) if match else ""
+    if code in {"429", "503"}:
+        return f"AnyRouter 暂时不可用（{code}），多半是上游繁忙或限流。请稍后再试，或换一个模型。\n{detail}"
+    if code in {"401", "403"}:
+        return f"AnyRouter 拒绝了令牌（{code}），请检查 {KEY_FILE}。\n{detail}"
     return detail
 
 

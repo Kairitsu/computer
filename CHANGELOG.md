@@ -16,7 +16,7 @@
 ### Changed
 
 - **AnyRouter 用自己的一份 Claude Code** 安装脚本会把固定版本（2.1.310）的 Claude Code 装到 `~/.local/share/claude-anyrouter`，配置和令牌放在 `~/.claude-anyrouter`。不再借用这台机器自己的 `claude`，也不会跟着它升级。
-- **AnyRouter 可以选思考强度和上下文** 思考强度只列这个模型真正会用到的档位：Opus 4.7、5.5 有低到最高五档，Opus 4.6 没有极高，Opus 4.5 只到高，Sonnet 和 Haiku 不分档。上下文可选 200K，支持的模型还可以选 1M。默认是高、200K。站点出错时，对话里会说明是上游繁忙（503）还是被限流（429）。
+- **AnyRouter 可以选思考强度和上下文** 思考强度只列这个模型真正会用到的档位：Opus 4.7、5.5 有低到最高五档，Opus 4.6 没有极高，Opus 4.5 只到高，Sonnet 和 Haiku 不分档。上下文可选 200K，支持的模型还可以选 1M。默认是高、200K。站点暂时不可用（503 或 429）时，对话里会直接说明，最多重试 3 次，不再干等好几分钟。
 - **模型列表去掉重复项** claude-opus-4 和 claude-opus-4-1 不再列出，因为 Claude Code 会把它们换成 claude-opus-5-5 发出去。新的 Claude 模型排在前面。
 - **删除对话时一并删掉 AnyRouter 的会话记录**
 
