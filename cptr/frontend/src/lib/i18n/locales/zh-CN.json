@@ -708,6 +708,7 @@
 	"effort.medium": "中",
 	"effort.high": "高",
 	"effort.xhigh": "极高",
+	"effort.max": "最高",
 	"usageIndicator.title": "上下文与额度用量",
 	"usageIndicator.quotaShort": "额度 {{percent}}%",
 	"usageIndicator.context": "上下文",

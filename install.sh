@@ -206,6 +206,27 @@ ensure_grok() {
 	fi
 }
 
+# AnyRouter 用一份单独安装、固定版本的 Claude Code，不碰机器上已有的 claude 和 ~/.claude。
+# 版本要和 cptr/utils/anyrouter.py 里的 CLAUDE_CODE_VERSION 一致。
+ensure_anyrouter_claude() {
+	local version=2.1.310 dir="$HOME/.local/share/claude-anyrouter" installed="" log
+	local pkg="$dir/node_modules/@anthropic-ai/claude-code/package.json"
+	[ -f "$pkg" ] && installed="$(node -p "require('$pkg').version" 2>/dev/null || true)"
+	if [ "$installed" = "$version" ] && [ -x "$dir/node_modules/.bin/claude" ]; then
+		info "AnyRouter 的 Claude Code：$installed（$dir）"
+		return 0
+	fi
+	step "安装 AnyRouter 用的 Claude Code $version（$dir）"
+	mkdir -p "$dir"
+	log="$(mktemp)"
+	if npm install --prefix "$dir" --no-audit --no-fund --save-exact "@anthropic-ai/claude-code@$version" >"$log" 2>&1; then
+		rm -f "$log"
+	else
+		tail -n 20 "$log" >&2
+		warn "AnyRouter 的 Claude Code 没装上，AnyRouter 暂时不能用；稍后再运行一次安装命令即可。"
+	fi
+}
+
 # ── 代码 ─────────────────────────────────────────────────────
 
 fetch_code() {
@@ -486,6 +507,7 @@ main() {
 	ensure_uv
 	ensure_node
 	ensure_grok
+	ensure_anyrouter_claude
 	fetch_code
 	build
 	save_settings

@@ -63,7 +63,7 @@ export interface SendMessageResult {
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
 
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ChatSendParams {
 	tool_approval_mode?: ToolApprovalMode;

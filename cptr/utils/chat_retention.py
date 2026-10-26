@@ -2,7 +2,8 @@
 
 A chat leaves data in several places besides its DB rows: the exported chat file, the
 attachments staged for the agent, uploaded files, the agent processes kept between
-turns, and Grok's own copy of the conversation under ``~/.grok/sessions``.
+turns, and the agents' own copies of the conversation: Grok's under ``~/.grok/sessions``,
+AnyRouter's Claude Code sessions under ``~/.claude-anyrouter``.
 """
 
 from __future__ import annotations
@@ -96,10 +97,19 @@ async def _meta_mentions(value: str, exclude_chat_ids: set[str]) -> bool:
         return message_hit.first() is not None
 
 
-def _grok_session_ids(chat: Chat, messages: list[ChatMessage]) -> set[str]:
+def _agent_session_ids(chat: Chat, messages: list[ChatMessage]) -> set[str]:
+    """Grok and Claude Code sessions the chat continues or ever ran a turn in."""
     from cptr.utils.agents.grok import grok_session_ids
 
     ids = set(grok_session_ids(chat))
+    sessions = (chat.meta or {}).get("agent_sessions") or {}
+    for session in sessions.values() if isinstance(sessions, dict) else []:
+        if (
+            isinstance(session, dict)
+            and session.get("agent") == "claude"
+            and isinstance(session.get("session_id"), str)
+        ):
+            ids.add(session["session_id"])
     for message in messages:
         turn = (message.meta or {}).get("agent_turn")
         if isinstance(turn, dict) and isinstance(turn.get("session_id"), str):
@@ -165,6 +175,22 @@ def _grok_session_dirs(homes: list[Path], session_id: str) -> list[Path]:
     return found
 
 
+def _claude_session_paths(session_id: str) -> list[Path]:
+    """An AnyRouter Claude Code session's transcript and the folders kept beside it."""
+    from cptr.utils.anyrouter import CLAUDE_HOME
+
+    if not _SESSION_ID_RE.match(session_id):
+        return []
+    found = [
+        *(CLAUDE_HOME / "projects").glob(f"*/{session_id}.jsonl"),
+        *(CLAUDE_HOME / "projects").glob(f"*/{session_id}"),
+    ]
+    env_dir = CLAUDE_HOME / "session-env" / session_id
+    if env_dir.exists():
+        found.append(env_dir)
+    return found
+
+
 async def _delete_path(request, path: Path) -> None:
     try:
         await Runtime.delete_item(request, str(path))
@@ -177,7 +203,7 @@ async def purge_chat(request, chat: Chat) -> None:
 
     Covers its internal child chats, their messages (with tool calls and reasoning),
     exported chat files, staged attachments, uploads no other chat uses, kept agent
-    processes, and Grok session folders no other chat uses.
+    processes, and Grok and Claude Code sessions no other chat uses.
     """
     from cptr.socket.main import emit_to_user
     from cptr.utils.agents.grok import close_grok_session, grok_session_ids
@@ -191,7 +217,7 @@ async def purge_chat(request, chat: Chat) -> None:
     for owner in owners:
         owner_messages = await ChatMessage.get_all_by_chat(owner.id)
         messages.extend(owner_messages)
-        session_ids |= _grok_session_ids(owner, owner_messages)
+        session_ids |= _agent_session_ids(owner, owner_messages)
         # Stop the Grok processes these chats kept between turns.
         for session_id in grok_session_ids(owner):
             await close_grok_session(session_id)
@@ -226,8 +252,11 @@ async def purge_chat(request, chat: Chat) -> None:
         for session_id in session_ids:
             if await _meta_mentions(session_id, owner_ids):
                 continue
-            for session_dir in _grok_session_dirs(homes, session_id):
-                await _delete_path(request, session_dir)
+            for path in [
+                *_grok_session_dirs(homes, session_id),
+                *_claude_session_paths(session_id),
+            ]:
+                await _delete_path(request, path)
 
     workspace = (chat.meta or {}).get("workspace") or ""
     unread_counts = await Chat.unread_counts_by_workspace(

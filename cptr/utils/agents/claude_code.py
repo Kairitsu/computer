@@ -1,8 +1,8 @@
 """Claude Code adapter for the fixed AnyRouter profile.
 
-The process is ``claude -p`` with newline-delimited stream-json on both
-pipes. AnyRouter only accepts this client's messages when the 1M-context
-beta is set, which ``claude_child_env`` does.
+Each turn runs ``claude -p`` with newline-delimited stream-json on both pipes and
+continues the chat's session with ``--resume``. The process comes from the
+profile's own Claude Code install; ``claude_child_env`` points it at AnyRouter.
 """
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import codecs
 import json
+import logging
 import os
 import tempfile
-import time
 from collections import deque
 from contextlib import suppress
 from typing import Any, AsyncIterator
@@ -34,17 +34,21 @@ from cptr.utils.anyrouter import (
     ANYROUTER_CLAUDE,
     ANYROUTER_PROFILE_ID,
     CLAUDE_HOME,
-    classify_failure,
+    KEY_FILE,
+    LONG_WINDOW,
     claude_child_env,
+    ensure_claude_home,
     read_api_key,
     redact,
+    turn_context_window,
     turn_reasoning_effort,
 )
 from cptr.utils.identity import env_for, preexec_for
 
+logger = logging.getLogger(__name__)
+
 _STDOUT_CHUNK = 64 * 1024
 _MAX_MESSAGE = 16 * 1024 * 1024
-_PROBE_TIMEOUT_SECONDS = 48
 
 
 class ClaudePrint:
@@ -157,15 +161,30 @@ class ClaudePrint:
 
 
 def resume_session_id(resume_state: dict[str, Any] | None, workspace: str) -> str | None:
-    """Claude session to continue. A Codex thread id is not one."""
+    """Claude session to continue, if any.
+
+    A session with a retracted turn pending (``rewind``) is not continued: the next
+    turn starts a new session seeded with the chat as it now stands.
+    """
     if not isinstance(resume_state, dict) or resume_state.get("agent") != "claude":
         return None
     if resume_state.get("workspace") and resume_state.get("workspace") != workspace:
         return None
     value = resume_state.get("session_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    rewind = resume_state.get("rewind")
+    if isinstance(rewind, dict) and rewind.get("session_id") == value:
+        return None
+    return value.strip()
+
+
+def _prompt_index(resume_state: dict[str, Any] | None, session_id: str | None) -> int:
+    """Index of this turn's prompt in the session; it lets a retract mark the session."""
+    if not session_id or not isinstance(resume_state, dict):
+        return 0
+    count = resume_state.get("prompts")
+    return count if isinstance(count, int) and count > 0 else 1
 
 
 def _approval_mode(chat_params: dict[str, Any]) -> str:
@@ -180,11 +199,13 @@ def _approval_mode(chat_params: dict[str, Any]) -> str:
 def _launch_args(
     *,
     model: str,
+    window: int,
     approval: str,
     session_id: str | None,
     effort: str | None,
     system_file: str | None,
 ) -> list[str]:
+    # A [1m] suffix gives Claude Code the 1M window; --autocompact sets where it compacts.
     args = [
         "-p",
         "--input-format",
@@ -194,17 +215,25 @@ def _launch_args(
         "--verbose",
         "--include-partial-messages",
         "--model",
-        model,
+        f"{model}[1m]" if window >= LONG_WINDOW else model,
+        "--autocompact",
+        str(window),
+        "--thinking-display",
+        "summarized",
         "--strict-mcp-config",
         "--setting-sources",
         "user",
+        # Nobody can answer its questions in print mode.
+        "--disallowed-tools",
+        "AskUserQuestion",
     ]
+    # Without --permission-prompt-tool stdio, Claude Code denies what needs approval
+    # instead of sending can_use_tool to cptr.
     if approval == "full":
-        args.append("--dangerously-skip-permissions")
-    elif approval == "ask":
-        args.extend(["--permission-mode", "manual", "--permission-prompts", "host"])
+        args.extend(["--permission-mode", "bypassPermissions"])
     else:
-        args.extend(["--permission-mode", "acceptEdits", "--permission-prompts", "host"])
+        mode = "manual" if approval == "ask" else "acceptEdits"
+        args.extend(["--permission-mode", mode, "--permission-prompt-tool", "stdio"])
     if session_id:
         args.extend(["--resume", session_id])
     if effort:
@@ -295,6 +324,28 @@ def _usage_payload(raw: Any) -> dict[str, int] | None:
     return payload
 
 
+def _prompt_tokens(raw: Any) -> int:
+    """Tokens of one API call's whole prompt, cached parts included."""
+    usage = _usage_payload(raw) or {}
+    return sum(
+        usage.get(key, 0)
+        for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    )
+
+
+def _api_error_text(status: Any, message: str) -> str:
+    """Final API failure for the chat, with a plain explanation for AnyRouter's usual ones."""
+    detail = redact(message).strip() or "Claude Code failed"
+    lowered = detail.lower()
+    if str(status) == "503" or "service unavailable" in lowered or " 503 " in f" {lowered} ":
+        return f"AnyRouter 暂时没有可用的上游（503），请稍后再试或换一个模型。\n{detail}"
+    if str(status) == "429" or "rate_limit" in lowered or " 429 " in f" {lowered} ":
+        return f"AnyRouter 限流了这个令牌（429），请过几分钟再试。\n{detail}"
+    if str(status) in {"401", "403"}:
+        return f"AnyRouter 拒绝了令牌（{status}），请检查 {KEY_FILE}。\n{detail}"
+    return detail
+
+
 def _control_response(request_id: Any, body: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "control_response",
@@ -340,7 +391,13 @@ async def run_claude_code_agent(
     identity=None,
 ) -> AsyncIterator[AgentEvent]:
     if read_api_key() == "":
-        yield AgentError("AnyRouter key file is missing")
+        yield AgentError(f"AnyRouter 令牌文件不存在：{KEY_FILE}")
+        return
+    command = str(profile.get("command") or ANYROUTER_CLAUDE)
+    if not os.access(command, os.X_OK):
+        yield AgentError(
+            f"AnyRouter 用的 Claude Code 没有安装：{command}。重新运行 install.sh 即可安装。"
+        )
         return
     session_id = resume_session_id(resume_state, workspace)
     prompt = session_turn_prompt_text(messages, resumed=bool(session_id))
@@ -350,15 +407,17 @@ async def run_claude_code_agent(
 
     base_env = env_for(identity, workspace) if identity and identity.is_pam else os.environ.copy()
     env = claude_child_env(base_env)
-    command = str(profile.get("command") or ANYROUTER_CLAUDE)
     approval = _approval_mode(chat_params)
-    effort = turn_reasoning_effort(chat_params)
+    effort = turn_reasoning_effort(model, chat_params)
+    window = turn_context_window(model, chat_params)
+    prompt_index = _prompt_index(resume_state, session_id)
     cwd = workspace if workspace and os.path.isdir(workspace) else str(os.path.expanduser("~"))
     system_file = _system_file(system_prompt) if system_prompt and not session_id else None
     client = ClaudePrint(
         command,
         _launch_args(
             model=model,
+            window=window,
             approval=approval,
             session_id=session_id,
             effort=effort,
@@ -375,6 +434,10 @@ async def run_claude_code_agent(
     seen_tools: set[str] = set()
     tool_inputs: dict[int, str] = {}
     tool_calls: dict[int, AgentToolUpdate] = {}
+    # The window holds the last API call's prompt plus its reply.
+    call_prompt = 0
+    context_tokens = 0
+    api_error: str | None = None
     try:
         await client.start()
         await client.send(_user_message(prompt, attachments, session_id))
@@ -388,15 +451,38 @@ async def run_claude_code_agent(
                 async for permission in _handle_control(client, event, approval):
                     yield permission
                 continue
-            if kind == "system" and event.get("subtype") == "init":
-                found = event.get("session_id")
-                if isinstance(found, str) and found.strip():
-                    observed_session = found.strip()
-                if not started and observed_session:
-                    started = True
-                    yield AgentTurnStarted(session_id=observed_session)
+            if kind == "system":
+                subtype = event.get("subtype")
+                if subtype == "init":
+                    found = event.get("session_id")
+                    if isinstance(found, str) and found.strip():
+                        observed_session = found.strip()
+                    if not started and observed_session:
+                        started = True
+                        yield AgentTurnStarted(
+                            session_id=observed_session, prompt_index=prompt_index
+                        )
+                elif subtype == "api_retry":
+                    logger.info(
+                        "AnyRouter %s retry %s/%s: %s %s",
+                        model,
+                        event.get("attempt"),
+                        event.get("max_retries"),
+                        event.get("error_status"),
+                        redact(str(event.get("error") or "")),
+                    )
                 continue
             if kind == "stream_event":
+                body = event.get("event") if isinstance(event.get("event"), dict) else {}
+                if body.get("type") == "message_start":
+                    message = body.get("message") if isinstance(body.get("message"), dict) else {}
+                    call_prompt = _prompt_tokens(message.get("usage"))
+                    context_tokens = call_prompt
+                elif body.get("type") == "message_delta":
+                    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+                    output = usage.get("output_tokens")
+                    if isinstance(output, int) and call_prompt:
+                        context_tokens = call_prompt + output
                 text, thinking, tool = _stream_pieces(event, tool_inputs, tool_calls)
                 if text:
                     streamed_text = True
@@ -415,8 +501,8 @@ async def run_claude_code_agent(
                         if isinstance(event.get("message"), dict)
                         else ""
                     )
-                    yield AgentError(redact(str(message or "Claude Code failed")))
-                    return
+                    api_error = str(message or "")
+                    continue
                 if not streamed_text or not streamed_thinking:
                     for piece in _assistant_pieces(event, streamed_text, streamed_thinking):
                         if isinstance(piece, AgentTextDelta):
@@ -427,28 +513,41 @@ async def run_claude_code_agent(
                 for tool in _assistant_tools(event):
                     seen_tools.add(tool.call_id)
                     yield tool
+                if not context_tokens:
+                    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+                    usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+                    output = usage.get("output_tokens")
+                    context_tokens = _prompt_tokens(usage) + (
+                        output if isinstance(output, int) else 0
+                    )
                 continue
             if kind == "user":
                 for tool in _tool_results(event):
                     yield tool
                 continue
             if kind == "result":
+                found = event.get("session_id")
+                if isinstance(found, str) and found.strip():
+                    observed_session = found.strip()
                 if observed_session and not started:
-                    yield AgentTurnStarted(session_id=observed_session)
+                    started = True
+                    yield AgentTurnStarted(session_id=observed_session, prompt_index=prompt_index)
                 if event.get("is_error"):
-                    message = event.get("result") or event.get("error") or "Claude Code failed"
-                    yield AgentError(redact(str(message)))
+                    message = event.get("result") or api_error or event.get("error")
+                    yield AgentError(
+                        _api_error_text(event.get("api_error_status"), str(message or ""))
+                    )
                     return
                 if not streamed_text:
                     text = event.get("result")
                     if isinstance(text, str) and text:
                         yield AgentTextDelta(text)
-                usage = _usage_payload(event.get("usage"))
-                if usage and usage.get("total_tokens"):
-                    yield AgentContextUsage(tokens=usage["total_tokens"])
-                found = event.get("session_id")
-                if isinstance(found, str) and found.strip():
-                    observed_session = found.strip()
+                usage: dict[str, Any] | None = _usage_payload(event.get("usage"))
+                if context_tokens:
+                    yield AgentContextUsage(tokens=context_tokens, window=window)
+                    usage = {**(usage or {}), "context_tokens": context_tokens}
+                if usage is not None:
+                    usage["context_window"] = window
                 yield AgentDone(
                     usage=usage,
                     resume_state={
@@ -457,6 +556,7 @@ async def run_claude_code_agent(
                         "session_id": observed_session,
                         "workspace": workspace,
                         "model": model,
+                        "prompts": prompt_index + 1,
                     },
                 )
                 return
@@ -475,8 +575,7 @@ def _system_file(system_prompt: str) -> str | None:
     text = system_prompt.strip()
     if not text:
         return None
-    CLAUDE_HOME.mkdir(mode=0o700, exist_ok=True)
-    os.chmod(CLAUDE_HOME, 0o700)
+    ensure_claude_home()
     handle = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -637,90 +736,7 @@ def _tool_results(event: dict[str, Any]) -> list[AgentToolUpdate]:
         if not isinstance(call_id, str) or not call_id.strip():
             continue
         output = _block_text(block.get("content"))
-        tools.append(
-            AgentToolUpdate(
-                call_id=call_id.strip(),
-                name="agent_tool",
-                status="completed",
-                output=output,
-            )
-        )
+        # No name: the call keeps the one it started with (run_command shows its command).
+        status = "failed" if block.get("is_error") else "completed"
+        tools.append(AgentToolUpdate(call_id=call_id.strip(), status=status, output=output))
     return tools
-
-
-async def probe_models(models: list[str]) -> dict[str, dict[str, str]]:
-    """Ask Claude Code, once per model, whether AnyRouter accepts that model."""
-    from cptr.utils.anyrouter import load_probe, save_probe
-
-    results: dict[str, dict[str, str]] = {}
-    stored = load_probe()
-    for index, model in enumerate(models):
-        if index:
-            await asyncio.sleep(8)
-        results[model] = await _probe_model(model)
-        stored[model] = {**results[model], "probed_at": time.time(), "wire": "claude"}
-        save_probe(stored)
-    return results
-
-
-async def _probe_model(model: str) -> dict[str, str]:
-    if read_api_key() == "":
-        return {"status": "error", "detail": "AnyRouter key file is missing"}
-    env = claude_child_env(os.environ.copy())
-    client = ClaudePrint(
-        ANYROUTER_CLAUDE,
-        [
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--permission-mode",
-            "dontAsk",
-            "--permission-prompts",
-            "none",
-            "--model",
-            model,
-            "--tools",
-            "",
-            "--no-session-persistence",
-            "--strict-mcp-config",
-            "--setting-sources",
-            "user",
-            "Reply with exactly the word ok.",
-        ],
-        "/tmp",
-        env,
-    )
-    try:
-        await client.start()
-        deadline = asyncio.get_running_loop().time() + _PROBE_TIMEOUT_SECONDS
-        while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                return {"status": "error", "detail": "timed out before the model responded"}
-            event = await asyncio.wait_for(client.events.get(), timeout=remaining)
-            kind = str(event.get("type") or "")
-            if kind == "system" and event.get("subtype") == "api_retry":
-                detail = redact(f"{event.get('error_status')} {event.get('error')}")
-                if str(event.get("error_status")) == "429" or "rate_limit" in detail:
-                    return {"status": "error", "detail": detail}
-                status = classify_failure(f"status {detail}")
-                if status == "accepted":
-                    return {"status": "accepted", "detail": detail}
-                if status == "rejected":
-                    return {"status": "rejected", "detail": detail}
-            if kind == "result":
-                text = redact(str(event.get("result") or ""))
-                if not event.get("is_error"):
-                    return {"status": "accepted", "detail": text[:180]}
-                status = classify_failure(text)
-                return {"status": status, "detail": text[:180]}
-            if kind == "transport":
-                detail = redact(str(event.get("message") or "Claude Code exited."))
-                return {"status": classify_failure(detail), "detail": detail[:180]}
-    except asyncio.TimeoutError:
-        return {"status": "error", "detail": "timed out before the model responded"}
-    except Exception as exc:  # noqa: BLE001 - stored on the probe row.
-        return {"status": "error", "detail": redact(str(exc))[:180]}
-    finally:
-        await client.close()

@@ -255,7 +255,7 @@ async def warm_model_cache(app_state) -> None:
 
 @router.get("/models")
 async def get_models(request: Request):
-    """List the models of the configured coding agents (Grok CLI)."""
+    """List the models of the configured coding agents (Grok, and Claude Code for AnyRouter)."""
     _get_user(request)
     from cptr.utils.context import resolve_compact_token_threshold
 
@@ -703,7 +703,7 @@ async def _get_context_leaf_message_id(chat) -> str | None:
 
 
 def _agent_context_window(app_state, model_id: str | None, params: object) -> int | None:
-    """Window an agent CLI that lists its context windows (Grok) runs the chat with.
+    """Window an agent that lists its context windows (Grok, AnyRouter) runs the chat with.
 
     A chosen window the CLI does not offer is not sent to it, so the CLI default applies.
     """

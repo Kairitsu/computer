@@ -38,7 +38,8 @@
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok', claude: '/home/ubuntu/.local/bin/claude' }[agent];
+		// The AnyRouter profile is fixed on the server, which sends its own install's path.
+		return { grok: 'grok', claude: profile.command }[agent];
 	}
 
 	function defaultName(agent: AgentProfile['agent']): string {

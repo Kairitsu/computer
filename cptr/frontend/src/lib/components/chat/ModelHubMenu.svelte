@@ -32,7 +32,7 @@
 	type Page = 'main' | 'models' | 'effort' | 'context';
 
 	const EFFORTS: (ReasoningEffort | null)[] = [null, 'low', 'medium', 'high', 'xhigh'];
-	const EFFORT_LEVELS: Record<string, number> = { low: 1, medium: 2, high: 3, xhigh: 4 };
+	const EFFORT_LEVELS: Record<string, number> = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
 	const CONTEXT_WINDOWS = [32_000, 64_000, 128_000, 200_000, 256_000, 500_000, 1_000_000];
 
 	let btnEl: HTMLButtonElement | undefined = $state();

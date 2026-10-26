@@ -92,21 +92,16 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
 
 
 async def _detect_anyrouter(command: str, version: str | None) -> AgentDetection:
-    from cptr.utils.anyrouter import reasoning_model_options, redact, selectable_model_ids
+    from cptr.utils.anyrouter import KEY_FILE, catalog_models, model_options, read_api_key
 
-    try:
-        models = await selectable_model_ids()
-    except Exception as exc:  # noqa: BLE001 - detection reports the failure in the profile.
-        return AgentDetection("auth_unknown", command, version, redact(str(exc))[:300], [])
+    if version is None:
+        return AgentDetection("error", command, None, "Claude Code did not start")
+    if not read_api_key():
+        return AgentDetection("auth_unknown", command, version, f"{KEY_FILE} is missing", [])
+    models = await catalog_models()
     if not models:
-        return AgentDetection(
-            "auth_unknown",
-            command,
-            version,
-            "AnyRouter did not accept any models for this token.",
-            [],
-        )
-    return AgentDetection("ready", command, version, None, models, reasoning_model_options(models))
+        return AgentDetection("auth_unknown", command, version, "AnyRouter lists no models", [])
+    return AgentDetection("ready", command, version, None, models, model_options(models))
 
 
 async def _probe_grok_models(

@@ -109,7 +109,7 @@ export interface HomeState {
 }
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type QuotaPeriod = 'day' | 'week' | 'month';
 export interface QuotaBudget {
 	period: QuotaPeriod;
@@ -574,7 +574,8 @@ export async function loadPreferences(): Promise<void> {
 			prefs.reasoningEffort === 'low' ||
 			prefs.reasoningEffort === 'medium' ||
 			prefs.reasoningEffort === 'high' ||
-			prefs.reasoningEffort === 'xhigh'
+			prefs.reasoningEffort === 'xhigh' ||
+			prefs.reasoningEffort === 'max'
 		) {
 			defaultReasoningEffort.set(prefs.reasoningEffort);
 		}

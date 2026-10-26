@@ -788,6 +788,7 @@
 	"effort.medium": "Medium",
 	"effort.high": "High",
 	"effort.xhigh": "Extra high",
+	"effort.max": "Max",
 	"usageIndicator.title": "Context and quota usage",
 	"usageIndicator.quotaShort": "Quota {{percent}}%",
 	"usageIndicator.context": "Context",

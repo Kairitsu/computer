@@ -589,7 +589,7 @@
 			toolApprovalMode = params.tool_approval_mode;
 		}
 		planMode = params.plan_mode === true;
-		if (['low', 'medium', 'high', 'xhigh'].includes(params.reasoning_effort)) {
+		if (['low', 'medium', 'high', 'xhigh', 'max'].includes(params.reasoning_effort)) {
 			reasoningEffort = params.reasoning_effort;
 		}
 		if (typeof params.context_window === 'number' && params.context_window > 0) {

@@ -4,6 +4,22 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [4.2.0] - 2026-10-26
+
+### Fixed
+
+- **启动和模型菜单不再卡住** 以前每次刷新模型列表，都会给 AnyRouter 的每个模型真的发一次请求，看它能不能用。结果启动要等三四分钟，打开模型菜单也会卡住，这些试探请求还让令牌一直被限流。现在模型直接取 AnyRouter 的模型列表，一个请求都不发。连不上站点时，用上次存下的列表。
+- **AnyRouter 会先问你再动手** 选「请求批准」或「自动批准」时，以前需要批准的操作会被 Claude Code 直接拒绝，页面上也不会弹出确认。现在会在对话里请你允许或拒绝。
+- **回复途中改消息，AnyRouter 不再接着旧问题聊** 改完再发，AnyRouter 会新开一个会话，只带上改过以后的对话。
+- **上下文用量按最后一次调用算** 以前把一轮里所有调用的用量加在一起，显示得偏大。
+
+### Changed
+
+- **AnyRouter 用自己的一份 Claude Code** 安装脚本会把固定版本（2.1.310）的 Claude Code 装到 `~/.local/share/claude-anyrouter`，配置和令牌放在 `~/.claude-anyrouter`。不再借用这台机器自己的 `claude`，也不会跟着它升级。
+- **AnyRouter 可以选思考强度和上下文** 思考强度只列这个模型真正会用到的档位：Opus 4.7、5.5 有低到最高五档，Opus 4.6 没有极高，Opus 4.5 只到高，Sonnet 和 Haiku 不分档。上下文可选 200K，支持的模型还可以选 1M。默认是高、200K。站点出错时，对话里会说明是上游繁忙（503）还是被限流（429）。
+- **模型列表去掉重复项** claude-opus-4 和 claude-opus-4-1 不再列出，因为 Claude Code 会把它们换成 claude-opus-5-5 发出去。新的 Claude 模型排在前面。
+- **删除对话时一并删掉 AnyRouter 的会话记录**
+
 ## [4.1.0] - 2026-10-26
 
 ### Changed
