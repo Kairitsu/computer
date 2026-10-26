@@ -53,6 +53,7 @@
 	} from '$lib/chatScrollFollow';
 
 	import ChatInput from './ChatInput.svelte';
+	import { activeQuotaProfile, quotaProfileForModel } from '$lib/stores/quota';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import StatusModal from './StatusModal.svelte';
@@ -83,6 +84,13 @@
 	let inputText = $state('');
 	let chatId = $state<string | null>(initialChatId ?? null);
 	let selectedModel = $state('');
+
+	$effect(() => {
+		if (!active) return;
+		activeQuotaProfile.set(
+			quotaProfileForModel($chatModels.find((model) => model.id === selectedModel))
+		);
+	});
 	let toolApprovalMode = $state<ToolApprovalMode>('auto');
 	let planMode = $state(false);
 	let reasoningEffort = $state<ReasoningEffort | null>(null);

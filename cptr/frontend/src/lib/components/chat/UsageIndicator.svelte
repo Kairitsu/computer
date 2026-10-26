@@ -28,7 +28,32 @@
 	const contextPercent = $derived(Math.max(0, Math.round(contextUsage?.percent ?? 0)));
 	const ringOffset = $derived(RING * (1 - Math.min(contextPercent, 100) / 100));
 	const quotaRemaining = $derived(
-		$quotaSummary.source === 'none' ? null : Math.round($quotaSummary.remainingPercent)
+		$quotaSummary.source === 'supergrok' || $quotaSummary.source === 'budget'
+			? Math.round($quotaSummary.remainingPercent)
+			: $quotaSummary.source === 'anyrouter' &&
+				  $quotaSummary.readable &&
+				  !$quotaSummary.unlimited &&
+				  $quotaSummary.remainingPercent !== null
+				? Math.round($quotaSummary.remainingPercent)
+				: null
+	);
+	const quotaLabel = $derived(
+		$quotaSummary.source === 'anyrouter'
+			? $quotaSummary.unlimited
+				? $t('usageIndicator.anyrouterUnlimitedShort')
+				: quotaRemaining !== null
+					? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
+					: $t('usageIndicator.quotaUnknownShort')
+			: quotaRemaining !== null
+				? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
+				: null
+	);
+	const spentLabel = $derived(
+		$quotaSummary.source === 'anyrouter' && $quotaSummary.spentUsd !== null
+			? new Intl.NumberFormat(i18next.language, { style: 'currency', currency: 'USD' }).format(
+					$quotaSummary.spentUsd
+				)
+			: null
 	);
 	const tone = (percent: number) => (percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'ok');
 
@@ -81,9 +106,9 @@
 	{#if contextUsage}
 		<span class="tabular-nums">{contextPercent}%</span>
 	{/if}
-	{#if quotaRemaining !== null}
+	{#if quotaLabel}
 		{#if contextUsage}<span class="usage-sep" aria-hidden="true"></span>{/if}
-		<span class="tabular-nums">{$t('usageIndicator.quotaShort', { percent: quotaRemaining })}</span>
+		<span class="tabular-nums">{quotaLabel}</span>
 	{/if}
 </button>
 
@@ -141,7 +166,36 @@
 					</button>
 				</div>
 
-				{#if $quotaSummary.source === 'supergrok'}
+				{#if $quotaSummary.source === 'anyrouter'}
+					{@const summary = $quotaSummary}
+					<div class="flex items-baseline justify-between">
+						<span class="usage-meta">AnyRouter</span>
+						<span class="text-xs font-medium">
+							{summary.unlimited
+								? $t('usageIndicator.anyrouterUnlimitedShort')
+								: summary.readable && summary.remainingPercent !== null
+									? $t('usageIndicator.remaining', {
+											percent: Math.round(summary.remainingPercent)
+										})
+									: $t('usageIndicator.quotaUnknownShort')}
+						</span>
+					</div>
+					<p class="usage-meta">
+						{summary.readable
+							? summary.unlimited
+								? $t('usageIndicator.anyrouterUnlimited')
+								: $t('usageIndicator.anyrouterBalance', {
+										available: summary.available ?? 0,
+										granted: summary.granted ?? 0
+									})
+							: $t('usageIndicator.anyrouterUnread')}
+					</p>
+					{#if spentLabel}
+						<p class="usage-meta tabular-nums">
+							{$t('usageIndicator.anyrouterSpent', { amount: spentLabel })}
+						</p>
+					{/if}
+				{:else if $quotaSummary.source === 'supergrok'}
 					{@const summary = $quotaSummary}
 					<div class="flex items-baseline justify-between">
 						<span class="usage-meta">SuperGrok</span>

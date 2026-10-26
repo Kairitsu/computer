@@ -1,4 +1,4 @@
-"""Detection helpers for the Grok agent profile."""
+"""Detection helpers for the Grok and AnyRouter agent profiles."""
 
 from __future__ import annotations
 
@@ -74,6 +74,8 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
     code, version_text = await _run_probe([command, "--version"])
     version = version_text.splitlines()[0] if code == 0 and version_text else None
 
+    if profile.get("agent") == "codex":
+        return await _detect_anyrouter(command, version)
     if profile.get("agent") != "grok":
         return AgentDetection("error", command, version, "Unknown agent")
 
@@ -87,6 +89,24 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
             [],
         )
     return AgentDetection("ready", command, version, None, models, model_options)
+
+
+async def _detect_anyrouter(command: str, version: str | None) -> AgentDetection:
+    from cptr.utils.anyrouter import redact, selectable_model_ids
+
+    try:
+        models = await selectable_model_ids()
+    except Exception as exc:  # noqa: BLE001 - detection reports the failure in the profile.
+        return AgentDetection("auth_unknown", command, version, redact(str(exc))[:300], [])
+    if not models:
+        return AgentDetection(
+            "auth_unknown",
+            command,
+            version,
+            "AnyRouter did not accept any models for this token.",
+            [],
+        )
+    return AgentDetection("ready", command, version, None, models, {})
 
 
 async def _probe_grok_models(
@@ -184,9 +204,10 @@ async def get_available_agent_model_entries(app_state=None) -> list[dict[str, An
                 "profile_id": config["id"],
                 **model_options.get(model, {}),
             }
-            # `id` routes the chat. The selector shows the CLI model id, so a
-            # later catalog entry such as grok-4.8 never displays agent:grok/.
+            # `id` routes the chat. The selector shows the model id, so a later
+            # catalog entry such as grok-4.8 never displays agent:grok/.
             entry["name"] = model
+            entry["profile_name"] = str(config.get("name") or config["id"])
             entries.append(entry)
     return entries
 

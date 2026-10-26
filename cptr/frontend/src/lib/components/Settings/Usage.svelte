@@ -29,7 +29,7 @@
 	} from '$lib/apis/grok';
 	import { locale, t } from '$lib/i18n';
 	import { requestConfirm } from '$lib/stores/confirm';
-	import { isSuperGrokQuota, refreshQuota } from '$lib/stores/quota';
+	import { isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import {
 		formatCount,
@@ -81,6 +81,14 @@
 	);
 	const displayName = $derived(
 		signedIn ? profile?.display_name || profile?.email || 'Grok' : $t('grokAccount.signedOutName')
+	);
+	const anyrouter = $derived($quotaData?.anyrouter ?? null);
+	const anyrouterSpent = $derived(
+		anyrouter && typeof anyrouter.spent_usd === 'number'
+			? new Intl.NumberFormat($locale, { style: 'currency', currency: 'USD' }).format(
+					anyrouter.spent_usd
+				)
+			: null
 	);
 	const hasSamples = $derived(
 		!!usage && usage.heatmap.some((day) => day.tokens > 0 || day.messages > 0)
@@ -498,6 +506,38 @@
 			<div class="plan">
 				<BudgetSettings />
 			</div>
+		{/if}
+	</section>
+
+	<section class="plan">
+		<div class="plan-head">
+			<span class="plan-name">AnyRouter</span>
+			<span class="plan-remain">
+				{anyrouter?.readable
+					? anyrouter.unlimited
+						? $t('usageIndicator.anyrouterUnlimitedShort')
+						: anyrouter.remaining_percent != null
+							? $t('usageIndicator.remaining', {
+									percent: Math.round(anyrouter.remaining_percent)
+								})
+							: $t('usageIndicator.quotaUnknownShort')
+					: $t('usageIndicator.quotaUnknownShort')}
+			</span>
+		</div>
+		<p class="plan-meta-text">
+			{anyrouter?.readable
+				? anyrouter.unlimited
+					? $t('usageIndicator.anyrouterUnlimited')
+					: $t('usageIndicator.anyrouterBalance', {
+							available: anyrouter.available ?? 0,
+							granted: anyrouter.granted ?? 0
+						})
+				: $t('usageIndicator.anyrouterUnread')}
+		</p>
+		{#if anyrouterSpent}
+			<p class="plan-meta-text tabular-nums">
+				{$t('usageIndicator.anyrouterSpent', { amount: anyrouterSpent })}
+			</p>
 		{/if}
 	</section>
 

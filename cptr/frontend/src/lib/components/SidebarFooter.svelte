@@ -49,7 +49,22 @@
 			class="w-5 h-5 rounded-full object-cover shrink-0"
 		/>
 		<span class="truncate">{$session?.username || $t('sidebar.settings')}</span>
-		{#if $quotaSummary.source !== 'none'}
+		{#if $quotaSummary.source === 'anyrouter'}
+			<span
+				class="ml-auto shrink-0 text-xs font-semibold tabular-nums"
+				use:tooltip={$quotaSummary.readable
+					? $t('usageIndicator.anyrouterBalance', {
+							available: $quotaSummary.available ?? 0,
+							granted: $quotaSummary.granted ?? 0
+						})
+					: $t('usageIndicator.anyrouterUnread')}
+				>{$quotaSummary.unlimited
+					? $t('usageIndicator.anyrouterUnlimitedShort')
+					: $quotaSummary.remainingPercent !== null
+						? `${Math.round($quotaSummary.remainingPercent)}%`
+						: $t('usageIndicator.quotaUnknownShort')}</span
+			>
+		{:else if $quotaSummary.source !== 'none'}
 			<span
 				class="ml-auto shrink-0 text-xs font-semibold tabular-nums"
 				use:tooltip={$t('usageIndicator.remainingTooltip')}

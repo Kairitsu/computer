@@ -1064,6 +1064,7 @@ async def run_chat_task(
 
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
+        from cptr.utils.agents.codex import run_codex_agent
         from cptr.utils.agents.grok import run_grok_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
@@ -1108,6 +1109,7 @@ async def run_chat_task(
 
         runners = {
             "grok": run_grok_agent,
+            "codex": run_codex_agent,
         }
         runner = runners.get(agent_target.agent)
         if runner is None:

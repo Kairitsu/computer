@@ -39,7 +39,14 @@
 	);
 
 	const menuItems = $derived.by(() => {
-		const items = [
+		const items: {
+			label: string;
+			tooltip?: string;
+			active?: boolean;
+			check?: boolean;
+			heading?: boolean;
+			onclick: () => void;
+		}[] = [
 			...(nullable
 				? [
 						{
@@ -53,21 +60,32 @@
 							}
 						}
 					]
-				: []),
-			...filtered.map((m) => ({
-				label: m.name,
-				tooltip: m.name,
-				active: m.id === selectedModel,
+				: [])
+		];
+		let previousGroup = '';
+		for (const model of filtered) {
+			const group = model.profile_name || '';
+			if (group && group !== previousGroup) {
+				items.push({ label: group, heading: true, onclick: () => {} });
+				previousGroup = group;
+			}
+			items.push({
+				label: model.name,
+				tooltip: model.name,
+				active: model.id === selectedModel,
 				check: true,
 				onclick: () => {
-					selectedModel = m.id;
-					onchange?.(m.id);
+					selectedModel = model.id;
+					onchange?.(model.id);
 				}
-			}))
-		];
+			});
+		}
 
 		const highlighted = Math.min(highlightedIndex, Math.max(items.length - 1, 0));
-		return items.map((item, index) => ({ ...item, highlighted: index === highlighted }));
+		return items.map((item, index) => ({
+			...item,
+			highlighted: !item.heading && index === highlighted
+		}));
 	});
 
 	function updateViewportSize() {
@@ -92,20 +110,29 @@
 	}
 
 	function selectedIndex() {
-		if (nullable && (selectedModel === null || selectedModel === '')) return 0;
-		const index = filtered.findIndex((m) => m.id === selectedModel);
-		return index >= 0 ? index + (nullable ? 1 : 0) : 0;
+		const index = menuItems.findIndex((item) => item.active && !item.heading);
+		if (index >= 0) return index;
+		return Math.max(
+			0,
+			menuItems.findIndex((item) => !item.heading)
+		);
 	}
 
 	function resetHighlightedIndex() {
-		const total = filtered.length + (nullable ? 1 : 0);
-		highlightedIndex = total > 0 ? Math.min(selectedIndex(), total - 1) : 0;
+		highlightedIndex = menuItems.length > 0 ? selectedIndex() : 0;
 	}
 
 	function moveHighlightedIndex(delta: number) {
 		const total = menuItems.length;
 		if (total === 0) return;
-		highlightedIndex = (highlightedIndex + delta + total) % total;
+		let next = highlightedIndex;
+		for (let step = 0; step < total; step += 1) {
+			next = (next + delta + total) % total;
+			if (!menuItems[next]?.heading) {
+				highlightedIndex = next;
+				return;
+			}
+		}
 	}
 
 	export async function openSelector() {
@@ -202,8 +229,11 @@
 								moveHighlightedIndex(-1);
 							} else if (e.key === 'Enter') {
 								e.preventDefault();
-								menuItems[Math.min(highlightedIndex, menuItems.length - 1)]?.onclick();
-								closeSelector();
+								const item = menuItems[Math.min(highlightedIndex, menuItems.length - 1)];
+								if (item && !item.heading) {
+									item.onclick();
+									closeSelector();
+								}
 							}
 						}}
 					/>

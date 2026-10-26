@@ -86,9 +86,24 @@ export interface SuperGrokQuota {
 	plan?: string | null;
 }
 
+export interface AnyRouterQuota {
+	readable: boolean;
+	reason: string | null;
+	unlimited?: boolean;
+	available?: number | null;
+	granted?: number | null;
+	used?: number | null;
+	remaining_percent?: number | null;
+	/** Cumulative spend from the usage endpoint, in dollars. Not a remaining balance. */
+	spent_usd?: number | null;
+	fetched_at: number;
+}
+
 export interface QuotaResponse {
 	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
 	supergrok: SuperGrokQuota | { error: string; fetched_at: number; plan?: string | null } | null;
+	/** Present when this install has the AnyRouter agent. */
+	anyrouter?: AnyRouterQuota | null;
 	local: {
 		period: 'day' | 'week' | 'month';
 		tokens_used: number;

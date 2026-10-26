@@ -38,12 +38,14 @@
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok' }[agent];
+		return { grok: 'grok', codex: '/home/ubuntu/.local/bin/codex' }[agent];
 	}
 
 	function defaultName(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok' }[agent];
+		return { grok: 'Grok', codex: 'AnyRouter' }[agent];
 	}
+
+	const locked = $derived(draft.id === 'anyrouter' || draft.agent === 'codex');
 </script>
 
 <Modal {onclose} class="w-full max-w-md mx-4">
@@ -72,6 +74,7 @@
 					bind:value={draft.name}
 					autocomplete="off"
 					spellcheck="false"
+					disabled={locked}
 					class="settings-field mt-1 w-full"
 				/>
 			</div>
@@ -82,6 +85,7 @@
 				<select
 					id={`${fieldPrefix}-type`}
 					value={draft.agent}
+					disabled={locked}
 					onchange={(e) => {
 						const agent = e.currentTarget.value as AgentProfile['agent'];
 						draft = {
@@ -96,6 +100,9 @@
 					class="settings-field mt-1 w-full"
 				>
 					<option value="grok">Grok</option>
+					{#if draft.agent === 'codex'}
+						<option value="codex">AnyRouter</option>
+					{/if}
 				</select>
 			</div>
 		</div>
@@ -109,6 +116,7 @@
 			bind:value={draft.id}
 			autocomplete="off"
 			spellcheck="false"
+			disabled={locked}
 			class="settings-field mt-1 w-full font-mono"
 		/>
 
@@ -125,6 +133,7 @@
 			placeholder={defaultCommand(draft.agent)}
 			autocomplete="off"
 			spellcheck="false"
+			disabled={locked}
 			class="settings-field mt-1 w-full font-mono"
 		/>
 
@@ -141,6 +150,7 @@
 			placeholder={$t('admin.optional')}
 			autocomplete="off"
 			spellcheck="false"
+			disabled={locked}
 			oninput={(e) => (draft.home = e.currentTarget.value || null)}
 			class="settings-field mt-1 w-full font-mono"
 		/>
@@ -148,7 +158,7 @@
 
 		<div class="flex items-center justify-between mt-3">
 			<div class="flex items-center gap-3">
-				{#if !isNew}
+				{#if !isNew && !locked}
 					<button
 						type="button"
 						class="settings-action danger"

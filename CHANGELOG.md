@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [4.0.0] - 2026-10-26
+
+### Added
+
+- **可以改用 AnyRouter** 模型菜单分成 Grok 和 AnyRouter。Grok 还是原来的对话，默认模型仍是 grok-4.7，额度仍是 SuperGrok。选中 AnyRouter 时，对话改走 Codex，模型用这个令牌在站点上实际能调用的那些。额度显示这个令牌的剩余余额；站点不让读取时，页面会说明读不到，不会把占位上限当成余额。
+
 ## [3.2.0] - 2026-10-22
 
 ### Added

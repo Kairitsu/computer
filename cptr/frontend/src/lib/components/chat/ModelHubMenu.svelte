@@ -254,6 +254,11 @@
 					</div>
 					<div class="max-h-60 overflow-y-auto">
 						{#each filteredModels as option, index (option.id)}
+							{#if index === 0 || option.profile_name !== filteredModels[index - 1]?.profile_name}
+								<div class="px-2 pt-1.5 pb-0.5 text-[0.625rem] font-semibold text-gray-400">
+									{option.profile_name || option.agent_id}
+								</div>
+							{/if}
 							<button
 								type="button"
 								class="hub-option"

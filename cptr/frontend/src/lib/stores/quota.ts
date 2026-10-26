@@ -9,6 +9,18 @@ import { getQuota, type QuotaResponse, type SuperGrokQuota } from '$lib/apis/cha
 import { quotaBudget, type QuotaPeriod } from '$lib/stores';
 import { socketStore } from '$lib/stores/socket.svelte';
 
+export type QuotaProfileId = 'grok' | 'anyrouter';
+
+/** Which agent's balance the composer and sidebar should show. */
+export const activeQuotaProfile = writable<QuotaProfileId>('grok');
+
+export function quotaProfileForModel(model: { profile_id?: string; id?: string } | undefined): QuotaProfileId {
+	if (model?.profile_id === 'anyrouter' || model?.id?.startsWith('agent:anyrouter/')) {
+		return 'anyrouter';
+	}
+	return 'grok';
+}
+
 const MIN_REFRESH_MS = 60_000;
 const POLL_MS = 5 * 60_000;
 
@@ -74,6 +86,15 @@ export type QuotaSummary =
 			supergrok: SuperGrokQuota;
 	  }
 	| {
+			source: 'anyrouter';
+			readable: boolean;
+			unlimited: boolean;
+			remainingPercent: number | null;
+			spentUsd: number | null;
+			available: number | null;
+			granted: number | null;
+	  }
+	| {
 			source: 'budget';
 			usedPercent: number;
 			remainingPercent: number;
@@ -84,7 +105,22 @@ export type QuotaSummary =
 	  }
 	| { source: 'none'; error: string | null; tokensUsed: number | null; period: QuotaPeriod };
 
-export const quotaSummary = derived([quotaData, quotaBudget], ([$quota, $budget]): QuotaSummary => {
+export const quotaSummary = derived(
+	[quotaData, quotaBudget, activeQuotaProfile],
+	([$quota, $budget, $profile]): QuotaSummary => {
+	if ($profile === 'anyrouter') {
+		const anyrouter = $quota?.anyrouter;
+		return {
+			source: 'anyrouter',
+			readable: anyrouter?.readable === true,
+			unlimited: anyrouter?.unlimited === true,
+			remainingPercent:
+				typeof anyrouter?.remaining_percent === 'number' ? anyrouter.remaining_percent : null,
+			spentUsd: typeof anyrouter?.spent_usd === 'number' ? anyrouter.spent_usd : null,
+			available: typeof anyrouter?.available === 'number' ? anyrouter.available : null,
+			granted: typeof anyrouter?.granted === 'number' ? anyrouter.granted : null
+		};
+	}
 	const supergrok = $quota?.supergrok ?? null;
 	if (isSuperGrokQuota(supergrok)) {
 		return {

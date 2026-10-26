@@ -16,6 +16,8 @@
 		image?: string;
 		/** Optional check mark on the right when active. */
 		check?: boolean;
+		/** Static group label. Not a choice, and it does not close the menu. */
+		heading?: boolean;
 		/** Optional keyboard shortcut hint displayed as a single pill on the right. */
 		shortcut?: string;
 		/** Optional trailing action button, e.g. row options. */
@@ -393,7 +395,11 @@
 			{@render empty()}
 		{:else}
 			{#each items as item}
-				{#if item.divider}
+				{#if item.heading}
+					<div class="px-2 pt-1.5 pb-0.5 text-[0.625rem] font-semibold text-gray-400">
+						{item.label}
+					</div>
+				{:else if item.divider}
 					<div class="app-divider h-px mx-1 my-0.5"></div>
 				{:else}
 					<div

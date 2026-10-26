@@ -584,6 +584,7 @@ async def get_quota(
     user_id = _get_user(request)
     from sqlalchemy import and_, or_
 
+    from cptr.utils.anyrouter import get_anyrouter_quota
     from cptr.utils.supergrok import get_supergrok_quota
 
     start, resets_at = _quota_period_bounds(period, datetime.now(timezone.utc))
@@ -621,6 +622,7 @@ async def get_quota(
 
     return {
         "supergrok": await get_supergrok_quota(force=refresh),
+        "anyrouter": await get_anyrouter_quota(force=refresh),
         "local": {
             "period": period,
             "tokens_used": tokens_used,

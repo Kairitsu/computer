@@ -25,6 +25,7 @@
 		id: string;
 		name: string;
 		provider: string;
+		profile_name?: string;
 		is_active: boolean;
 		systemPrompt: string;
 		dirty: boolean;
@@ -60,6 +61,17 @@
 		{ name: 'DATE', desc: 'Current date (ISO format)' },
 		{ name: 'MODEL', desc: 'Model ID being used' }
 	];
+
+	const modelGroups = $derived.by(() => {
+		const groups: { name: string; models: ModelEntry[] }[] = [];
+		for (const model of models) {
+			const name = model.profile_name || '';
+			const last = groups.at(-1);
+			if (!last || last.name !== name) groups.push({ name, models: [model] });
+			else last.models.push(model);
+		}
+		return groups;
+	});
 
 	const DEFAULT_PROMPT_PLACEHOLDER = `You are Computer, a helpful assistant running inside the user's computer interface. You have access to tools to read, search, and modify files in the workspace, run commands, and use configured tools. Use them to help the user directly. Approach hard requests with initiative and persistence: make the best possible attempt, adapt as needed, and keep going unless a real constraint prevents progress.
 
@@ -267,7 +279,11 @@ Files:
 
 			<!-- Per-model list -->
 			<div class="mt-1.5 flex flex-col gap-1.5">
-				{#each models as model}
+				{#each modelGroups as group (group.name)}
+					{#if group.name}
+						<p class="px-2.5 pt-1 text-[0.625rem] font-semibold text-gray-400">{group.name}</p>
+					{/if}
+				{#each group.models as model}
 					<div class="settings-row flex items-center gap-2 w-full min-h-9 px-2.5 py-1.5 text-left">
 						<button
 							type="button"
@@ -291,6 +307,7 @@ Files:
 							$t('models.systemPromptInherited')
 						)}
 					{/if}
+				{/each}
 				{/each}
 			</div>
 

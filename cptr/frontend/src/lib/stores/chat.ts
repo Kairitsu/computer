@@ -262,6 +262,8 @@ export interface ChatModel {
 	name: string;
 	provider: string;
 	agent_id?: string;
+	profile_id?: string;
+	profile_name?: string;
 	/** Whether the composer's reasoning effort reaches this model. */
 	supports_reasoning_effort?: boolean;
 	/** Default context window (compaction threshold) in tokens. */
