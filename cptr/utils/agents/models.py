@@ -9,12 +9,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from cptr.models import Config
-from cptr.utils.anyrouter import (
-    ANYROUTER_CLAUDE,
-    ANYROUTER_PROFILE_ID,
-    CLAUDE_HOME,
-    DEFAULT_MODEL as ANYROUTER_DEFAULT_MODEL,
-)
 
 CONFIG_KEY_AGENT_PROFILES = "agents.profiles"
 
@@ -29,36 +23,29 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
         "models": [],
         "default_model": "",
     },
+    {
+        "id": "codebuddy",
+        "agent": "codebuddy",
+        "name": "CodeBuddy",
+        "mode": "auto",
+        "command": "codebuddy",
+        "home": None,
+        "models": [],
+        "default_model": "",
+    },
 ]
 
 _PROFILE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_VALID_AGENTS = {"grok", "claude"}
-_LEGACY_ANYROUTER_AGENTS = {"claude", "codex"}
+_VALID_AGENTS = {"grok", "codebuddy"}
 _VALID_MODES = {"auto", "enabled", "disabled"}
 _AGENT_DEFAULTS: dict[str, dict[str, str]] = {
     "grok": {"name": "Grok", "command": "grok", "model": ""},
-    "claude": {"name": "AnyRouter", "command": ANYROUTER_CLAUDE, "model": ANYROUTER_DEFAULT_MODEL},
+    "codebuddy": {"name": "CodeBuddy", "command": "codebuddy", "model": ""},
 }
 
 
-def fixed_anyrouter_profile(mode: str = "auto") -> dict[str, Any]:
-    """The only Claude Code profile: AnyRouter, on its own config directory."""
-    if mode not in _VALID_MODES:
-        mode = "auto"
-    return {
-        "id": ANYROUTER_PROFILE_ID,
-        "agent": "claude",
-        "name": "AnyRouter",
-        "mode": mode,
-        "command": ANYROUTER_CLAUDE,
-        "home": str(CLAUDE_HOME),
-        "models": [],
-        "default_model": ANYROUTER_DEFAULT_MODEL,
-    }
-
-
 def default_agent_profiles() -> list[dict[str, Any]]:
-    return [deepcopy(DEFAULT_AGENT_PROFILES[0]), fixed_anyrouter_profile()]
+    return deepcopy(DEFAULT_AGENT_PROFILES)
 
 
 def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
@@ -68,13 +55,8 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "agent profile id must be a slug up to 64 characters")
 
     agent = str(profile.get("agent") or "").strip()
-    if agent not in _VALID_AGENTS and agent not in _LEGACY_ANYROUTER_AGENTS:
-        raise HTTPException(400, "agent must be grok or claude")
-    if agent in _LEGACY_ANYROUTER_AGENTS:
-        if profile_id != ANYROUTER_PROFILE_ID:
-            raise HTTPException(400, "the Claude Code agent is fixed to AnyRouter")
-        mode = str(profile.get("mode") or "auto").strip()
-        return fixed_anyrouter_profile(mode)
+    if agent not in _VALID_AGENTS:
+        raise HTTPException(400, "agent must be grok or codebuddy")
     defaults = _AGENT_DEFAULTS[agent]
 
     mode = str(profile.get("mode") or "auto").strip()
@@ -130,25 +112,19 @@ def normalize_agent_profiles(raw_profiles: Any) -> list[dict[str, Any]]:
         raise HTTPException(400, "agents.profiles must be a list")
 
     profiles = []
-    anyrouter_mode = "auto"
     for profile in raw_profiles:
         if not isinstance(profile, dict):
             raise HTTPException(400, "agent profiles must be objects")
-        agent = str(profile.get("agent") or "").strip()
-        profile_id = str(profile.get("id") or "").strip()
-        # Retired runners stay ignored so an old saved list still loads Grok.
-        retired = (
-            agent not in _VALID_AGENTS
-            and agent not in _LEGACY_ANYROUTER_AGENTS
-            and profile_id != ANYROUTER_PROFILE_ID
-        )
-        if retired:
-            continue
-        if agent in _LEGACY_ANYROUTER_AGENTS or profile_id == ANYROUTER_PROFILE_ID:
-            anyrouter_mode = str(profile.get("mode") or "auto").strip() or "auto"
+        # Retired runners (Codex, Claude Code, and the rest) are ignored so an
+        # old saved list still loads the other profiles.
+        if str(profile.get("agent") or "").strip() not in _VALID_AGENTS:
             continue
         profiles.append(normalize_agent_profile(profile))
-    profiles.append(fixed_anyrouter_profile(anyrouter_mode))
+    # Every agent keeps a profile; a saved list from before CodeBuddy gains its default.
+    present = {profile["agent"] for profile in profiles}
+    profiles.extend(
+        deepcopy(default) for default in DEFAULT_AGENT_PROFILES if default["agent"] not in present
+    )
 
     seen: set[str] = set()
     for profile in profiles:

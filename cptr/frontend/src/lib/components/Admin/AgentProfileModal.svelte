@@ -38,15 +38,12 @@
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		// The AnyRouter profile is fixed on the server, which sends its own install's path.
-		return { grok: 'grok', claude: profile.command }[agent];
+		return { grok: 'grok', codebuddy: 'codebuddy' }[agent];
 	}
 
 	function defaultName(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok', claude: 'AnyRouter' }[agent];
+		return { grok: 'Grok', codebuddy: 'CodeBuddy' }[agent];
 	}
-
-	const locked = $derived(draft.id === 'anyrouter' || draft.agent === 'claude');
 </script>
 
 <Modal {onclose} class="w-full max-w-md mx-4">
@@ -75,7 +72,6 @@
 					bind:value={draft.name}
 					autocomplete="off"
 					spellcheck="false"
-					disabled={locked}
 					class="settings-field mt-1 w-full"
 				/>
 			</div>
@@ -86,7 +82,6 @@
 				<select
 					id={`${fieldPrefix}-type`}
 					value={draft.agent}
-					disabled={locked}
 					onchange={(e) => {
 						const agent = e.currentTarget.value as AgentProfile['agent'];
 						draft = {
@@ -101,9 +96,7 @@
 					class="settings-field mt-1 w-full"
 				>
 					<option value="grok">Grok</option>
-					{#if draft.agent === 'claude'}
-						<option value="claude">AnyRouter</option>
-					{/if}
+					<option value="codebuddy">CodeBuddy</option>
 				</select>
 			</div>
 		</div>
@@ -117,7 +110,6 @@
 			bind:value={draft.id}
 			autocomplete="off"
 			spellcheck="false"
-			disabled={locked}
 			class="settings-field mt-1 w-full font-mono"
 		/>
 
@@ -134,7 +126,6 @@
 			placeholder={defaultCommand(draft.agent)}
 			autocomplete="off"
 			spellcheck="false"
-			disabled={locked}
 			class="settings-field mt-1 w-full font-mono"
 		/>
 
@@ -151,7 +142,6 @@
 			placeholder={$t('admin.optional')}
 			autocomplete="off"
 			spellcheck="false"
-			disabled={locked}
 			oninput={(e) => (draft.home = e.currentTarget.value || null)}
 			class="settings-field mt-1 w-full font-mono"
 		/>
@@ -159,7 +149,7 @@
 
 		<div class="flex items-center justify-between mt-3">
 			<div class="flex items-center gap-3">
-				{#if !isNew && !locked}
+				{#if !isNew}
 					<button
 						type="button"
 						class="settings-action danger"

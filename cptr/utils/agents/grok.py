@@ -24,6 +24,7 @@ from cptr.utils.agents.acp import (
     acp_text_from_update,
     acp_thought_from_update,
     acp_tool_from_update,
+    discard_stale_events,
 )
 from cptr.utils.agents.events import (
     AgentAskUser,
@@ -36,7 +37,8 @@ from cptr.utils.agents.events import (
     AgentToolUpdate,
     AgentTurnStarted,
 )
-from cptr.utils.agents.prompts import turn_prompt_text
+from cptr.utils.agents.params import agent_params
+from cptr.utils.agents.prompts import session_turn_prompt_text
 from cptr.utils.identity import env_for, preexec_for
 
 
@@ -593,20 +595,6 @@ def grok_session_ids(chat: Any) -> list[str]:
     ]
 
 
-def grok_compactions(chat: Any) -> int:
-    """How often Grok compacted the session a chat continues in."""
-    sessions = ((getattr(chat, "meta", None) or {}).get("agent_sessions")) or {}
-    if not isinstance(sessions, dict):
-        return 0
-    return sum(
-        session["compactions"]
-        for session in sessions.values()
-        if isinstance(session, dict)
-        and session.get("agent") == "grok"
-        and isinstance(session.get("compactions"), int)
-    )
-
-
 async def close_all_grok_sessions() -> None:
     for session_id, live in list(_live_sessions.items()):
         await _close_live(session_id, live)
@@ -684,18 +672,6 @@ def _check_in(session_id: str, live: _LiveGrok) -> None:
     _spawn(_trim_idle())
     if _reaper is None or _reaper.done():
         _reaper = asyncio.create_task(_reap_idle_sessions())
-
-
-async def _discard_stale_events(client: AcpClient) -> None:
-    """Drop what Grok sent between turns; answer requests so nothing waits on them."""
-    while not client.events.empty():
-        message = client.events.get_nowait()
-        if "id" not in message or not message.get("method"):
-            continue
-        if message["method"] == ACP_PERMISSION_METHOD:
-            await client.respond(message["id"], {"outcome": {"outcome": "cancelled"}})
-        else:
-            await client.respond_error(message["id"], -32603, "No turn is running")
 
 
 async def _compact_if_full(
@@ -807,12 +783,12 @@ async def run_grok_agent(
     model: str,
     workspace: str,
     messages: list[dict[str, Any]],
-    system_prompt: str,
     chat_params: dict[str, Any],
     resume_state: dict[str, Any] | None,
     attachments: PreparedAgentAttachments,
     identity=None,
 ) -> AsyncIterator[AgentEvent]:
+    chat_params = agent_params(chat_params, profile["id"])
     env = env_for(identity, workspace) if identity and identity.is_pam else os.environ.copy()
     if profile.get("home"):
         env["HOME"] = os.path.expanduser(str(profile["home"]))
@@ -856,7 +832,7 @@ async def run_grok_agent(
     kept = False
     try:
         if reused:
-            await _discard_stale_events(client)
+            await discard_stale_events(client)
         else:
             await client.start()
             await await_grok_model_catalog(client)
@@ -879,7 +855,7 @@ async def run_grok_agent(
         # Whether the model call under way has run one of xAI's own tools.
         backend_call = False
 
-        prompt = turn_prompt_text(messages, system_prompt, resumed=resumed)
+        prompt = session_turn_prompt_text(messages, resumed=resumed)
 
         images = [_grok_image_block(image) for image in attachments.images]
         if client.session_id:

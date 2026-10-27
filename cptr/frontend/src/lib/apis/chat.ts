@@ -63,15 +63,25 @@ export interface SendMessageResult {
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
 
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** An effort the agent CLI lists for the model (CodeBuddy also has 'minimal' and 'disabled'). */
+export type ReasoningEffort = string;
 
-export interface ChatSendParams {
+/** One agent's own composer settings; agents never share them. */
+export interface AgentSendParams {
+	/** Grok's approval mode. */
 	tool_approval_mode?: ToolApprovalMode;
-	plan_mode?: boolean;
-	/** Composer reasoning effort; omitted = provider default. */
+	/** CodeBuddy's permission mode, one of the modes it lists. */
+	permission_mode?: string;
+	/** Omitted = the agent CLI's default for the model. */
 	reasoning_effort?: ReasoningEffort;
-	/** Context window (tokens) that drives usage and auto-compaction for this chat. */
+	/** Context window (tokens); omitted = the CLI's default for the model. */
 	context_window?: number;
+}
+
+export interface ChatSendParams extends AgentSendParams {
+	plan_mode?: boolean;
+	/** Settings per agent profile id. The top-level fields are Grok's, for older chats. */
+	agents?: Record<string, AgentSendParams>;
 }
 
 export interface SuperGrokQuota {
@@ -86,24 +96,32 @@ export interface SuperGrokQuota {
 	plan?: string | null;
 }
 
-export interface AnyRouterQuota {
-	readable: boolean;
-	reason: string | null;
-	unlimited?: boolean;
-	available?: number | null;
-	granted?: number | null;
-	used?: number | null;
-	remaining_percent?: number | null;
-	/** Cumulative spend from the usage endpoint, in dollars. Not a remaining balance. */
-	spent_usd?: number | null;
-	fetched_at: number;
+export interface CodeBuddyUsagePeriod {
+	/** Credits CodeBuddy reported for this user's turns since `period_start`. */
+	credits: number;
+	replies: number;
+	period_start: number;
+}
+
+export interface CodeBuddyQuota {
+	signed_in: boolean;
+	nickname?: string;
+	account_type?: string;
+	domain?: string;
+	/** codebuddy.cn's usage page: the remaining balance is only shown there. */
+	usage_url?: string;
+	expires_at?: number | null;
+	usage?: { day: CodeBuddyUsagePeriod; week: CodeBuddyUsagePeriod; month: CodeBuddyUsagePeriod };
+	/** Always null: CodeBuddy's command-line login cannot read the balance. */
+	balance?: null;
+	fetched_at?: number;
 }
 
 export interface QuotaResponse {
 	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
 	supergrok: SuperGrokQuota | { error: string; fetched_at: number; plan?: string | null } | null;
-	/** Present when this install has the AnyRouter agent. */
-	anyrouter?: AnyRouterQuota | null;
+	/** CodeBuddy's login and the credits its turns used. */
+	codebuddy?: CodeBuddyQuota | null;
 	local: {
 		period: 'day' | 'week' | 'month';
 		tokens_used: number;

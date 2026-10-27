@@ -29,7 +29,7 @@
 	} from '$lib/apis/grok';
 	import { locale, t } from '$lib/i18n';
 	import { requestConfirm } from '$lib/stores/confirm';
-	import { isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
+	import { formatCredits, isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import {
 		formatCount,
@@ -82,14 +82,7 @@
 	const displayName = $derived(
 		signedIn ? profile?.display_name || profile?.email || 'Grok' : $t('grokAccount.signedOutName')
 	);
-	const anyrouter = $derived($quotaData?.anyrouter ?? null);
-	const anyrouterSpent = $derived(
-		anyrouter && typeof anyrouter.spent_usd === 'number'
-			? new Intl.NumberFormat($locale, { style: 'currency', currency: 'USD' }).format(
-					anyrouter.spent_usd
-				)
-			: null
-	);
+	const codebuddy = $derived($quotaData?.codebuddy ?? null);
 	const hasSamples = $derived(
 		!!usage && usage.heatmap.some((day) => day.tokens > 0 || day.messages > 0)
 	);
@@ -509,35 +502,42 @@
 		{/if}
 	</section>
 
+	<!-- CodeBuddy: its own login; credits as CodeBuddy reported them for this user's turns -->
 	<section class="plan">
 		<div class="plan-head">
-			<span class="plan-name">AnyRouter</span>
+			<span class="plan-name">
+				CodeBuddy{codebuddy?.nickname ? ` · ${codebuddy.nickname}` : ''}
+			</span>
 			<span class="plan-remain">
-				{anyrouter?.readable
-					? anyrouter.unlimited
-						? $t('usageIndicator.anyrouterUnlimitedShort')
-						: anyrouter.remaining_percent != null
-							? $t('usageIndicator.remaining', {
-									percent: Math.round(anyrouter.remaining_percent)
-								})
-							: $t('usageIndicator.quotaUnknownShort')
-					: $t('usageIndicator.quotaUnknownShort')}
+				{codebuddy?.signed_in
+					? $t('codebuddyAccount.signedIn')
+					: $t('usageIndicator.codebuddySignedOutShort')}
 			</span>
 		</div>
+		{#if codebuddy?.signed_in && codebuddy.usage}
+			{#each ['day', 'week', 'month'] as const as period (period)}
+				<div class="plan-meta-text flex justify-between tabular-nums">
+					<span>{$t(`usageIndicator.period.${period}`)}</span>
+					<span>
+						{$t('usageIndicator.codebuddyPeriodUsage', {
+							credits: formatCredits(codebuddy.usage[period].credits),
+							replies: codebuddy.usage[period].replies
+						})}
+					</span>
+				</div>
+			{/each}
+		{/if}
 		<p class="plan-meta-text">
-			{anyrouter?.readable
-				? anyrouter.unlimited
-					? $t('usageIndicator.anyrouterUnlimited')
-					: $t('usageIndicator.anyrouterBalance', {
-							available: anyrouter.available ?? 0,
-							granted: anyrouter.granted ?? 0
-						})
-				: $t('usageIndicator.anyrouterUnread')}
+			{codebuddy?.signed_in
+				? $t('usageIndicator.codebuddyBalanceHint')
+				: $t('usageIndicator.codebuddySignedOut')}
 		</p>
-		{#if anyrouterSpent}
-			<p class="plan-meta-text tabular-nums">
-				{$t('usageIndicator.anyrouterSpent', { amount: anyrouterSpent })}
-			</p>
+		{#if codebuddy?.usage_url}
+			<div class="links">
+				<a class="link-btn" href={codebuddy.usage_url} target="_blank" rel="noopener noreferrer"
+					>{$t('usageIndicator.codebuddyOpenUsage')}</a
+				>
+			</div>
 		{/if}
 	</section>
 

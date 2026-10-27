@@ -69,9 +69,3 @@ def session_turn_prompt_text(messages: list[dict[str, Any]], resumed: bool) -> s
         f"<latest_user_request>\n{prompt}\n</latest_user_request>"
     )
 
-
-def turn_prompt_text(messages: list[dict[str, Any]], system_prompt: str, resumed: bool) -> str:
-    prompt = session_turn_prompt_text(messages, resumed)
-    if system_prompt and not resumed:
-        return f"{system_prompt}\n\n{prompt}" if prompt else system_prompt
-    return prompt

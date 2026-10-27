@@ -11,6 +11,7 @@ from cptr.routers import (
     admin_router,
     auth_router,
     chat_router,
+    codebuddy_router,
     files_router,
     grok_router,
     search_router,
@@ -72,11 +73,17 @@ async def lifespan(app: FastAPI):
             with suppress(asyncio.CancelledError):
                 await task
 
-        # Stop the Grok processes chats keep between turns.
+        # Stop the Grok and CodeBuddy processes chats keep between turns.
         try:
             from cptr.utils.agents.grok import close_all_grok_sessions
 
             await close_all_grok_sessions()
+        except Exception:
+            pass
+        try:
+            from cptr.utils.agents.codebuddy import close_all_codebuddy_sessions
+
+            await close_all_codebuddy_sessions()
         except Exception:
             pass
 
@@ -232,6 +239,7 @@ async def get_config():
 app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(codebuddy_router)
 app.include_router(files_router)
 app.include_router(grok_router)
 app.include_router(search_router)

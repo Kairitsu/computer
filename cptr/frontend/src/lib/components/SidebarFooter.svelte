@@ -3,7 +3,7 @@
 	import { session, clearSession } from '$lib/session';
 	import { t } from '$lib/i18n';
 	import { keybindings, formatChord } from '$lib/stores/keybindings';
-	import { quotaSummary } from '$lib/stores/quota';
+	import { formatCredits, quotaSummary } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import DropdownMenu from './DropdownMenu.svelte';
 	import Icon from './Icon.svelte';
@@ -49,20 +49,17 @@
 			class="w-5 h-5 rounded-full object-cover shrink-0"
 		/>
 		<span class="truncate">{$session?.username || $t('sidebar.settings')}</span>
-		{#if $quotaSummary.source === 'anyrouter'}
+		{#if $quotaSummary.source === 'codebuddy'}
 			<span
 				class="ml-auto shrink-0 text-xs font-semibold tabular-nums"
-				use:tooltip={$quotaSummary.readable
-					? $t('usageIndicator.anyrouterBalance', {
-							available: $quotaSummary.available ?? 0,
-							granted: $quotaSummary.granted ?? 0
+				use:tooltip={$quotaSummary.signedIn
+					? $t('usageIndicator.codebuddyWeekTooltip')
+					: $t('usageIndicator.codebuddySignedOut')}
+				>{$quotaSummary.signedIn
+					? $t('usageIndicator.codebuddyWeekShort', {
+							credits: formatCredits($quotaSummary.weekCredits)
 						})
-					: $t('usageIndicator.anyrouterUnread')}
-				>{$quotaSummary.unlimited
-					? $t('usageIndicator.anyrouterUnlimitedShort')
-					: $quotaSummary.remainingPercent !== null
-						? `${Math.round($quotaSummary.remainingPercent)}%`
-						: $t('usageIndicator.quotaUnknownShort')}</span
+					: $t('usageIndicator.codebuddySignedOutShort')}</span
 			>
 		{:else if $quotaSummary.source !== 'none'}
 			<span

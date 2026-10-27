@@ -2,8 +2,8 @@
 	/**
 	 * Composer model hub: one chip for model + reasoning effort + context window,
 	 * modelled on Grok App's combined model/effort menu. When the model's agent CLI
-	 * lists its efforts / context windows (Grok), the hub offers exactly those, with the
-	 * CLI's defaults.
+	 * lists its efforts / context windows (Grok, CodeBuddy), the hub offers exactly those,
+	 * with the CLI's defaults.
 	 */
 	import { tick } from 'svelte';
 	import type { ReasoningEffort } from '$lib/apis/chat';
@@ -32,7 +32,16 @@
 	type Page = 'main' | 'models' | 'effort' | 'context';
 
 	const EFFORTS: (ReasoningEffort | null)[] = [null, 'low', 'medium', 'high', 'xhigh'];
-	const EFFORT_LEVELS: Record<string, number> = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
+	const EFFORT_LEVELS: Record<string, number> = {
+		minimal: 0,
+		low: 1,
+		medium: 2,
+		high: 3,
+		xhigh: 4,
+		max: 5
+	};
+	// CodeBuddy's "thinking off".
+	const EFFORT_OFF = 'disabled';
 	const CONTEXT_WINDOWS = [32_000, 64_000, 128_000, 200_000, 256_000, 500_000, 1_000_000];
 
 	let btnEl: HTMLButtonElement | undefined = $state();
@@ -79,7 +88,7 @@
 	);
 
 	function effortName(effort: ReasoningEffort | null | undefined) {
-		if (effort && !(effort in EFFORT_LEVELS)) {
+		if (effort && !(effort in EFFORT_LEVELS) && effort !== EFFORT_OFF) {
 			return cliEfforts?.find((option) => option.value === effort)?.label ?? effort;
 		}
 		return $t(`effort.${effort ?? 'default'}`);
@@ -119,8 +128,15 @@
 	}
 
 	function selectModel(id: string) {
-		selectedModel = id;
 		const next = $chatModels.find((m) => m.id === id);
+		const sameAgent = next?.profile_id === model?.profile_id;
+		selectedModel = id;
+		// Another agent's model brings that agent's own settings (see ChatPanel).
+		if (!sameAgent) {
+			onchange?.();
+			page = 'main';
+			return;
+		}
 		const efforts = next?.reasoning_efforts;
 		if (
 			!next?.supports_reasoning_effort ||
@@ -268,6 +284,12 @@
 								onmouseenter={() => (highlightedIndex = index)}
 							>
 								<span class="truncate flex-1 text-left">{option.name}</span>
+								{#if option.credits}
+									<!-- CodeBuddy's credit rate for the model -->
+									<span class="shrink-0 text-[0.625rem] tabular-nums text-gray-400"
+										>{option.credits}</span
+									>
+								{/if}
 								{#if option.id === selectedModel}
 									<Icon name="check" size={12} class="shrink-0 hub-check" />
 								{/if}
@@ -279,6 +301,20 @@
 						{/each}
 					</div>
 				{:else if page === 'effort' && cliEfforts}
+					{#if model?.default_reasoning_effort == null}
+						<!-- The CLI's own default for the model is not one of its listed efforts. -->
+						<button
+							type="button"
+							class="hub-option"
+							class:active={effectiveEffort === null}
+							onclick={() => selectEffort(null)}
+						>
+							<span class="flex-1 text-left">{$t('effort.default')}</span>
+							{#if effectiveEffort === null}
+								<Icon name="check" size={12} class="shrink-0 hub-check" />
+							{/if}
+						</button>
+					{/if}
 					{#each cliEfforts as option (option.value)}
 						<button
 							type="button"

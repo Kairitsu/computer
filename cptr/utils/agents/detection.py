@@ -1,4 +1,4 @@
-"""Detection helpers for the Grok and AnyRouter agent profiles."""
+"""Detection helpers for the Grok and CodeBuddy agent profiles."""
 
 from __future__ import annotations
 
@@ -74,8 +74,8 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
     code, version_text = await _run_probe([command, "--version"])
     version = version_text.splitlines()[0] if code == 0 and version_text else None
 
-    if profile.get("agent") == "claude":
-        return await _detect_anyrouter(command, version)
+    if profile.get("agent") == "codebuddy":
+        return await _detect_codebuddy(command, version, profile)
     if profile.get("agent") != "grok":
         return AgentDetection("error", command, version, "Unknown agent")
 
@@ -91,17 +91,30 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
     return AgentDetection("ready", command, version, None, models, model_options)
 
 
-async def _detect_anyrouter(command: str, version: str | None) -> AgentDetection:
-    from cptr.utils.anyrouter import KEY_FILE, catalog_models, model_options, read_api_key
+async def _detect_codebuddy(
+    command: str, version: str | None, profile: dict[str, Any]
+) -> AgentDetection:
+    from cptr.utils.agents.codebuddy import AUTH_DIR, codebuddy_catalog, codebuddy_home, signed_in
 
     if version is None:
-        return AgentDetection("error", command, None, "Claude Code did not start")
-    if not read_api_key():
-        return AgentDetection("auth_unknown", command, version, f"{KEY_FILE} is missing", [])
-    models = await catalog_models()
-    if not models:
-        return AgentDetection("auth_unknown", command, version, "AnyRouter lists no models", [])
-    return AgentDetection("ready", command, version, None, models, model_options(models))
+        return AgentDetection("error", command, None, "CodeBuddy did not start")
+    home = codebuddy_home(profile)
+    if not signed_in(home):
+        return AgentDetection(
+            "auth_unknown",
+            command,
+            version,
+            f"CodeBuddy is not signed in (no login in {home / AUTH_DIR}). Run `codebuddy` and log in.",
+            [],
+        )
+    catalog = await codebuddy_catalog(command, profile)
+    if not catalog or not catalog.get("models"):
+        return AgentDetection(
+            "auth_unknown", command, version, "Could not read CodeBuddy's models.", []
+        )
+    return AgentDetection(
+        "ready", command, version, None, list(catalog["models"]), catalog.get("options") or {}
+    )
 
 
 async def _probe_grok_models(
@@ -156,12 +169,7 @@ async def get_agent_status(app_state=None, refresh: bool = False) -> dict[str, A
         effective_profile = dict(profile)
         effective_profile["models"] = models
         if models and effective_profile.get("default_model") not in models:
-            if effective_profile.get("id") == "anyrouter":
-                from cptr.utils.anyrouter import preferred_default
-
-                effective_profile["default_model"] = preferred_default(models)
-            else:
-                effective_profile["default_model"] = models[0]
+            effective_profile["default_model"] = models[0]
         entries.append(
             {
                 "id": effective_profile["id"],
@@ -204,9 +212,10 @@ async def get_available_agent_model_entries(app_state=None) -> list[dict[str, An
                 "profile_id": config["id"],
                 **model_options.get(model, {}),
             }
-            # `id` routes the chat. The selector shows the model id, so a later
-            # catalog entry such as grok-4.8 never displays agent:grok/.
-            entry["name"] = model
+            # `id` routes the chat. The selector shows the CLI model id (or the name the
+            # CLI gives it, as CodeBuddy's "Auto"), so a later catalog entry such as
+            # grok-4.8 never displays agent:grok/.
+            entry["name"] = entry.pop("display_name", None) or model
             entry["profile_name"] = str(config.get("name") or config["id"])
             entries.append(entry)
     return entries

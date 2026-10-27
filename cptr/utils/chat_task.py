@@ -15,6 +15,7 @@ from typing import Any
 
 from cptr.events import EVENTS, publish_event
 from cptr.env import CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS
+from cptr.utils.agents.params import agent_params
 from cptr.utils.context import build_context_usage, chat_context_window
 from cptr.models import (
     Chat,
@@ -24,7 +25,6 @@ from cptr.socket.main import emit_to_user
 from cptr.utils.config import now_ms
 from cptr.utils.tools import clear_active_tasks
 from cptr.utils.chat_export import export_chat_to_file
-from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
 from cptr.utils.agents.events import (
     AgentAskUser,
     AgentContextUsage,
@@ -222,10 +222,13 @@ _released_chats: set[str] = set()
 
 
 async def _close_chat_agents(chat: Chat | None) -> None:
+    from cptr.utils.agents.codebuddy import close_codebuddy_session, codebuddy_session_ids
     from cptr.utils.agents.grok import close_grok_session, grok_session_ids
 
     for session_id in grok_session_ids(chat):
         await close_grok_session(session_id, running=False)
+    for session_id in codebuddy_session_ids(chat):
+        await close_codebuddy_session(session_id, running=False)
 
 
 async def release_chat_agents(chat_id: str) -> None:
@@ -1030,6 +1033,18 @@ async def run_chat_task(
         if not chat:
             return
         meta = dict(chat.meta or {})
+        resume_state = dict(resume_state)
+        # A permission mode the agent switched to itself during the turn (CodeBuddy
+        # leaving plan mode) becomes the chat's, so the next turn does not undo it.
+        agent_mode = resume_state.pop("permission_mode", None)
+        if isinstance(agent_mode, str) and agent_mode:
+            params = dict(meta.get("params") or {})
+            agents = dict(params.get("agents") or {})
+            agents[agent_target.profile_id] = {
+                **(agents.get(agent_target.profile_id) or {}),
+                "permission_mode": agent_mode,
+            }
+            meta["params"] = {**params, "agents": agents}
         sessions = dict(meta.get("agent_sessions") or {})
         sessions[agent_target.profile_id] = {
             **resume_state,
@@ -1041,6 +1056,13 @@ async def run_chat_task(
         }
         meta["agent_sessions"] = sessions
         await Chat.update_meta(chat_id, meta, now_ms())
+        if isinstance(agent_mode, str) and agent_mode:
+            await emit(
+                agent_settings={
+                    "profile_id": agent_target.profile_id,
+                    "permission_mode": agent_mode,
+                }
+            )
 
     async def record_turn_start(agent_target: AgentModelTarget, event: AgentTurnStarted):
         """Note where this turn sits in the agent session, so it can be rewound later.
@@ -1052,6 +1074,8 @@ async def run_chat_task(
             "session_id": event.session_id,
             "prompt_index": event.prompt_index,
         }
+        if event.request_id:
+            message_meta["agent_turn"]["request_id"] = event.request_id
         await ChatMessage.update(message_id, meta=message_meta)
         chat = await Chat.get_by_id(chat_id)
         sessions = dict(((chat.meta or {}).get("agent_sessions") or {}) if chat else {})
@@ -1064,19 +1088,16 @@ async def run_chat_task(
 
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
-        from cptr.utils.agents.claude_code import run_claude_code_agent
+        from cptr.utils.agents.codebuddy import run_codebuddy_agent
         from cptr.utils.agents.grok import run_grok_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
         identity = await identity_for_context({"request": request, "user_id": user_id})
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         agent_workspace = workspace or str(Path.home())
-        messages, loaded_summary = await _load_message_history(chat_id, message_id)
-        system = await _load_system_prompt(
-            request, agent_workspace, agent_target.full_model_id, user_id=user_id
-        )
-        if loaded_summary:
-            system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
+        # Each agent CLI is its own harness: its system prompt, instruction files and
+        # tools apply as they are, and cptr sends only the conversation.
+        messages, _ = await _load_message_history(chat_id, message_id)
         current_user_files = []
         if msg and msg.parent_id:
             parent_msg = await ChatMessage.get_by_id(msg.parent_id)
@@ -1094,9 +1115,10 @@ async def run_chat_task(
         _append_prompt_suffix(messages, agent_attachments.prompt_suffix)
         if regeneration_prompt:
             messages.append({"role": "user", "content": regeneration_prompt})
-        if chat_params.get("plan_mode", False):
+        if agent_target.agent == "grok" and chat_params.get("plan_mode", False):
             # A resumed agent session only receives the latest user message, so append the
             # instruction to it rather than adding a message that would replace it.
+            # CodeBuddy plans in its own plan permission mode instead.
             _append_prompt_suffix(messages, f"\n\n{PLAN_MODE_PROMPT}")
 
         resume_state = None
@@ -1109,7 +1131,7 @@ async def run_chat_task(
 
         runners = {
             "grok": run_grok_agent,
-            "claude": run_claude_code_agent,
+            "codebuddy": run_codebuddy_agent,
         }
         runner = runners.get(agent_target.agent)
         if runner is None:
@@ -1237,7 +1259,6 @@ async def run_chat_task(
             model=agent_target.model,
             workspace=agent_workspace,
             messages=messages,
-            system_prompt=system,
             chat_params=chat_params,
             resume_state=resume_state,
             attachments=agent_attachments,
@@ -1427,7 +1448,8 @@ async def run_chat_task(
                 await emit(
                     context_usage=build_context_usage(
                         event.tokens,
-                        threshold=event.window or chat_context_window(chat_params),
+                        threshold=event.window
+                        or chat_context_window(agent_params(chat_params, agent_target.profile_id)),
                         compactions=event.compactions,
                     )
                 )

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 COOKIE_NAME = "cptr_session"
 
 # Coding agents that accept a per-turn reasoning effort (see utils/agents).
-REASONING_EFFORT_AGENTS = frozenset({"grok"})
+REASONING_EFFORT_AGENTS = frozenset({"grok", "codebuddy"})
 
 
 def _get_user(request: Request) -> str:
@@ -255,7 +255,7 @@ async def warm_model_cache(app_state) -> None:
 
 @router.get("/models")
 async def get_models(request: Request):
-    """List the models of the configured coding agents (Grok, and Claude Code for AnyRouter)."""
+    """List the models of the configured coding agents (Grok and CodeBuddy)."""
     _get_user(request)
     from cptr.utils.context import resolve_compact_token_threshold
 
@@ -578,13 +578,14 @@ async def get_quota(
     """Subscription quota for the composer and sidebar.
 
     `supergrok` is the Grok CLI login's SuperGrok credit snapshot (None when not
-    signed in). `local` is this user's token usage in the current budget period;
-    the budget itself is a client preference.
+    signed in). `codebuddy` is CodeBuddy's login and the credits its turns used.
+    `local` is this user's token usage in the current budget period; the budget
+    itself is a client preference.
     """
     user_id = _get_user(request)
     from sqlalchemy import and_, or_
 
-    from cptr.utils.anyrouter import get_anyrouter_quota
+    from cptr.utils.codebuddy_account import get_codebuddy_quota
     from cptr.utils.supergrok import get_supergrok_quota
 
     start, resets_at = _quota_period_bounds(period, datetime.now(timezone.utc))
@@ -622,7 +623,7 @@ async def get_quota(
 
     return {
         "supergrok": await get_supergrok_quota(force=refresh),
-        "anyrouter": await get_anyrouter_quota(force=refresh),
+        "codebuddy": await get_codebuddy_quota(user_id),
         "local": {
             "period": period,
             "tokens_used": tokens_used,
@@ -703,18 +704,21 @@ async def _get_context_leaf_message_id(chat) -> str | None:
 
 
 def _agent_context_window(app_state, model_id: str | None, params: object) -> int | None:
-    """Window an agent that lists its context windows (Grok, AnyRouter) runs the chat with.
+    """Window an agent that lists its context windows (Grok, CodeBuddy) runs the chat with.
 
     A chosen window the CLI does not offer is not sent to it, so the CLI default applies.
     """
     from cptr.utils.agents.detection import cached_agent_model_options
+    from cptr.utils.agents.models import parse_agent_model_id
+    from cptr.utils.agents.params import agent_params
     from cptr.utils.context import chat_context_window
 
     options = cached_agent_model_options(app_state, model_id or "")
     windows = options.get("context_windows") or []
     if not windows:
         return None
-    chosen = chat_context_window(params)
+    profile_id = (parse_agent_model_id(model_id or "") or (None, None))[0]
+    chosen = chat_context_window(agent_params(params, profile_id))
     return chosen if chosen in windows else options.get("default_context_window")
 
 
@@ -725,8 +729,9 @@ async def _get_chat_context_usage(
     if not message_id:
         return None
 
-    from cptr.utils.agents.grok import grok_compactions
-    from cptr.utils.chat_task import _load_message_history, _load_system_prompt
+    from cptr.utils.agents.models import parse_agent_model_id
+    from cptr.utils.agents.params import agent_params
+    from cptr.utils.chat_task import _load_message_history
     from cptr.utils.context import (
         build_context_usage,
         chat_context_window,
@@ -736,20 +741,20 @@ async def _get_chat_context_usage(
         usage_context_tokens,
     )
 
-    messages, existing_summary = await _load_message_history(chat.id, message_id)
-    workspace = (chat.meta or {}).get("workspace", "")
+    messages, _ = await _load_message_history(chat.id, message_id)
     model = model_id or await _infer_chat_model(chat.id)
+    profile_id = (parse_agent_model_id(model or "") or (None, None))[0]
     params = (chat.meta or {}).get("params")
     compact_token_threshold = (
         _agent_context_window(request.app.state, model, params)
-        or chat_context_window(params)
+        or chat_context_window(agent_params(params, profile_id))
         or await load_compact_token_threshold(model)
     )
-    system = await _load_system_prompt(request, workspace, model or "", user_id=chat.user_id)
-    if existing_summary:
-        system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"
 
-    compactions = grok_compactions(chat)
+    # How often the agent compacted the session the chat continues in.
+    session = ((chat.meta or {}).get("agent_sessions") or {}).get(profile_id)
+    compactions = session.get("compactions") if isinstance(session, dict) else None
+    compactions = compactions if isinstance(compactions, int) else 0
     usage_checkpoint = await _get_latest_usage_checkpoint(chat.id, message_id)
     if usage_checkpoint:
         trailing_messages, usage = usage_checkpoint
@@ -763,7 +768,8 @@ async def _get_chat_context_usage(
                 tokens, threshold=compact_token_threshold, compactions=compactions
             )
 
-    usage = estimate_context_usage(messages, system, threshold=compact_token_threshold)
+    # The agent's own system prompt and tools are not counted; they are not sent from here.
+    usage = estimate_context_usage(messages, "", threshold=compact_token_threshold)
     usage["compactions"] = compactions
     return usage
 
@@ -1412,14 +1418,16 @@ async def retract_message(request: Request, chat_id: str, message_id: str):
         turns = []
         for message in below:
             turn = (message.meta or {}).get("agent_turn") if message.role == "assistant" else None
-            if isinstance(turn, dict) and isinstance(turn.get("prompt_index"), int):
+            if isinstance(turn, dict) and isinstance(turn.get("session_id"), str):
                 turns.append(turn)
         for message in [*below, target]:
             await ChatMessage.delete(message.id)
         await Chat.update_current_message(chat_id, target.parent_id, now_ms())
 
-        # Rewind the agent session before its next turn (see run_grok_agent). Only the
-        # session the chat resumes matters; a turn sent to a new session is dropped with it.
+        # Rewind the agent session before its next turn (see run_grok_agent and
+        # run_codebuddy_agent). Grok rewinds to the turn's prompt index, CodeBuddy to its
+        # request id; without either, CodeBuddy starts a new session. Only the session the
+        # chat resumes matters; a turn sent to a new session is dropped with it.
         chat = await Chat.get_by_id(chat_id)
         meta = dict((chat.meta if chat else None) or {})
         sessions = dict(meta.get("agent_sessions") or {})
@@ -1427,17 +1435,22 @@ async def retract_message(request: Request, chat_id: str, message_id: str):
             entry = sessions.get(turn.get("profile_id"))
             if not isinstance(entry, dict) or entry.get("session_id") != turn.get("session_id"):
                 continue
-            pending = entry.get("rewind")
-            if (
-                isinstance(pending, dict)
-                and pending.get("session_id") == turn["session_id"]
-                and isinstance(pending.get("prompt_index"), int)
-                and pending["prompt_index"] <= turn["prompt_index"]
-            ):
+            if entry.get("agent") == "grok" and not isinstance(turn.get("prompt_index"), int):
                 continue
+            pending = entry.get("rewind")
+            if isinstance(pending, dict) and pending.get("session_id") == turn["session_id"]:
+                # An earlier pending rewind already drops this turn, unless both are
+                # Grok prompt indexes and this one is earlier.
+                earlier, later = pending.get("prompt_index"), turn.get("prompt_index")
+                if not (isinstance(earlier, int) and isinstance(later, int)) or earlier <= later:
+                    continue
             sessions[turn["profile_id"]] = {
                 **entry,
-                "rewind": {"session_id": turn["session_id"], "prompt_index": turn["prompt_index"]},
+                "rewind": {
+                    key: turn[key]
+                    for key in ("session_id", "prompt_index", "request_id")
+                    if turn.get(key) is not None
+                },
             }
         if sessions != (meta.get("agent_sessions") or {}):
             meta["agent_sessions"] = sessions

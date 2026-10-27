@@ -27,6 +27,11 @@
 		updateGrokProcessSettings,
 		type GrokProcessSettings
 	} from '$lib/apis/grok';
+	import {
+		getCodeBuddyProcessSettings,
+		updateCodeBuddyProcessSettings,
+		type CodeBuddyProcessSettings
+	} from '$lib/apis/codebuddy';
 	import ToggleSwitch from '../common/ToggleSwitch.svelte';
 
 	interface Props {
@@ -49,8 +54,14 @@
 	const REPO_URL = 'https://github.com/Kairitsu/computer';
 
 	let resetting = $state(false);
-	// Server-wide limits for the Grok processes chats keep between turns; admins set them.
+	// Server-wide limits for the Grok and CodeBuddy processes chats keep between turns;
+	// admins set them. Each agent has its own.
 	let processSettings = $state<GrokProcessSettings | null>(null);
+	let codebuddyProcessSettings = $state<CodeBuddyProcessSettings | null>(null);
+	const processFields = $derived([
+		{ key: 'max_idle_processes' as const, label: $t('general.maxIdleProcesses'), max: 100 },
+		{ key: 'idle_timeout_minutes' as const, label: $t('general.idleTimeoutMinutes'), max: 10080 }
+	]);
 
 	// How long chats are kept, server-wide; admins set it. Idle chats past it are deleted.
 	let retention = $state<ChatRetention | null>(null);
@@ -100,6 +111,30 @@
 			.then((settings) => (processSettings = settings))
 			.catch(() => {});
 	});
+
+	$effect(() => {
+		if ($session?.role !== 'admin' || codebuddyProcessSettings) return;
+		getCodeBuddyProcessSettings()
+			.then((settings) => (codebuddyProcessSettings = settings))
+			.catch(() => {});
+	});
+
+	async function saveCodeBuddyProcessSetting(
+		key: keyof CodeBuddyProcessSettings,
+		input: HTMLInputElement
+	) {
+		if (!codebuddyProcessSettings) return;
+		const value = Number(input.value);
+		if (input.value.trim() && Number.isInteger(value) && value >= 0) {
+			try {
+				codebuddyProcessSettings = await updateCodeBuddyProcessSettings({ [key]: value });
+				toast.success($t('settings.saved'));
+			} catch {
+				toast.error($t('admin.failedToSave'));
+			}
+		}
+		input.value = String(codebuddyProcessSettings[key]);
+	}
 
 	async function saveProcessSetting(key: keyof GrokProcessSettings, input: HTMLInputElement) {
 		if (!processSettings) return;
@@ -260,7 +295,7 @@
 				{$t('general.grokProcesses')}
 			</h3>
 			<div class="flex flex-col gap-2">
-				{#each [{ key: 'max_idle_processes' as const, label: $t('general.maxIdleProcesses'), max: 100 }, { key: 'idle_timeout_minutes' as const, label: $t('general.idleTimeoutMinutes'), max: 10080 }] as field (field.key)}
+				{#each processFields as field (field.key)}
 					<label class="flex items-center justify-between gap-3">
 						<span class="text-xs text-gray-600 dark:text-gray-400">{field.label}</span>
 						<input
@@ -277,6 +312,31 @@
 			</div>
 			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
 				{$t('general.grokProcessesDesc')}
+			</p>
+		{/if}
+
+		{#if $session?.role === 'admin' && codebuddyProcessSettings}
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+				{$t('general.codebuddyProcesses')}
+			</h3>
+			<div class="flex flex-col gap-2">
+				{#each processFields as field (field.key)}
+					<label class="flex items-center justify-between gap-3">
+						<span class="text-xs text-gray-600 dark:text-gray-400">{field.label}</span>
+						<input
+							type="number"
+							min="0"
+							max={field.max}
+							step="1"
+							value={codebuddyProcessSettings[field.key]}
+							onchange={(e) => saveCodeBuddyProcessSetting(field.key, e.currentTarget)}
+							class="settings-field w-20 text-right"
+						/>
+					</label>
+				{/each}
+			</div>
+			<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 mt-1">
+				{$t('general.codebuddyProcessesDesc')}
 			</p>
 		{/if}
 

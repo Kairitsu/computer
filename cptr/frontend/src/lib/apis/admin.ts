@@ -35,7 +35,7 @@ export const updateChatRetention = (days: number) =>
 
 // ── Agents ─────────────────────────────────────────────────
 
-export type AgentType = 'grok' | 'claude';
+export type AgentType = 'grok' | 'codebuddy';
 export type AgentMode = 'auto' | 'enabled' | 'disabled';
 export type AgentStatus = 'ready' | 'not_found' | 'missing_dependency' | 'auth_unknown' | 'error';
 

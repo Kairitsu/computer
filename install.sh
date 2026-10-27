@@ -206,24 +206,17 @@ ensure_grok() {
 	fi
 }
 
-# AnyRouter 用一份单独安装、固定版本的 Claude Code，不碰机器上已有的 claude 和 ~/.claude。
-# 版本要和 cptr/utils/anyrouter.py 里的 CLAUDE_CODE_VERSION 一致。
-ensure_anyrouter_claude() {
-	local version=2.1.310 dir="$HOME/.local/share/claude-anyrouter" installed="" log
-	local pkg="$dir/node_modules/@anthropic-ai/claude-code/package.json"
-	[ -f "$pkg" ] && installed="$(node -p "require('$pkg').version" 2>/dev/null || true)"
-	if [ "$installed" = "$version" ] && [ -x "$dir/node_modules/.bin/claude" ]; then
-		info "AnyRouter 的 Claude Code：$installed（$dir）"
+# CodeBuddy 不由这里安装：它要用户自己装好（npm i -g @tencent-ai/codebuddy-code）并登录。
+# 这里只检查一下，缺了就提醒，Grok 照常可用。
+ensure_codebuddy() {
+	if ! have codebuddy; then
+		info "CodeBuddy：没有找到 codebuddy 命令，CodeBuddy 暂时不能用。"
 		return 0
 	fi
-	step "安装 AnyRouter 用的 Claude Code $version（$dir）"
-	mkdir -p "$dir"
-	log="$(mktemp)"
-	if npm install --prefix "$dir" --no-audit --no-fund --save-exact "@anthropic-ai/claude-code@$version" >"$log" 2>&1; then
-		rm -f "$log"
+	if ls "$HOME/.local/share/CodeBuddyExtension/Data/Public/auth/"*.info >/dev/null 2>&1; then
+		info "CodeBuddy：$(codebuddy --version 2>/dev/null | head -n 1)，已登录"
 	else
-		tail -n 20 "$log" >&2
-		warn "AnyRouter 的 Claude Code 没装上，AnyRouter 暂时不能用；稍后再运行一次安装命令即可。"
+		warn "CodeBuddy 还没有为 $(id -un) 登录。运行 codebuddy 并登录后，CodeBuddy 才能用。"
 	fi
 }
 
@@ -507,7 +500,7 @@ main() {
 	ensure_uv
 	ensure_node
 	ensure_grok
-	ensure_anyrouter_claude
+	ensure_codebuddy
 	fetch_code
 	build
 	save_settings

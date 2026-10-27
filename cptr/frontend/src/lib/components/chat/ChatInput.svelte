@@ -37,6 +37,8 @@
 		inputText: string;
 		selectedModel: string;
 		toolApprovalMode?: ToolApprovalMode;
+		/** CodeBuddy's permission mode; null = the mode CodeBuddy starts in. */
+		permissionMode?: string | null;
 		planMode?: boolean;
 		reasoningEffort?: ReasoningEffort | null;
 		contextWindow?: number | null;
@@ -68,11 +70,13 @@
 		onqueuedelete?: (id: string) => void;
 		onsettingschange?: () => void;
 		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
+		onpermissionmodechange?: (mode: string) => void;
 	}
 	let {
 		inputText = $bindable(),
 		selectedModel = $bindable(),
 		toolApprovalMode = $bindable('auto'),
+		permissionMode = $bindable(null),
 		planMode = $bindable(false),
 		reasoningEffort = $bindable(null),
 		contextWindow = $bindable(null),
@@ -98,7 +102,8 @@
 		onqueueedit,
 		onqueuedelete,
 		onsettingschange,
-		ontoolapprovalchange
+		ontoolapprovalchange,
+		onpermissionmodechange
 	}: Props = $props();
 
 	let editorEl: HTMLDivElement | undefined = $state();
@@ -110,25 +115,44 @@
 	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
 	// Grok's auto mode is its auto-review: risky calls are refused rather than asked about.
 	const grokSelected = $derived(selectedChatModel?.agent_id === 'grok');
-	const approvalModes = $derived([
-		{
-			value: 'ask' as ToolApprovalMode,
-			label: $t('plusMenu.askApproval'),
-			desc: $t('plusMenu.askApprovalDesc')
-		},
-		{
-			value: 'auto' as ToolApprovalMode,
-			label: $t(grokSelected ? 'plusMenu.grokAutoReview' : 'plusMenu.autoApprove'),
-			desc: $t(grokSelected ? 'plusMenu.grokAutoReviewDesc' : 'plusMenu.autoApproveDesc')
-		},
-		{
-			value: 'full' as ToolApprovalMode,
-			label: $t('plusMenu.fullAccess'),
-			desc: $t('plusMenu.fullAccessDesc')
-		}
-	]);
+	// CodeBuddy lists its own permission modes, and plans in its plan mode.
+	const ownModes = $derived(selectedChatModel?.permission_modes ?? []);
+	const usesOwnModes = $derived(!grokSelected && ownModes.length > 0);
+	// Modes that skip CodeBuddy's permission checks.
+	const DANGER_MODES = new Set(['full', 'bypassPermissions', 'fullAccess']);
+	const approvalModes = $derived(
+		usesOwnModes
+			? ownModes.map((mode) => ({
+					value: mode.value,
+					label: $t(`codebuddyMode.${mode.value}`, { defaultValue: mode.label }),
+					desc: $t(`codebuddyMode.${mode.value}Desc`, { defaultValue: mode.description ?? '' })
+				}))
+			: [
+					{
+						value: 'ask',
+						label: $t('plusMenu.askApproval'),
+						desc: $t('plusMenu.askApprovalDesc')
+					},
+					{
+						value: 'auto',
+						label: $t(grokSelected ? 'plusMenu.grokAutoReview' : 'plusMenu.autoApprove'),
+						desc: $t(grokSelected ? 'plusMenu.grokAutoReviewDesc' : 'plusMenu.autoApproveDesc')
+					},
+					{
+						value: 'full',
+						label: $t('plusMenu.fullAccess'),
+						desc: $t('plusMenu.fullAccessDesc')
+					}
+				]
+	);
+	const currentApprovalMode = $derived(
+		usesOwnModes
+			? (permissionMode ?? selectedChatModel?.default_permission_mode ?? ownModes[0]?.value)
+			: toolApprovalMode
+	);
+	const approvalDanger = $derived(DANGER_MODES.has(currentApprovalMode ?? ''));
 	const approvalLabel = $derived(
-		approvalModes.find((mode) => mode.value === toolApprovalMode)?.label ??
+		approvalModes.find((mode) => mode.value === currentApprovalMode)?.label ??
 			$t('plusMenu.toolPermissions')
 	);
 	const modelContextWindow = $derived(selectedChatModel?.context_window);
@@ -141,10 +165,16 @@
 			: contextWindow
 	);
 
-	function selectApprovalMode(mode: ToolApprovalMode) {
+	function selectApprovalMode(mode: string) {
 		approvalMenuOpen = false;
-		toolApprovalMode = mode;
-		if (ontoolapprovalchange) ontoolapprovalchange(mode);
+		if (usesOwnModes) {
+			permissionMode = mode;
+			if (onpermissionmodechange) onpermissionmodechange(mode);
+			else onsettingschange?.();
+			return;
+		}
+		toolApprovalMode = mode as ToolApprovalMode;
+		if (ontoolapprovalchange) ontoolapprovalchange(mode as ToolApprovalMode);
 		else onsettingschange?.();
 	}
 
@@ -780,7 +810,9 @@
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{$t('chat.commandPlan')}</span>
 						<span class="app-muted text-[0.625rem] truncate shrink-0">
-							{planMode ? $t('chat.commandPlanOn') : $t('chat.commandPlanOff')}
+							{(usesOwnModes ? permissionMode === 'plan' : planMode)
+								? $t('chat.commandPlanOn')
+								: $t('chat.commandPlanOff')}
 						</span>
 					</span>
 				</button>
@@ -990,6 +1022,7 @@
 			<div class="ml-0.5 self-end flex items-center gap-1">
 				<PlusMenu
 					bind:planMode
+					showPlanMode={!usesOwnModes}
 					onchange={onsettingschange}
 					onfiles={(files) => {
 						if (files) processFiles(Array.from(files));
@@ -999,16 +1032,12 @@
 					bind:this={approvalChipEl}
 					type="button"
 					class="approval-chip"
-					class:danger={toolApprovalMode === 'full'}
+					class:danger={approvalDanger}
 					aria-haspopup="menu"
 					aria-expanded={approvalMenuOpen}
 					onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
 				>
-					<Icon
-						name={toolApprovalMode === 'full' ? 'warning-triangle' : 'shield'}
-						size={13}
-						class="shrink-0"
-					/>
+					<Icon name={approvalDanger ? 'warning-triangle' : 'shield'} size={13} class="shrink-0" />
 					<span class="truncate">{approvalLabel}</span>
 					<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
 				</button>
@@ -1021,22 +1050,22 @@
 								onclick={() => selectApprovalMode(mode.value)}
 							>
 								<Icon
-									name={mode.value === 'full' ? 'warning-triangle' : 'shield'}
+									name={DANGER_MODES.has(mode.value) ? 'warning-triangle' : 'shield'}
 									size={13}
-									class="shrink-0 mt-px {mode.value === 'full' ? 'text-red-500' : ''}"
+									class="shrink-0 mt-px {DANGER_MODES.has(mode.value) ? 'text-red-500' : ''}"
 								/>
 								<span class="flex-1 min-w-0 text-left">
 									<span class="block">{mode.label}</span>
 									<span class="block text-[0.625rem] leading-snug opacity-70">{mode.desc}</span>
 								</span>
-								{#if toolApprovalMode === mode.value}
+								{#if currentApprovalMode === mode.value}
 									<Icon name="check" size={12} class="shrink-0 mt-px menu-check" />
 								{/if}
 							</button>
 						{/each}
 					</Popover>
 				{/if}
-				{#if planMode}
+				{#if planMode && !usesOwnModes}
 					<button
 						type="button"
 						aria-label={$t('chat.commandPlanOff')}

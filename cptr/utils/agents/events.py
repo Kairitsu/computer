@@ -75,12 +75,14 @@ class AgentContextUsage:
 class AgentTurnStarted:
     """The agent is about to send this turn's prompt into its session.
 
-    ``prompt_index`` is the prompt's position in the session (Grok's rewind point), so
-    the turn can later be rewound out of the agent's history.
+    ``prompt_index`` is the prompt's position in the session (Grok's rewind point) and
+    ``request_id`` the id the agent gave the prompt (CodeBuddy's), so the turn can
+    later be rewound out of the agent's history.
     """
 
     session_id: str
     prompt_index: int | None = None
+    request_id: str | None = None
 
 
 @dataclass

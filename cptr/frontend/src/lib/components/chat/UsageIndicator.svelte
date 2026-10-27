@@ -1,10 +1,16 @@
 <script lang="ts">
 	/**
-	 * Composer chip with the current context fullness and subscription quota.
-	 * Click for details: context tokens, SuperGrok or local budget.
+	 * Composer chip with the current context fullness and the selected agent's quota.
+	 * Click for details: context tokens, SuperGrok or local budget, CodeBuddy credits.
 	 */
 	import type { ContextUsage } from '$lib/apis/chat';
-	import { formatTokens, quotaLoading, quotaSummary, refreshQuota } from '$lib/stores/quota';
+	import {
+		formatCredits,
+		formatTokens,
+		quotaLoading,
+		quotaSummary,
+		refreshQuota
+	} from '$lib/stores/quota';
 	import { i18next, t } from '$lib/i18n';
 	import Icon from '../Icon.svelte';
 	import Popover from '../common/Popover.svelte';
@@ -30,30 +36,18 @@
 	const quotaRemaining = $derived(
 		$quotaSummary.source === 'supergrok' || $quotaSummary.source === 'budget'
 			? Math.round($quotaSummary.remainingPercent)
-			: $quotaSummary.source === 'anyrouter' &&
-				  $quotaSummary.readable &&
-				  !$quotaSummary.unlimited &&
-				  $quotaSummary.remainingPercent !== null
-				? Math.round($quotaSummary.remainingPercent)
-				: null
+			: null
 	);
 	const quotaLabel = $derived(
-		$quotaSummary.source === 'anyrouter'
-			? $quotaSummary.unlimited
-				? $t('usageIndicator.anyrouterUnlimitedShort')
-				: quotaRemaining !== null
-					? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
-					: $t('usageIndicator.quotaUnknownShort')
+		$quotaSummary.source === 'codebuddy'
+			? $quotaSummary.signedIn
+				? $t('usageIndicator.codebuddyWeekShort', {
+						credits: formatCredits($quotaSummary.weekCredits)
+					})
+				: $t('usageIndicator.codebuddySignedOutShort')
 			: quotaRemaining !== null
 				? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
 				: null
-	);
-	const spentLabel = $derived(
-		$quotaSummary.source === 'anyrouter' && $quotaSummary.spentUsd !== null
-			? new Intl.NumberFormat(i18next.language, { style: 'currency', currency: 'USD' }).format(
-					$quotaSummary.spentUsd
-				)
-			: null
 	);
 	const tone = (percent: number) => (percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'ok');
 
@@ -166,34 +160,46 @@
 					</button>
 				</div>
 
-				{#if $quotaSummary.source === 'anyrouter'}
+				{#if $quotaSummary.source === 'codebuddy'}
 					{@const summary = $quotaSummary}
-					<div class="flex items-baseline justify-between">
-						<span class="usage-meta">AnyRouter</span>
-						<span class="text-xs font-medium">
-							{summary.unlimited
-								? $t('usageIndicator.anyrouterUnlimitedShort')
-								: summary.readable && summary.remainingPercent !== null
-									? $t('usageIndicator.remaining', {
-											percent: Math.round(summary.remainingPercent)
-										})
-									: $t('usageIndicator.quotaUnknownShort')}
+					{@const usage = summary.codebuddy?.usage}
+					<div class="flex items-baseline justify-between gap-2">
+						<span class="usage-meta truncate">
+							CodeBuddy{summary.codebuddy?.nickname ? ` · ${summary.codebuddy.nickname}` : ''}
+						</span>
+						<span class="text-xs font-medium shrink-0">
+							{summary.signedIn
+								? $t('usageIndicator.codebuddyCredits', {
+										credits: formatCredits(summary.weekCredits)
+									})
+								: $t('usageIndicator.codebuddySignedOutShort')}
 						</span>
 					</div>
+					{#if usage}
+						{#each ['day', 'week', 'month'] as const as period (period)}
+							<div class="usage-meta flex justify-between tabular-nums">
+								<span>{$t(`usageIndicator.period.${period}`)}</span>
+								<span>
+									{$t('usageIndicator.codebuddyPeriodUsage', {
+										credits: formatCredits(usage[period].credits),
+										replies: usage[period].replies
+									})}
+								</span>
+							</div>
+						{/each}
+					{/if}
 					<p class="usage-meta">
-						{summary.readable
-							? summary.unlimited
-								? $t('usageIndicator.anyrouterUnlimited')
-								: $t('usageIndicator.anyrouterBalance', {
-										available: summary.available ?? 0,
-										granted: summary.granted ?? 0
-									})
-							: $t('usageIndicator.anyrouterUnread')}
+						{summary.signedIn
+							? $t('usageIndicator.codebuddyBalanceHint')
+							: $t('usageIndicator.codebuddySignedOut')}
 					</p>
-					{#if spentLabel}
-						<p class="usage-meta tabular-nums">
-							{$t('usageIndicator.anyrouterSpent', { amount: spentLabel })}
-						</p>
+					{#if summary.codebuddy?.usage_url}
+						<a
+							class="usage-link block"
+							href={summary.codebuddy.usage_url}
+							target="_blank"
+							rel="noopener noreferrer">{$t('usageIndicator.codebuddyOpenUsage')}</a
+						>
 					{/if}
 				{:else if $quotaSummary.source === 'supergrok'}
 					{@const summary = $quotaSummary}

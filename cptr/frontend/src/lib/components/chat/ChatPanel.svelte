@@ -13,6 +13,7 @@
 		queueSendNow as apiQueueSendNow,
 		queueDelete as apiQueueDelete,
 		updateChatSettings,
+		type AgentSendParams,
 		type ChatMessageRow,
 		type ChatSendParams,
 		type ReasoningEffort,
@@ -23,6 +24,7 @@
 	import {
 		chatModels,
 		defaultModel,
+		profileOfModel,
 		setChatReadAt,
 		streamingChatTabs,
 		registerStreamingChat,
@@ -31,9 +33,10 @@
 		registerToolApprovalShortcutHandler
 	} from '$lib/stores/chat';
 	import { socketStore } from '$lib/stores/socket.svelte';
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import {
+		agentDefaults,
 		currentWorkspace,
 		defaultContextWindow,
 		defaultReasoningEffort,
@@ -91,10 +94,59 @@
 			quotaProfileForModel($chatModels.find((model) => model.id === selectedModel))
 		);
 	});
+	// The composer shows the selected agent's own settings: Grok's approval mode, or
+	// CodeBuddy's permission mode, plus that agent's effort and window. Each agent
+	// keeps its settings in `agentSettings`, so switching agents never carries them over.
+	const GROK_PROFILE = 'grok';
 	let toolApprovalMode = $state<ToolApprovalMode>('auto');
+	let permissionMode = $state<string | null>(null);
 	let planMode = $state(false);
 	let reasoningEffort = $state<ReasoningEffort | null>(null);
 	let contextWindow = $state<number | null>(null);
+	let settingsProfile = $state('');
+	let agentSettings: Record<string, AgentSendParams> = {};
+	// CodeBuddy's mode before `/plan` switched it to plan, to switch back to.
+	let modeBeforePlan: string | null = null;
+
+	function currentAgentSettings(): AgentSendParams {
+		const settings: AgentSendParams = {};
+		if (settingsProfile === GROK_PROFILE) settings.tool_approval_mode = toolApprovalMode;
+		else if (permissionMode) settings.permission_mode = permissionMode;
+		if (reasoningEffort) settings.reasoning_effort = reasoningEffort;
+		if (contextWindow) settings.context_window = contextWindow;
+		return settings;
+	}
+
+	/** New-chat settings: the agent's last choices, else its CLI defaults. */
+	function defaultAgentSettings(profile: string): AgentSendParams {
+		if (profile !== GROK_PROFILE) return { ...(get(agentDefaults)[profile] ?? {}) };
+		const settings: AgentSendParams = { tool_approval_mode: get(defaultToolApprovalMode) };
+		const effort = get(defaultReasoningEffort);
+		const window = get(defaultContextWindow);
+		if (effort) settings.reasoning_effort = effort;
+		if (window) settings.context_window = window;
+		return settings;
+	}
+
+	function showAgentSettings(profile: string) {
+		settingsProfile = profile;
+		const settings = agentSettings[profile] ?? {};
+		toolApprovalMode = settings.tool_approval_mode ?? get(defaultToolApprovalMode);
+		permissionMode = settings.permission_mode ?? null;
+		reasoningEffort = settings.reasoning_effort ?? null;
+		contextWindow = settings.context_window ?? null;
+	}
+
+	// Picking another agent's model shows that agent's settings, starting from its defaults.
+	$effect(() => {
+		const profile = profileOfModel(selectedModel);
+		untrack(() => {
+			if (profile === settingsProfile) return;
+			if (settingsProfile) agentSettings[settingsProfile] = currentAgentSettings();
+			agentSettings[profile] ??= defaultAgentSettings(profile);
+			showAgentSettings(profile);
+		});
+	});
 	let allMessages = $state<ChatMessageRow[]>([]);
 	const pendingAskUser = $derived.by(() => {
 		for (const message of [...allMessages].reverse()) {
@@ -332,7 +384,8 @@
 	const landingTitle = $derived($t('chat.landingTitle'));
 	// In plan mode, a finished reply is a plan waiting for approval.
 	const planApprovalMessageId = $derived.by(() => {
-		if (!planMode || streaming || sending || pendingAskUser) return null;
+		if (!planMode || settingsProfile !== GROK_PROFILE || streaming || sending || pendingAskUser)
+			return null;
 		const last = activePath[activePath.length - 1]?.msg;
 		if (!last || last.role !== 'assistant' || !last.done || last.meta?.error) return null;
 		return last.content?.trim() ? last.id : null;
@@ -449,6 +502,7 @@
 		output?: any;
 		tasks?: ChatTask[];
 		context_usage?: ContextUsage | null;
+		agent_settings?: { profile_id?: string; permission_mode?: string };
 		done?: boolean;
 		error?: string;
 		pending_inputs_processed?: boolean;
@@ -478,6 +532,12 @@
 		}
 		if (data.context_usage) {
 			contextUsage = data.context_usage;
+		}
+		// The agent switched its own permission mode (CodeBuddy leaving plan mode).
+		if (data.agent_settings?.profile_id && data.agent_settings.permission_mode) {
+			const { profile_id, permission_mode } = data.agent_settings;
+			agentSettings[profile_id] = { ...agentSettings[profile_id], permission_mode };
+			if (profile_id === settingsProfile) permissionMode = permission_mode;
 		}
 
 		// Follow-up state changed server-side: reload to see new transcript/generation state.
@@ -568,33 +628,52 @@
 		const dm = get(defaultModel);
 		if (dm) selectedModel = dm;
 		else if (models.length) selectedModel = models[0].id;
-		toolApprovalMode = get(defaultToolApprovalMode);
 		planMode = false;
-		reasoningEffort = get(defaultReasoningEffort);
-		contextWindow = get(defaultContextWindow);
+		modeBeforePlan = null;
+		const profile = profileOfModel(selectedModel);
+		agentSettings = { [profile]: defaultAgentSettings(profile) };
+		showAgentSettings(profile);
+	}
+
+	function savedAgentSettings(raw: unknown): AgentSendParams {
+		const settings: AgentSendParams = {};
+		if (!raw || typeof raw !== 'object') return settings;
+		const value = raw as Record<string, unknown>;
+		if (
+			value.tool_approval_mode === 'ask' ||
+			value.tool_approval_mode === 'auto' ||
+			value.tool_approval_mode === 'full'
+		) {
+			settings.tool_approval_mode = value.tool_approval_mode;
+		}
+		if (typeof value.permission_mode === 'string' && value.permission_mode) {
+			settings.permission_mode = value.permission_mode;
+		}
+		if (typeof value.reasoning_effort === 'string' && value.reasoning_effort) {
+			settings.reasoning_effort = value.reasoning_effort;
+		}
+		if (typeof value.context_window === 'number' && value.context_window > 0) {
+			settings.context_window = value.context_window;
+		}
+		return settings;
 	}
 
 	function loadChatSettings(meta: Record<string, any> | null) {
 		resetChatSettings();
-		// Existing chats keep what they were sent with; missing = provider default.
-		reasoningEffort = null;
-		contextWindow = null;
-		const params = meta?.params;
-		if (!params || typeof params !== 'object') return;
-		if (
-			params.tool_approval_mode === 'ask' ||
-			params.tool_approval_mode === 'auto' ||
-			params.tool_approval_mode === 'full'
-		) {
-			toolApprovalMode = params.tool_approval_mode;
-		}
+		const params = meta?.params && typeof meta.params === 'object' ? meta.params : {};
 		planMode = params.plan_mode === true;
-		if (['low', 'medium', 'high', 'xhigh', 'max'].includes(params.reasoning_effort)) {
-			reasoningEffort = params.reasoning_effort;
+		// Existing chats keep what each agent was sent with; missing = the CLI's default.
+		agentSettings = {};
+		if (params.agents && typeof params.agents === 'object') {
+			for (const [profile, saved] of Object.entries(params.agents)) {
+				agentSettings[profile] = savedAgentSettings(saved);
+			}
 		}
-		if (typeof params.context_window === 'number' && params.context_window > 0) {
-			contextWindow = params.context_window;
-		}
+		// Chats from before per-agent settings keep Grok's at the top level.
+		agentSettings[GROK_PROFILE] ??= {
+			tool_approval_mode: get(defaultToolApprovalMode),
+			...savedAgentSettings(params)
+		};
 		const models = get(chatModels);
 		if (
 			typeof meta?.last_model === 'string' &&
@@ -602,6 +681,9 @@
 		) {
 			selectedModel = meta.last_model;
 		}
+		const profile = profileOfModel(selectedModel);
+		agentSettings[profile] ??= profile === GROK_PROFILE ? defaultAgentSettings(profile) : {};
+		showAgentSettings(profile);
 	}
 
 	async function persistChatSettings() {
@@ -610,9 +692,14 @@
 	}
 
 	function handleSettingsChange() {
-		// The latest choice becomes the default for the next new chat.
-		defaultReasoningEffort.set(reasoningEffort);
-		defaultContextWindow.set(contextWindow);
+		// The latest choice becomes the agent's default for the next new chat.
+		if (settingsProfile === GROK_PROFILE) {
+			defaultReasoningEffort.set(reasoningEffort);
+			defaultContextWindow.set(contextWindow);
+		} else if (settingsProfile) {
+			const settings = currentAgentSettings();
+			agentDefaults.update((defaults) => ({ ...defaults, [settingsProfile]: settings }));
+		}
 		persistChatSettings();
 	}
 
@@ -838,12 +925,16 @@
 	// ── Actions ─────────────────────────────────────────────────
 
 	function getChatSendParams(): ChatSendParams {
+		if (settingsProfile) agentSettings[settingsProfile] = currentAgentSettings();
+		// Grok's settings also go at the top level, where older versions read them.
+		const grok = agentSettings[GROK_PROFILE] ?? {};
 		const params: ChatSendParams = {
-			tool_approval_mode: toolApprovalMode,
-			plan_mode: planMode
+			tool_approval_mode: grok.tool_approval_mode ?? get(defaultToolApprovalMode),
+			plan_mode: planMode,
+			agents: { ...agentSettings }
 		};
-		if (reasoningEffort) params.reasoning_effort = reasoningEffort;
-		if (contextWindow) params.context_window = contextWindow;
+		if (grok.reasoning_effort) params.reasoning_effort = grok.reasoning_effort;
+		if (grok.context_window) params.context_window = grok.context_window;
 		return params;
 	}
 
@@ -1019,6 +1110,19 @@
 	}
 
 	function handlePlanCommand() {
+		if (settingsProfile !== GROK_PROFILE) {
+			// CodeBuddy plans in its own plan permission mode.
+			const model = $chatModels.find((m) => m.id === selectedModel);
+			if (!model?.permission_modes?.some((mode) => mode.value === 'plan')) return;
+			const fallback = model.default_permission_mode ?? 'default';
+			if (permissionMode === 'plan') {
+				handlePermissionModeChange(modeBeforePlan ?? fallback);
+			} else {
+				modeBeforePlan = permissionMode ?? fallback;
+				handlePermissionModeChange('plan');
+			}
+			return;
+		}
 		planMode = !planMode;
 		persistChatSettings();
 	}
@@ -1041,6 +1145,11 @@
 		toolApprovalMode = mode;
 		defaultToolApprovalMode.set(mode);
 		persistChatSettings();
+	}
+
+	function handlePermissionModeChange(mode: string) {
+		permissionMode = mode;
+		handleSettingsChange();
 	}
 
 	function firstUserMessageTitle(): string {
@@ -1416,6 +1525,7 @@
 					bind:inputText
 					bind:selectedModel
 					bind:toolApprovalMode
+					bind:permissionMode
 					bind:planMode
 					bind:reasoningEffort
 					bind:contextWindow
@@ -1429,6 +1539,7 @@
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
+					onpermissionmodechange={handlePermissionModeChange}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}
@@ -1533,6 +1644,7 @@
 					bind:inputText
 					bind:selectedModel
 					bind:toolApprovalMode
+					bind:permissionMode
 					bind:planMode
 					bind:reasoningEffort
 					bind:contextWindow
@@ -1553,6 +1665,7 @@
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
 					ontoolapprovalchange={handleToolApprovalModeChange}
+					onpermissionmodechange={handlePermissionModeChange}
 					onstatus={handleStatusCommand}
 					oncancel={handleCancel}
 					{queuedMessages}

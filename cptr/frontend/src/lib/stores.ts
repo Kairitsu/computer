@@ -109,8 +109,15 @@ export interface HomeState {
 }
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** An effort the agent CLI lists for the model; CodeBuddy adds 'minimal' and 'disabled'. */
+export type ReasoningEffort = string;
 export type QuotaPeriod = 'day' | 'week' | 'month';
+/** An agent's last composer choices; missing = the agent CLI's default. */
+export interface AgentDefaults {
+	permission_mode?: string;
+	reasoning_effort?: ReasoningEffort;
+	context_window?: number;
+}
 export interface QuotaBudget {
 	period: QuotaPeriod;
 	/** Token budget for the period; null = no local budget. */
@@ -125,6 +132,8 @@ export interface UserPreferences {
 	toolApprovalMode?: ToolApprovalMode;
 	reasoningEffort?: ReasoningEffort | null;
 	contextWindow?: number | null;
+	/** New-chat defaults of agents other than Grok, by profile id. */
+	agentDefaults?: Record<string, AgentDefaults>;
 	quotaBudget?: QuotaBudget;
 	locale: string;
 	workspaceOrder?: string[]; // ordered paths for sidebar drag-reorder
@@ -324,6 +333,8 @@ export const toolApprovalMode = writable<ToolApprovalMode>('auto');
 /** Composer defaults for new chats: last chosen reasoning effort / context window. */
 export const defaultReasoningEffort = writable<ReasoningEffort | null>(null);
 export const defaultContextWindow = writable<number | null>(null);
+/** The same for agents other than Grok (CodeBuddy), each kept apart. */
+export const agentDefaults = writable<Record<string, AgentDefaults>>({});
 export const quotaBudget = writable<QuotaBudget>({ period: 'week', tokens: null });
 
 /**
@@ -459,6 +470,7 @@ function persistPreferences(): void {
 			toolApprovalMode: get(toolApprovalMode),
 			reasoningEffort: get(defaultReasoningEffort),
 			contextWindow: get(defaultContextWindow),
+			agentDefaults: get(agentDefaults),
 			quotaBudget: get(quotaBudget),
 			locale: i18next.language,
 			workspaceOrder: get(workspaceOrder),
@@ -506,6 +518,9 @@ function subscribeForPersistence() {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	defaultContextWindow.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	agentDefaults.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	quotaBudget.subscribe(() => {
@@ -581,6 +596,9 @@ export async function loadPreferences(): Promise<void> {
 		}
 		if (typeof prefs.contextWindow === 'number' && prefs.contextWindow > 0) {
 			defaultContextWindow.set(prefs.contextWindow);
+		}
+		if (prefs.agentDefaults && typeof prefs.agentDefaults === 'object') {
+			agentDefaults.set(prefs.agentDefaults as Record<string, AgentDefaults>);
 		}
 		const savedBudget = prefs.quotaBudget as Partial<QuotaBudget> | undefined;
 		if (savedBudget && typeof savedBudget === 'object') {

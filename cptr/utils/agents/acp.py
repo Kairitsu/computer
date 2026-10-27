@@ -1,4 +1,4 @@
-"""Small ACP JSON-RPC client for Cursor and Grok agents."""
+"""Small ACP JSON-RPC client for the Grok and CodeBuddy agents."""
 
 from __future__ import annotations
 
@@ -28,12 +28,16 @@ class AcpClient:
         extension_requests: frozenset[str] = frozenset(),
         session_meta: dict[str, Any] | None = None,
         preexec_fn=None,
+        authenticate: bool = True,
     ) -> None:
         self.command = command
         self.args = args
         self.cwd = cwd
         self.env = env
         self.auth_method_id = auth_method_id
+        # False for agents that sign in on their own: CodeBuddy's first auth method
+        # would start a new login instead of using the saved one.
+        self.authenticate = authenticate
         self.client_capabilities = client_capabilities or {}
         self.resume_session_id = resume_session_id
         self.auto_approve_permissions = auto_approve_permissions
@@ -79,9 +83,10 @@ class AcpClient:
                 "clientInfo": {"name": "cptr", "version": "0"},
             },
         )
-        auth_method_id = self.auth_method_id or _first_auth_method(self.initialize_result)
-        if auth_method_id:
-            await self.request("authenticate", {"methodId": auth_method_id})
+        if self.authenticate:
+            auth_method_id = self.auth_method_id or _first_auth_method(self.initialize_result)
+            if auth_method_id:
+                await self.request("authenticate", {"methodId": auth_method_id})
         await self._open_session()
 
     async def close(self) -> None:
@@ -179,6 +184,12 @@ class AcpClient:
                 "session/set_config_option",
                 {"sessionId": self.session_id, "configId": config_id, "value": value},
             )
+
+    async def new_session(self) -> None:
+        """Leave the current session for a new one in the same process."""
+        self.resume_session_id = None
+        self.session_id = None
+        await self._open_session()
 
     async def _open_session(self) -> None:
         setup: dict[str, Any] | None = None
@@ -508,6 +519,18 @@ def acp_models_from_setup(setup: dict[str, Any]) -> list[str]:
             if isinstance(model, str) and model.strip():
                 result.append(model.strip())
     return result
+
+
+async def discard_stale_events(client: AcpClient) -> None:
+    """Drop what a kept agent sent between turns; answer requests so nothing waits on them."""
+    while not client.events.empty():
+        message = client.events.get_nowait()
+        if "id" not in message or not message.get("method"):
+            continue
+        if message["method"] == ACP_PERMISSION_METHOD:
+            await client.respond(message["id"], {"outcome": {"outcome": "cancelled"}})
+        else:
+            await client.respond_error(message["id"], -32603, "No turn is running")
 
 
 async def acp_event_stream(

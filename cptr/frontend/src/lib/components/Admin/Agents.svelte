@@ -104,11 +104,11 @@
 	}
 
 	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok', claude: '/home/ubuntu/.local/bin/claude' }[agent];
+		return { grok: 'grok', codebuddy: 'codebuddy' }[agent];
 	}
 
 	function agentLabel(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok', claude: 'AnyRouter' }[agent];
+		return { grok: 'Grok', codebuddy: 'CodeBuddy' }[agent];
 	}
 
 	function statusKey(profile: AgentProfile): string {
