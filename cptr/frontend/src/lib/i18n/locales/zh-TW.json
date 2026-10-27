@@ -661,8 +661,6 @@
 	"modelHub.contextCustomPlaceholder": "自訂，如 300K",
 	"modelHub.contextSave": "儲存",
 	"modelHub.contextHint": "上下文用量依此視窗計算，接近上限時會自動壓縮較早的對話。",
-	"modelHub.cliEffortHint": "換模型後使用該模型的最長上下文和最高思考，之後仍可調低。",
-	"modelHub.cliContextHint": "該模型在 CLI 中可選的上下文視窗；接近上限時由 CLI 自動壓縮較早的對話。",
 	"effort.default": "預設",
 	"effort.low": "低",
 	"effort.medium": "中",

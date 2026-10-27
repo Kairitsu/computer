@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
-	 * Composer model hub: one chip for model + reasoning effort + context window,
-	 * modelled on Grok App's combined model/effort menu. When the model's agent CLI
-	 * lists its efforts / context windows (Grok, CodeBuddy), the hub offers exactly those.
+	 * Composer model hub: one chip for model + reasoning effort + context window.
+	 * When the model's agent CLI lists its efforts / context windows (Grok, CodeBuddy),
+	 * the hub offers exactly those, and effort names are the CLI values themselves.
 	 * Switching models selects the strongest effort and the longest window.
+	 * After the chat has a user message, the chip only displays the current choice.
 	 */
 	import { tick } from 'svelte';
 	import type { ReasoningEffort } from '$lib/apis/chat';
@@ -22,6 +23,8 @@
 		onclose?: () => void;
 		/** Save the current agent's settings before a different agent's model is shown. */
 		onbeforeprofilechange?: (profile: string, modelId: string) => void;
+		/** A sent chat shows the current model, effort, and context, and cannot change them. */
+		locked?: boolean;
 	}
 
 	let {
@@ -30,7 +33,8 @@
 		contextWindow = $bindable(null),
 		onchange,
 		onclose,
-		onbeforeprofilechange
+		onbeforeprofilechange,
+		locked = false
 	}: Props = $props();
 
 	type Page = 'main' | 'models' | 'effort' | 'context';
@@ -44,8 +48,6 @@
 		xhigh: 4,
 		max: 5
 	};
-	// CodeBuddy's "thinking off".
-	const EFFORT_OFF = 'disabled';
 	const CONTEXT_WINDOWS = [32_000, 64_000, 128_000, 200_000, 256_000, 500_000, 1_000_000];
 
 	let btnEl: HTMLButtonElement | undefined = $state();
@@ -71,7 +73,7 @@
 			? longestContext(model)
 			: (contextWindow ?? model?.context_window ?? null)
 	);
-	const effortLabel = $derived(effectiveEffort ? effortName(effectiveEffort) : '');
+	const effortLabel = $derived(effectiveEffort ?? '');
 	const contextLabel = $derived(
 		effectiveContextWindow ? formatTokens(effectiveContextWindow) : '—'
 	);
@@ -85,16 +87,18 @@
 			? $t('modelSelector.noModels')
 			: (model?.name ?? $t('modelSelector.selectModel'))
 	);
-
-	function effortName(effort: ReasoningEffort | null | undefined) {
-		if (effort && !(effort in EFFORT_LEVELS) && effort !== EFFORT_OFF) {
-			return cliEfforts?.find((option) => option.value === effort)?.label ?? effort;
-		}
-		return $t(`effort.${effort ?? 'default'}`);
-	}
+	const lockedTitle = $derived(
+		[
+			triggerLabel,
+			supportsEffort && effortLabel ? effortLabel : '',
+			effectiveContextWindow ? contextLabel : ''
+		]
+			.filter(Boolean)
+			.join(' · ')
+	);
 
 	export async function openSelector() {
-		if ($chatModels.length === 0) return;
+		if (locked || $chatModels.length === 0) return;
 		open = true;
 		await showPage('models');
 	}
@@ -115,6 +119,7 @@
 	}
 
 	function toggle() {
+		if (locked) return;
 		if (open) return close();
 		open = true;
 		page = 'main';
@@ -187,26 +192,39 @@
 	}
 </script>
 
-<button
-	bind:this={btnEl}
-	type="button"
-	class="hub-chip"
-	aria-haspopup="menu"
-	aria-expanded={open}
-	title={triggerLabel}
-	onclick={toggle}
->
-	<Icon name="flash" size={13} class="shrink-0" />
-	<span class="truncate max-w-[11rem]">{triggerLabel}</span>
-	{#if supportsEffort && effectiveEffort}
-		<span class="shrink-0">{effortLabel}</span>
-	{/if}
-	{#if $chatModels.length > 0}
-		<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
-	{/if}
-</button>
+{#if locked}
+	<div class="hub-chip hub-chip-locked" title={lockedTitle}>
+		<Icon name="flash" size={13} class="shrink-0" />
+		<span class="truncate max-w-[11rem]">{triggerLabel}</span>
+		{#if supportsEffort && effortLabel}
+			<span class="shrink-0">{effortLabel}</span>
+		{/if}
+		{#if effectiveContextWindow}
+			<span class="shrink-0 tabular-nums">{contextLabel}</span>
+		{/if}
+	</div>
+{:else}
+	<button
+		bind:this={btnEl}
+		type="button"
+		class="hub-chip"
+		aria-haspopup="menu"
+		aria-expanded={open}
+		title={triggerLabel}
+		onclick={toggle}
+	>
+		<Icon name="flash" size={13} class="shrink-0" />
+		<span class="truncate max-w-[11rem]">{triggerLabel}</span>
+		{#if supportsEffort && effortLabel}
+			<span class="shrink-0">{effortLabel}</span>
+		{/if}
+		{#if $chatModels.length > 0}
+			<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
+		{/if}
+	</button>
+{/if}
 
-{#if open && btnEl}
+{#if !locked && open && btnEl}
 	<Popover anchor={btnEl} align="end" width="16rem" onclose={close}>
 		{#if page === 'main'}
 			<div class="hub-page">
@@ -226,9 +244,7 @@
 					<Icon name="brain" size={14} />
 					<span class="hub-row-label">{$t('modelHub.effort')}</span>
 					<span class="hub-row-value"
-						>{supportsEffort
-							? effortLabel || '—'
-							: $t('modelHub.effortUnsupportedShort')}</span
+						>{supportsEffort ? effortLabel || '—' : $t('modelHub.effortUnsupportedShort')}</span
 					>
 					<Icon name="chevron-right" size={12} class="shrink-0 opacity-60" />
 				</button>
@@ -301,18 +317,11 @@
 					{#each cliEfforts as option (option.value)}
 						<button
 							type="button"
-							class="hub-option hub-option-tall"
+							class="hub-option"
 							class:active={effectiveEffort === option.value}
 							onclick={() => selectEffort(option.value)}
 						>
-							<span class="flex-1 min-w-0 text-left">
-								<span class="block">{effortName(option.value)}</span>
-								{#if option.description}
-									<span class="block text-[0.625rem] leading-snug opacity-70"
-										>{option.description}</span
-									>
-								{/if}
-							</span>
+							<span class="flex-1 text-left">{option.value}</span>
 							{#if EFFORT_LEVELS[option.value]}
 								<span class="effort-bars" aria-hidden="true">
 									{#each [1, 2, 3, 4] as level}
@@ -325,9 +334,6 @@
 							{/if}
 						</button>
 					{/each}
-					<p class="px-2 pt-1 pb-0.5 text-[0.625rem] leading-snug text-gray-400">
-						{$t('modelHub.cliEffortHint')}
-					</p>
 				{:else if page === 'effort'}
 					{#each FALLBACK_EFFORTS as effort}
 						<button
@@ -336,7 +342,7 @@
 							class:active={reasoningEffort === effort}
 							onclick={() => selectEffort(effort)}
 						>
-							<span class="flex-1 text-left">{effortName(effort)}</span>
+							<span class="flex-1 text-left">{effort}</span>
 							{#if EFFORT_LEVELS[effort]}
 								<span class="effort-bars" aria-hidden="true">
 									{#each [1, 2, 3, 4] as level}
@@ -366,9 +372,6 @@
 							{/if}
 						</button>
 					{/each}
-					<p class="px-2 pt-1 pb-0.5 text-[0.625rem] leading-snug text-gray-400">
-						{$t('modelHub.cliContextHint')}
-					</p>
 				{:else}
 					{#each CONTEXT_WINDOWS as value}
 						<button
@@ -432,8 +435,12 @@
 		transition: border-color 0.1s;
 	}
 
-	.hub-chip:hover {
+	.hub-chip:hover:not(.hub-chip-locked) {
 		border-color: color-mix(in oklab, var(--app-accent) 40%, transparent);
+	}
+
+	.hub-chip-locked {
+		cursor: default;
 	}
 
 	.hub-page {
@@ -482,17 +489,6 @@
 	.hub-row:disabled {
 		opacity: 0.5;
 		cursor: default;
-	}
-
-	.hub-option-tall {
-		align-items: flex-start;
-		padding-top: 0.375rem;
-		padding-bottom: 0.375rem;
-	}
-
-	.hub-option-tall :global(.hub-check),
-	.hub-option-tall .effort-bars {
-		margin-top: 0.125rem;
 	}
 
 	.hub-option.active {

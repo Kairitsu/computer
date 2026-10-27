@@ -57,6 +57,8 @@
 		onplanaskrevise?: () => void | Promise<void>;
 		queuedMessages?: { id: string; content: string }[];
 		hasChatContent?: boolean;
+		/** An existing chat cannot change model, effort, or context, even while it is loading. */
+		modelLocked?: boolean;
 		onsend: () => void;
 		onfork?: () => void;
 		onplan?: () => void;
@@ -98,6 +100,7 @@
 		onplanaskrevise,
 		queuedMessages = [],
 		hasChatContent = false,
+		modelLocked = false,
 		onsend,
 		onfork,
 		onplan,
@@ -117,6 +120,7 @@
 	let editor: Editor | null = $state(null);
 	let selectedSlashCommandIndex = $state(0);
 	let modelSelector: ModelHubMenu | undefined = $state();
+	const modelChoiceLocked = $derived(modelLocked || hasChatContent);
 	let approvalChipEl: HTMLButtonElement | undefined = $state();
 	let approvalMenuOpen = $state(false);
 	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
@@ -625,7 +629,7 @@
 		if (onplan && '/plan'.startsWith(slashCommandQuery)) ids.push('plan');
 		if (hasChatContent && onfork && '/fork'.startsWith(slashCommandQuery)) ids.push('fork');
 		if (hasChatContent && onstatus && '/status'.startsWith(slashCommandQuery)) ids.push('status');
-		if ('/model'.startsWith(slashCommandQuery)) ids.push('model');
+		if (!modelChoiceLocked && '/model'.startsWith(slashCommandQuery)) ids.push('model');
 		return ids;
 	}
 
@@ -688,7 +692,7 @@
 			onstatus();
 			return;
 		}
-		if (commandId === 'model') {
+		if (commandId === 'model' && !modelChoiceLocked) {
 			removeSlashCommandToken();
 			void modelSelector?.openSelector();
 			return;
@@ -939,6 +943,7 @@
 					bind:selectedModel
 					bind:reasoningEffort
 					bind:contextWindow
+					locked={modelChoiceLocked}
 					onchange={onsettingschange}
 					{onbeforeprofilechange}
 					onclose={focusAfterModelSelectorClose}

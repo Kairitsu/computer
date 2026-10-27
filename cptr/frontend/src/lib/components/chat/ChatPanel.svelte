@@ -1730,6 +1730,7 @@
 					placeholder={$t('chat.landingPlaceholder')}
 					{contextUsage}
 					{hasChatContent}
+					modelLocked
 					tasks={chatTasks}
 					askUser={pendingAskUser}
 					onaskuseranswer={handleAskUserAnswer}
