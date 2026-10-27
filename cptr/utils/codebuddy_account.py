@@ -1,30 +1,44 @@
 """CodeBuddy login and usage for Settings → Usage and the composer.
 
 The login is the one CodeBuddy saved under the server user's home. Its token is only
-read to tell whether the login is still valid; it is never logged or returned.
+read to call CodeBuddy's own billing endpoint and to tell whether the login is still
+valid. It is never logged or returned.
 
-CodeBuddy does not let its command-line login read the account's remaining credits:
-codebuddy.cn's billing API only accepts the website's own session. So the balance
-stays on codebuddy.cn (`usage_url`), and the usage shown here is the credits CodeBuddy
-reported for each model call made from this server's chats.
+The balance is `POST /v2/billing/meter/get-user-resource` on the login's site
+(www.codebuddy.cn for this install). Each active credit package is one row: size,
+used, remaining, and when it expires. `usage` is separate: the credits CodeBuddy
+reported for model calls made from this server's chats.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 
 from cptr.models import Chat, ChatMessage
 from cptr.utils.agents.codebuddy import auth_files, codebuddy_home
 from cptr.utils.db import get_db
 
+log = logging.getLogger(__name__)
+
 MODEL_PREFIX = "agent:codebuddy/"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
+RESOURCE_PATH = "/v2/billing/meter/get-user-resource"
+TIMEOUT_SECONDS = 12
+CACHE_SECONDS = 60
+# CycleEndTime has no timezone. CodeBuddy's site shows Beijing time.
+_BEIJING = timezone(timedelta(hours=8))
+
+# token hash → (fetched at, balance dict or {"error": ...})
+_balance_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _read_login(home: Path) -> dict[str, Any] | None:
@@ -119,12 +133,187 @@ async def usage_summary(user_id: str, now: datetime | None = None) -> dict[str, 
     return periods
 
 
-async def get_codebuddy_quota(user_id: str) -> dict[str, Any]:
-    """Login, usage from this server's chats, and where to see the balance."""
+def _amount(account: dict[str, Any], precise: str, whole: str) -> float:
+    for key in (precise, whole):
+        value = account.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return 0.0
+
+
+def _round_credits(value: float) -> float:
+    return round(value, 4)
+
+
+def _percent(used: float, total: float) -> float:
+    if total <= 0:
+        return 0.0
+    return round(min(100.0, max(0.0, used / total * 100.0)), 2)
+
+
+def _cycle_end_seconds(value: Any) -> int | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.strptime(value.strip()[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return int(parsed.replace(tzinfo=_BEIJING).timestamp())
+
+
+def _site_host(domain: str) -> str:
+    host = domain.strip().split("://")[-1].split("/")[0] or DEFAULT_DOMAIN
+    if host.count(".") == 1:
+        host = f"www.{host}"
+    return host
+
+
+def parse_user_resource(payload: Any) -> dict[str, Any]:
+    """Turn a get-user-resource body into totals plus one row per active package."""
+    if not isinstance(payload, dict):
+        raise ValueError("quota response was not an object")
+    code = payload.get("code")
+    if code not in (0, "0", None):
+        raise ValueError(str(payload.get("msg") or "quota request failed")[:200])
+    data = payload.get("data")
+    response = data.get("Response") if isinstance(data, dict) else None
+    if isinstance(response, dict) and response.get("Error"):
+        error = response["Error"]
+        message = error.get("Message") if isinstance(error, dict) else error
+        raise ValueError(str(message or "quota request failed")[:200])
+    body = response.get("Data") if isinstance(response, dict) else None
+    accounts = body.get("Accounts") if isinstance(body, dict) else None
+    if not isinstance(accounts, list):
+        raise ValueError("quota response had no resource list")
+
+    packages: list[dict[str, Any]] = []
+    for index, account in enumerate(accounts):
+        if not isinstance(account, dict) or account.get("Status") not in (0, "0"):
+            continue
+        total = _amount(account, "CapacitySizePrecise", "CapacitySize")
+        used = _amount(account, "CapacityUsedPrecise", "CapacityUsed")
+        remain = _amount(account, "CapacityRemainPrecise", "CapacityRemain")
+        if total <= 0 and used <= 0 and remain <= 0:
+            continue
+        name = account.get("PackageName")
+        if not isinstance(name, str) or not name.strip():
+            name = account.get("SubProductName")
+        label = name.strip() if isinstance(name, str) and name.strip() else "CodeBuddy"
+        resets_at = _cycle_end_seconds(account.get("CycleEndTime"))
+        resource = account.get("ResourceId")
+        package_code = account.get("PackageCode")
+        if isinstance(resource, str) and resource:
+            package_id = resource
+        elif isinstance(package_code, str) and package_code:
+            package_id = f"{package_code}:{resets_at or index}"
+        else:
+            package_id = f"{label}:{resets_at or index}"
+        packages.append(
+            {
+                "id": package_id,
+                "label": label,
+                "total": _round_credits(total),
+                "used": _round_credits(used),
+                "remain": _round_credits(remain),
+                "used_percent": _percent(used, total),
+                "resets_at": resets_at,
+            }
+        )
+    packages.sort(
+        key=lambda item: (item["resets_at"] is None, item["resets_at"] or 0, item["label"])
+    )
+
+    total = _round_credits(sum(item["total"] for item in packages))
+    used = _round_credits(sum(item["used"] for item in packages))
+    remain = _round_credits(sum(item["remain"] for item in packages))
+    ends = [item["resets_at"] for item in packages if item["resets_at"]]
+    used_percent = _percent(used, total)
     return {
-        **login_status(),
+        "total": total,
+        "used": used,
+        "remain": remain,
+        "used_percent": used_percent,
+        "remaining_percent": round(100.0 - used_percent, 2) if total > 0 else 0.0,
+        "resets_at": min(ends) if ends else None,
+        "packages": packages,
+    }
+
+
+def _credentials(home: Path | None = None) -> tuple[str, str, str] | None:
+    """Access token, user id, and site host. The token stays in this process."""
+    data = _read_login(home or codebuddy_home())
+    if data is None:
+        return None
+    auth = data["auth"]
+    account = data.get("account") if isinstance(data.get("account"), dict) else {}
+    token = auth.get("accessToken")
+    uid = account.get("uid")
+    domain = auth.get("domain") if isinstance(auth.get("domain"), str) else ""
+    if not isinstance(token, str) or not token or not isinstance(uid, str) or not uid:
+        return None
+    return token, uid, _site_host(domain)
+
+
+async def _fetch_balance(token: str, uid: str, host: str) -> dict[str, Any]:
+    x_domain = host.removeprefix("www.")
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            f"https://{host}{RESOURCE_PATH}",
+            json={},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-User-Id": uid,
+                "X-Domain": x_domain,
+                "Accept": "application/json",
+                "User-Agent": "CodeBuddy/2.177.0",
+            },
+        )
+    if not response.is_success:
+        raise ValueError(f"quota endpoint returned {response.status_code}")
+    text = response.text.lstrip()
+    if "json" not in response.headers.get("content-type", "") and not text.startswith("{"):
+        raise ValueError("quota endpoint returned HTML")
+    return parse_user_resource(response.json())
+
+
+async def get_codebuddy_balance(force: bool = False) -> dict[str, Any] | None:
+    """Active credit packages, None when signed out, or {"error": ...}."""
+    creds = _credentials()
+    if creds is None:
+        return None
+    token, uid, host = creds
+    key = hashlib.sha256(token.encode()).hexdigest()[:16]
+    now = time.monotonic()
+    cached = _balance_cache.get(key)
+    if not force and cached and now - cached[0] < CACHE_SECONDS:
+        return cached[1]
+    try:
+        value: dict[str, Any] = await _fetch_balance(token, uid, host)
+    except Exception as error:
+        log.warning("CodeBuddy quota unavailable: %s", type(error).__name__)
+        value = {"error": f"{type(error).__name__}: {error}"[:200]}
+    _balance_cache.clear()
+    _balance_cache[key] = (now, value)
+    return value
+
+
+async def get_codebuddy_quota(user_id: str, force: bool = False) -> dict[str, Any]:
+    """Login, official credit packages, and usage from this server's chats."""
+    status = login_status()
+    balance = None
+    error = None
+    if status.get("signed_in"):
+        snapshot = await get_codebuddy_balance(force=force)
+        if snapshot is None:
+            error = "CodeBuddy quota unavailable"
+        elif "error" in snapshot:
+            error = snapshot["error"]
+        else:
+            balance = snapshot
+    return {
+        **status,
         "usage": await usage_summary(user_id),
-        # Not readable with CodeBuddy's command-line login; see the module docstring.
-        "balance": None,
+        "balance": balance,
+        "error": error,
         "fetched_at": int(time.time()),
     }

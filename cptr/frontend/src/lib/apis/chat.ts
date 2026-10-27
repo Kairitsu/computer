@@ -103,24 +103,47 @@ export interface CodeBuddyUsagePeriod {
 	period_start: number;
 }
 
+/** One active CodeBuddy credit package, same role as a Grok product row. */
+export interface CodeBuddyPackage {
+	id: string;
+	label: string;
+	total: number;
+	used: number;
+	remain: number;
+	used_percent: number;
+	resets_at: number | null;
+}
+
+/** Official CodeBuddy balance: totals plus one row per active package. */
+export interface CodeBuddyBalance {
+	total: number;
+	used: number;
+	remain: number;
+	used_percent: number;
+	remaining_percent: number;
+	resets_at: number | null;
+	packages: CodeBuddyPackage[];
+}
+
 export interface CodeBuddyQuota {
 	signed_in: boolean;
 	nickname?: string;
 	account_type?: string;
 	domain?: string;
-	/** codebuddy.cn's usage page: the remaining balance is only shown there. */
+	/** codebuddy.cn's usage page, still linked under the table. */
 	usage_url?: string;
 	expires_at?: number | null;
 	usage?: { day: CodeBuddyUsagePeriod; week: CodeBuddyUsagePeriod; month: CodeBuddyUsagePeriod };
-	/** Always null: CodeBuddy's command-line login cannot read the balance. */
-	balance?: null;
+	/** null when signed out or the billing call failed (`error` is set in that case). */
+	balance?: CodeBuddyBalance | null;
+	error?: string | null;
 	fetched_at?: number;
 }
 
 export interface QuotaResponse {
 	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
 	supergrok: SuperGrokQuota | { error: string; fetched_at: number; plan?: string | null } | null;
-	/** CodeBuddy's login and the credits its turns used. */
+	/** CodeBuddy's login, credit packages, and the credits its turns used. */
 	codebuddy?: CodeBuddyQuota | null;
 	local: {
 		period: 'day' | 'week' | 'month';

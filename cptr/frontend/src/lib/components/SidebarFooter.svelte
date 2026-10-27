@@ -52,14 +52,18 @@
 		{#if $quotaSummary.source === 'codebuddy'}
 			<span
 				class="ml-auto shrink-0 text-xs font-semibold tabular-nums"
-				use:tooltip={$quotaSummary.signedIn
-					? $t('usageIndicator.codebuddyWeekTooltip')
-					: $t('usageIndicator.codebuddySignedOut')}
-				>{$quotaSummary.signedIn
-					? $t('usageIndicator.codebuddyWeekShort', {
-							credits: formatCredits($quotaSummary.weekCredits)
-						})
-					: $t('usageIndicator.codebuddySignedOutShort')}</span
+				use:tooltip={!$quotaSummary.signedIn
+					? $t('usageIndicator.codebuddySignedOut')
+					: $quotaSummary.remainCredits != null
+						? $t('usageIndicator.codebuddyRemainingTooltip', {
+								credits: formatCredits($quotaSummary.remainCredits)
+							})
+						: $t('usageIndicator.codebuddyQuotaError')}
+				>{!$quotaSummary.signedIn
+					? $t('usageIndicator.codebuddySignedOutShort')
+					: $quotaSummary.remainingPercent != null
+						? `${Math.round($quotaSummary.remainingPercent)}%`
+						: $t('usageIndicator.codebuddyQuotaErrorShort')}</span
 			>
 		{:else if $quotaSummary.source !== 'none'}
 			<span

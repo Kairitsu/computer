@@ -3,7 +3,7 @@
  *
  * Grok: SuperGrok (the local Grok CLI login) is preferred; otherwise the user's local
  * token budget from Settings → Usage is compared with this period's usage.
- * CodeBuddy: the credits its turns used this week; the balance is on codebuddy.cn.
+ * CodeBuddy: official credit packages (used and remaining), like SuperGrok's product rows.
  */
 import { derived, get, writable } from 'svelte/store';
 import {
@@ -99,6 +99,11 @@ export type QuotaSummary =
 			/** Credits used this week (UTC, from Monday) by this user's CodeBuddy turns. */
 			weekCredits: number;
 			codebuddy: CodeBuddyQuota | null;
+			/** null when the official balance could not be read. */
+			usedPercent: number | null;
+			remainingPercent: number | null;
+			remainCredits: number | null;
+			resetsAt: number | null;
 	  }
 	| {
 			source: 'budget';
@@ -116,11 +121,16 @@ export const quotaSummary = derived(
 	([$quota, $budget, $profile]): QuotaSummary => {
 	if ($profile === 'codebuddy') {
 		const codebuddy = $quota?.codebuddy ?? null;
+		const balance = codebuddy?.balance ?? null;
 		return {
 			source: 'codebuddy',
 			signedIn: codebuddy?.signed_in === true,
 			weekCredits: codebuddy?.usage?.week.credits ?? 0,
-			codebuddy
+			codebuddy,
+			usedPercent: balance ? balance.used_percent : null,
+			remainingPercent: balance ? balance.remaining_percent : null,
+			remainCredits: balance ? balance.remain : null,
+			resetsAt: balance?.resets_at ?? null
 		};
 	}
 	const supergrok = $quota?.supergrok ?? null;

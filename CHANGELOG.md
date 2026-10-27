@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.3.0] - 2026-10-27
+
+### Added
+
+- **用量里直接显示 CodeBuddy 额度** 设置里的用量、输入框旁的用量和侧边栏，会像 Grok 那样列出剩余比例和用量条，以及每一份积分包用了多少、还剩多少、何时到期。这台电脑上的对话用量仍列在下面。
+
 ## [5.0.0] - 2026-10-27
 
 ### Added

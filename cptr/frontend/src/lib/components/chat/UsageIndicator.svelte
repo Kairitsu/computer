@@ -33,23 +33,40 @@
 	const limit = $derived(contextUsage?.threshold || contextWindow || defaultContextWindow || 0);
 	const contextPercent = $derived(Math.max(0, Math.round(contextUsage?.percent ?? 0)));
 	const ringOffset = $derived(RING * (1 - Math.min(contextPercent, 100) / 100));
-	const quotaRemaining = $derived(
-		$quotaSummary.source === 'supergrok' || $quotaSummary.source === 'budget'
-			? Math.round($quotaSummary.remainingPercent)
-			: null
-	);
-	const quotaLabel = $derived(
-		$quotaSummary.source === 'codebuddy'
-			? $quotaSummary.signedIn
-				? $t('usageIndicator.codebuddyWeekShort', {
-						credits: formatCredits($quotaSummary.weekCredits)
-					})
-				: $t('usageIndicator.codebuddySignedOutShort')
-			: quotaRemaining !== null
-				? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
-				: null
-	);
+	const quotaRemaining = $derived.by(() => {
+		const summary = $quotaSummary;
+		if (summary.source === 'supergrok' || summary.source === 'budget') {
+			return Math.round(summary.remainingPercent);
+		}
+		if (summary.source === 'codebuddy' && summary.remainingPercent != null) {
+			return Math.round(summary.remainingPercent);
+		}
+		return null;
+	});
+	const quotaLabel = $derived.by(() => {
+		const summary = $quotaSummary;
+		if (summary.source === 'codebuddy') {
+			if (!summary.signedIn) return $t('usageIndicator.codebuddySignedOutShort');
+			if (summary.remainingPercent != null) {
+				return $t('usageIndicator.quotaShort', {
+					percent: Math.round(summary.remainingPercent)
+				});
+			}
+			return $t('usageIndicator.codebuddyQuotaErrorShort');
+		}
+		return quotaRemaining !== null
+			? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
+			: null;
+	});
 	const tone = (percent: number) => (percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'ok');
+
+	function formatDay(seconds: number | null) {
+		if (!seconds) return '';
+		return new Date(seconds * 1000).toLocaleDateString(i18next.language, {
+			month: 'short',
+			day: 'numeric'
+		});
+	}
 
 	function formatReset(seconds: number | null) {
 		if (!seconds) return '';
@@ -162,20 +179,69 @@
 
 				{#if $quotaSummary.source === 'codebuddy'}
 					{@const summary = $quotaSummary}
+					{@const balance = summary.codebuddy?.balance}
 					{@const usage = summary.codebuddy?.usage}
 					<div class="flex items-baseline justify-between gap-2">
 						<span class="usage-meta truncate">
 							CodeBuddy{summary.codebuddy?.nickname ? ` · ${summary.codebuddy.nickname}` : ''}
 						</span>
-						<span class="text-xs font-medium shrink-0">
-							{summary.signedIn
-								? $t('usageIndicator.codebuddyCredits', {
-										credits: formatCredits(summary.weekCredits)
-									})
-								: $t('usageIndicator.codebuddySignedOutShort')}
+						<span class="text-xs font-medium shrink-0 tabular-nums">
+							{#if !summary.signedIn}
+								{$t('usageIndicator.codebuddySignedOutShort')}
+							{:else if summary.remainingPercent != null}
+								{$t('usageIndicator.remaining', {
+									percent: Math.round(summary.remainingPercent)
+								})}
+							{:else}
+								{$t('usageIndicator.codebuddyQuotaErrorShort')}
+							{/if}
 						</span>
 					</div>
+					{#if balance}
+						<div class="usage-bar">
+							<span
+								class={tone(balance.used_percent)}
+								style="width: {Math.min(balance.used_percent, 100)}%;"
+							></span>
+						</div>
+						<p class="usage-meta tabular-nums">
+							{$t('usageIndicator.codebuddyCreditsAmount', {
+								credits: formatCredits(balance.remain)
+							})}
+							{#if summary.resetsAt}
+								· {$t('usageIndicator.resetsAt', { time: formatReset(summary.resetsAt) })}
+							{/if}
+						</p>
+						{#each balance.packages as pkg (pkg.id)}
+							<div class="usage-meta flex justify-between gap-2 tabular-nums">
+								<span class="min-w-0 truncate" title={pkg.label}>{pkg.label}</span>
+								<span class="shrink-0"
+									>{$t('usageIndicator.used', { percent: Math.round(pkg.used_percent) })}</span
+								>
+							</div>
+							<div class="usage-meta flex justify-between gap-2 tabular-nums">
+								<span>
+									{$t('usageIndicator.codebuddyPackageRemain', {
+										remain: formatCredits(pkg.remain),
+										total: formatCredits(pkg.total)
+									})}
+								</span>
+								{#if pkg.resets_at}
+									<span class="shrink-0"
+										>{$t('usageIndicator.codebuddyExpires', {
+											time: formatDay(pkg.resets_at)
+										})}</span
+									>
+								{/if}
+							</div>
+						{/each}
+					{:else if summary.signedIn}
+						<p class="usage-meta">{$t('usageIndicator.codebuddyQuotaError')}</p>
+					{:else}
+						<p class="usage-meta">{$t('usageIndicator.codebuddySignedOut')}</p>
+					{/if}
 					{#if usage}
+						<p class="usage-meta">{$t('usageIndicator.codebuddyLocalUsage')}</p>
 						{#each ['day', 'week', 'month'] as const as period (period)}
 							<div class="usage-meta flex justify-between tabular-nums">
 								<span>{$t(`usageIndicator.period.${period}`)}</span>
@@ -188,11 +254,6 @@
 							</div>
 						{/each}
 					{/if}
-					<p class="usage-meta">
-						{summary.signedIn
-							? $t('usageIndicator.codebuddyBalanceHint')
-							: $t('usageIndicator.codebuddySignedOut')}
-					</p>
 					{#if summary.codebuddy?.usage_url}
 						<a
 							class="usage-link block"

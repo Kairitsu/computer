@@ -83,6 +83,7 @@
 		signedIn ? profile?.display_name || profile?.email || 'Grok' : $t('grokAccount.signedOutName')
 	);
 	const codebuddy = $derived($quotaData?.codebuddy ?? null);
+	const codebuddyBalance = $derived(codebuddy?.balance ?? null);
 	const hasSamples = $derived(
 		!!usage && usage.heatmap.some((day) => day.tokens > 0 || day.messages > 0)
 	);
@@ -502,19 +503,74 @@
 		{/if}
 	</section>
 
-	<!-- CodeBuddy: its own login; credits as CodeBuddy reported them for this user's turns -->
+	<!-- CodeBuddy: official credit packages, then credits this server's chats reported -->
 	<section class="plan">
 		<div class="plan-head">
 			<span class="plan-name">
 				CodeBuddy{codebuddy?.nickname ? ` · ${codebuddy.nickname}` : ''}
 			</span>
 			<span class="plan-remain">
-				{codebuddy?.signed_in
-					? $t('codebuddyAccount.signedIn')
-					: $t('usageIndicator.codebuddySignedOutShort')}
+				{#if !codebuddy?.signed_in}
+					{$t('usageIndicator.codebuddySignedOutShort')}
+				{:else if codebuddyBalance}
+					{$t('usageIndicator.remaining', {
+						percent: Math.round(codebuddyBalance.remaining_percent)
+					})}
+					· {$t('usageIndicator.codebuddyCreditsAmount', {
+						credits: formatCredits(codebuddyBalance.remain)
+					})}
+				{:else}
+					{$t('usageIndicator.codebuddyQuotaErrorShort')}
+				{/if}
 			</span>
 		</div>
+		{#if codebuddyBalance}
+			<div class="quota-bar" aria-hidden="true">
+				<div
+					class="quota-fill"
+					class:is-warn={codebuddyBalance.used_percent >= 70}
+					class:is-danger={codebuddyBalance.used_percent >= 90}
+					style="width: {Math.min(100, Math.max(0, codebuddyBalance.used_percent))}%;"
+				></div>
+			</div>
+			<div class="plan-meta">
+				<span>
+					{$t('grokAccount.used', { percent: Math.round(codebuddyBalance.used_percent) })}
+					{#if codebuddyBalance.resets_at}
+						· {$t('grokAccount.resetsAt', {
+							time: formatResetTime(codebuddyBalance.resets_at, $locale)
+						})}
+					{/if}
+				</span>
+			</div>
+			{#each codebuddyBalance.packages as pkg (pkg.id)}
+				<div class="plan-meta-text flex justify-between gap-3 tabular-nums">
+					<span class="min-w-0 truncate" title={pkg.label}>{pkg.label}</span>
+					<span class="shrink-0">
+						{$t('usageIndicator.used', { percent: Math.round(pkg.used_percent) })}
+						· {$t('usageIndicator.codebuddyPackageRemain', {
+							remain: formatCredits(pkg.remain),
+							total: formatCredits(pkg.total)
+						})}
+					</span>
+				</div>
+				{#if pkg.resets_at}
+					<div class="plan-meta-text -mt-1 tabular-nums">
+						{$t('usageIndicator.codebuddyExpires', {
+							time: formatResetTime(pkg.resets_at, $locale)
+						})}
+					</div>
+				{/if}
+			{/each}
+		{:else}
+			<p class="plan-meta-text">
+				{codebuddy?.signed_in
+					? $t('usageIndicator.codebuddyQuotaError')
+					: $t('usageIndicator.codebuddySignedOut')}
+			</p>
+		{/if}
 		{#if codebuddy?.signed_in && codebuddy.usage}
+			<p class="plan-meta-text">{$t('usageIndicator.codebuddyLocalUsage')}</p>
 			{#each ['day', 'week', 'month'] as const as period (period)}
 				<div class="plan-meta-text flex justify-between tabular-nums">
 					<span>{$t(`usageIndicator.period.${period}`)}</span>
@@ -527,11 +583,6 @@
 				</div>
 			{/each}
 		{/if}
-		<p class="plan-meta-text">
-			{codebuddy?.signed_in
-				? $t('usageIndicator.codebuddyBalanceHint')
-				: $t('usageIndicator.codebuddySignedOut')}
-		</p>
 		{#if codebuddy?.usage_url}
 			<div class="links">
 				<a class="link-btn" href={codebuddy.usage_url} target="_blank" rel="noopener noreferrer"

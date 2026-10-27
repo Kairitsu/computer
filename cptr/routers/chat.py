@@ -573,14 +573,14 @@ def _quota_period_bounds(period: QuotaPeriod, now: datetime) -> tuple[datetime, 
 async def get_quota(
     request: Request,
     period: QuotaPeriod = Query("week", description="Local budget period"),
-    refresh: bool = Query(False, description="Bypass the SuperGrok quota cache"),
+    refresh: bool = Query(False, description="Bypass the quota cache"),
 ):
     """Subscription quota for the composer and sidebar.
 
     `supergrok` is the Grok CLI login's SuperGrok credit snapshot (None when not
-    signed in). `codebuddy` is CodeBuddy's login and the credits its turns used.
-    `local` is this user's token usage in the current budget period; the budget
-    itself is a client preference.
+    signed in). `codebuddy` is CodeBuddy's login, its credit packages, and the
+    credits its turns on this server used. `local` is this user's token usage in
+    the current budget period; the budget itself is a client preference.
     """
     user_id = _get_user(request)
     from sqlalchemy import and_, or_
@@ -623,7 +623,7 @@ async def get_quota(
 
     return {
         "supergrok": await get_supergrok_quota(force=refresh),
-        "codebuddy": await get_codebuddy_quota(user_id),
+        "codebuddy": await get_codebuddy_quota(user_id, force=refresh),
         "local": {
             "period": period,
             "tokens_used": tokens_used,
