@@ -153,12 +153,22 @@ export interface QuotaResponse {
 	};
 }
 
+export interface UsageAgentCount {
+	tokens: number;
+	messages: number;
+}
+
 export interface UsageHeatmapEntry {
 	date: string;
 	tokens: number;
 	messages: number;
 	chats: number;
 	models: Record<string, number>;
+	/** Tokens and messages from Grok and from CodeBuddy on this day. */
+	by_agent?: {
+		grok?: UsageAgentCount;
+		codebuddy?: UsageAgentCount;
+	};
 }
 
 export interface UsageResponse {
@@ -181,8 +191,6 @@ export interface UsageResponse {
 		assistant_message_share: number;
 	};
 	heatmap: UsageHeatmapEntry[];
-	weekly_heatmap: UsageHeatmapEntry[];
-	cumulative_heatmap: UsageHeatmapEntry[];
 	top_models: { model_id: string; messages: number; total_tokens: number }[];
 	top_tools: { name: string; count: number }[];
 	period: { start_date: number; end_date: number; days: number };

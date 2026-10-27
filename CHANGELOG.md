@@ -4,6 +4,17 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.4.8] - 2026-10-27
+
+### Changed
+
+- **活动热力图分开显示两边的用量** 悬停某一天时，Token 和消息分别列出 Grok 和 CodeBuddy。格子的深浅仍按这一天两边的合计显示。
+
+### Removed
+
+- **活动热力图只按天统计** 去掉每周和累计，以及「每日 / 每周 / 累计」切换。打开用量页就是按天的热力图。
+- **代理页不再显示配置数量** 设置里的代理列表下方不再出现 “2 profiles” 这类数量。
+
 ## [5.4.5] - 2026-10-27
 
 ### Fixed

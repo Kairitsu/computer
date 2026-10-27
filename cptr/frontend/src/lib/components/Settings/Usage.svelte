@@ -11,7 +11,7 @@
 	import GrokMark from '$lib/components/brand/GrokMark.svelte';
 	import Icon from '../Icon.svelte';
 	import BudgetSettings from './BudgetSettings.svelte';
-	import UsageHeatmap, { type HeatmapMode } from './UsageHeatmap.svelte';
+	import UsageHeatmap from './UsageHeatmap.svelte';
 	import { ApiError } from '$lib/apis';
 	import { getUsage, type UsageResponse } from '$lib/apis/chat';
 	import {
@@ -44,17 +44,10 @@
 	let usageLoading = $state(true);
 	let busy = $state(false);
 	let refreshing = $state(false);
-	let heatmapMode = $state<HeatmapMode>('daily');
 	let pasteOpen = $state(false);
 	let pasteCode = $state('');
 	let loginError = $state('');
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-	const heatmapModes: { value: HeatmapMode; label: string }[] = [
-		{ value: 'daily', label: 'usage.daily' },
-		{ value: 'weekly', label: 'usage.weekly' },
-		{ value: 'cumulative', label: 'usage.cumulative' }
-	];
 
 	const profile = $derived(account?.profile ?? null);
 	const signedIn = $derived(!!profile?.signed_in);
@@ -514,16 +507,6 @@
 	<section class="activity">
 		<div class="section-title cptr-rise" style="--rise-delay: 120ms;">
 			<span>{$t('usage.heatmap')}</span>
-			<div class="segmented segmented-sm shrink-0" role="group" aria-label={$t('usage.heatmap')}>
-				{#each heatmapModes as mode}
-					<button
-						type="button"
-						class:active={heatmapMode === mode.value}
-						aria-pressed={heatmapMode === mode.value}
-						onclick={() => (heatmapMode = mode.value)}>{$t(mode.label)}</button
-					>
-				{/each}
-			</div>
 		</div>
 
 		{#if usage && hasSamples}
@@ -564,7 +547,7 @@
 					<div>{$t('usage.noDataHint')}</div>
 				</div>
 			{:else}
-				<UsageHeatmap days={usage.heatmap} mode={heatmapMode} />
+				<UsageHeatmap days={usage.heatmap} />
 			{/if}
 		</div>
 		<p class="note">{$t('usage.estimateNote')}</p>

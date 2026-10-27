@@ -1,15 +1,11 @@
-<script lang="ts" module>
-	export type HeatmapMode = 'daily' | 'weekly' | 'cumulative';
-</script>
-
 <script lang="ts">
 	/**
 	 * Contribution-style activity heatmap after Grok App: GitHub greens,
 	 * Sunday-first week columns that fit the card, month labels on top,
 	 * Mon/Wed/Fri on the left and a hover tip.
 	 *
-	 * daily: one cell per day · weekly: one bar per week column ·
-	 * cumulative: days colored by the running token total.
+	 * One cell per day. The tip lists that day's tokens and messages for Grok
+	 * and for CodeBuddy. The cell color is the day's combined total.
 	 */
 	import type { UsageHeatmapEntry } from '$lib/apis/chat';
 	import { locale, t } from '$lib/i18n';
@@ -17,17 +13,19 @@
 
 	interface Props {
 		days: UsageHeatmapEntry[];
-		mode: HeatmapMode;
 	}
 
-	let { days, mode }: Props = $props();
+	let { days }: Props = $props();
 
 	type Cell = {
 		date: string | null;
 		label: string;
 		tokens: number;
 		messages: number;
-		cumulative: number | null;
+		grokTokens: number;
+		grokMessages: number;
+		codebuddyTokens: number;
+		codebuddyMessages: number;
 		value: number;
 		level: number;
 	};
@@ -37,15 +35,13 @@
 	const RIGHT_PAD = 12;
 	const MIN_CELL = 10;
 	const MAX_CELL = 14;
-	const WEEK_CELL_H = 28;
 	const MAX_WEEKS = 53;
 	const MIN_MONTH_GAP = 3;
+	const TIP_WIDTH = 208;
 
 	let width = $state(0);
 	let hover = $state<{ cell: Cell; left: number; top: number; above: boolean } | null>(null);
 
-	const useDayGrid = $derived(mode !== 'weekly');
-	const labelCol = $derived(useDayGrid ? LABEL_COL : 0);
 	/** Agents that report no token usage still show activity by message count. */
 	const metric = $derived<'tokens' | 'messages'>(
 		days.some((day) => day.tokens > 0) ? 'tokens' : 'messages'
@@ -54,11 +50,11 @@
 		width
 			? Math.max(
 					4,
-					Math.min(MAX_WEEKS, Math.floor((width - labelCol - RIGHT_PAD + GAP) / (MIN_CELL + GAP)))
+					Math.min(MAX_WEEKS, Math.floor((width - LABEL_COL - RIGHT_PAD + GAP) / (MIN_CELL + GAP)))
 				)
 			: MAX_WEEKS
 	);
-	const weeks = $derived(buildWeeks(days, weekCount, mode, metric));
+	const weeks = $derived(buildWeeks(days, weekCount, metric));
 	const columns = $derived(weeks.length);
 	const cell = $derived(
 		width && columns
@@ -66,13 +62,13 @@
 					MIN_CELL,
 					Math.min(
 						MAX_CELL,
-						Math.floor((width - labelCol - RIGHT_PAD - (columns - 1) * GAP) / columns)
+						Math.floor((width - LABEL_COL - RIGHT_PAD - (columns - 1) * GAP) / columns)
 					)
 				)
 			: MIN_CELL
 	);
 	const graphWidth = $derived(columns * (cell + GAP) - GAP);
-	const graphHeight = $derived(useDayGrid ? 7 * (cell + GAP) - GAP : WEEK_CELL_H);
+	const graphHeight = $derived(7 * (cell + GAP) - GAP);
 	const monthLabels = $derived(buildMonthLabels(weeks));
 	const monthFormat = $derived(safeFormat($locale, { month: 'short' }));
 	const weekdayLabels = $derived.by(() => {
@@ -120,20 +116,32 @@
 		return [t1, t2, Math.max(at(0.75), t2)];
 	}
 
+	function agentSplit(entry: UsageHeatmapEntry | undefined) {
+		const grok = entry?.by_agent?.grok;
+		const codebuddy = entry?.by_agent?.codebuddy;
+		if (!grok && !codebuddy) {
+			return {
+				grokTokens: entry?.tokens ?? 0,
+				grokMessages: entry?.messages ?? 0,
+				codebuddyTokens: 0,
+				codebuddyMessages: 0
+			};
+		}
+		return {
+			grokTokens: grok?.tokens ?? 0,
+			grokMessages: grok?.messages ?? 0,
+			codebuddyTokens: codebuddy?.tokens ?? 0,
+			codebuddyMessages: codebuddy?.messages ?? 0
+		};
+	}
+
 	function buildWeeks(
 		data: UsageHeatmapEntry[],
 		count: number,
-		heatMode: HeatmapMode,
 		valueOf: 'tokens' | 'messages'
 	): Cell[][] {
 		if (!data.length) return [];
 		const byDate = new Map(data.map((entry) => [entry.date, entry]));
-		const running = new Map<string, number>();
-		let total = 0;
-		for (const entry of data) {
-			total += entry[valueOf];
-			running.set(entry.date, total);
-		}
 
 		const first = parseYmd(data[0].date);
 		const last = parseYmd(data[data.length - 1].date);
@@ -147,44 +155,19 @@
 			const key = ymd(cursor);
 			const inRange = cursor >= first && cursor <= last;
 			const entry = inRange ? byDate.get(key) : undefined;
-			const cumulative = inRange ? (running.get(key) ?? null) : null;
-			const own = entry?.[valueOf] ?? 0;
 			cells.push({
 				date: inRange ? key : null,
 				label: key,
 				tokens: entry?.tokens ?? 0,
 				messages: entry?.messages ?? 0,
-				cumulative: heatMode === 'cumulative' ? cumulative : null,
-				value: heatMode === 'cumulative' ? (cumulative ?? 0) : own,
+				...agentSplit(entry),
+				value: entry?.[valueOf] ?? 0,
 				level: 0
 			});
 		}
 
-		let grouped: Cell[][] = [];
+		const grouped: Cell[][] = [];
 		for (let i = 0; i < cells.length; i += 7) grouped.push(cells.slice(i, i + 7));
-
-		if (heatMode === 'weekly') {
-			grouped = grouped.map((week) => {
-				const inRange = week.filter((day) => day.date);
-				const startLabel = inRange[0]?.label ?? week[0].label;
-				const endLabel = inRange[inRange.length - 1]?.label ?? week[6].label;
-				const sum = (key: 'tokens' | 'messages') => inRange.reduce((acc, day) => acc + day[key], 0);
-				return [
-					{
-						date: inRange.length ? startLabel : null,
-						label:
-							startLabel === endLabel
-								? startLabel
-								: `${startLabel} – ${endLabel.slice(startLabel.slice(0, 4) === endLabel.slice(0, 4) ? 5 : 0)}`,
-						tokens: sum('tokens'),
-						messages: sum('messages'),
-						cumulative: null,
-						value: sum(valueOf),
-						level: 0
-					}
-				];
-			});
-		}
 
 		const thresholds = thresholdsFor(
 			grouped.flat().flatMap((item) => (item.date ? [item.value] : []))
@@ -216,8 +199,8 @@
 	function showTip(event: PointerEvent, item: Cell) {
 		if (!item.date) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		const tipWidth = 184;
-		const above = rect.top - 84 >= 8;
+		const tipWidth = TIP_WIDTH;
+		const above = rect.top - 168 >= 8;
 		const left = Math.min(
 			Math.max(8, rect.left + rect.width / 2 - tipWidth / 2),
 			Math.max(8, window.innerWidth - tipWidth - 8)
@@ -226,7 +209,11 @@
 	}
 
 	function ariaFor(item: Cell) {
-		return `${item.label}, ${$t('usage.tokensLabel')} ${formatCount(item.tokens, $locale)}`;
+		const tokens = $t('usage.tokensLabel');
+		const messages = $t('usage.messagesLabel');
+		const line = (name: string, tokenCount: number, messageCount: number) =>
+			`${name} ${tokens} ${formatCount(tokenCount, $locale)}, ${messages} ${messageCount.toLocaleString($locale)}`;
+		return `${item.label}, ${line('Grok', item.grokTokens, item.grokMessages)}, ${line('CodeBuddy', item.codebuddyTokens, item.codebuddyMessages)}`;
 	}
 </script>
 
@@ -234,8 +221,8 @@
 
 <div class="heatmap" bind:clientWidth={width}>
 	{#if columns}
-		<div class="heatmap-inner" style="width: {labelCol + graphWidth}px;">
-			<div class="heatmap-months" style="margin-left: {labelCol}px;">
+		<div class="heatmap-inner" style="width: {LABEL_COL + graphWidth}px;">
+			<div class="heatmap-months" style="margin-left: {LABEL_COL}px;">
 				{#each monthLabels as month (month.column)}
 					<span style="left: {month.column * (cell + GAP)}px;"
 						>{monthFormat.format(month.date)}</span
@@ -244,22 +231,18 @@
 			</div>
 
 			<div class="heatmap-body">
-				{#if useDayGrid}
-					<div class="heatmap-dow" style="width: {LABEL_COL}px; gap: {GAP}px;">
-						{#each weekdayLabels as label, index}
-							<span style="height: {cell}px; visibility: {index % 2 ? 'visible' : 'hidden'};"
-								>{label}</span
-							>
-						{/each}
-					</div>
-				{/if}
+				<div class="heatmap-dow" style="width: {LABEL_COL}px; gap: {GAP}px;">
+					{#each weekdayLabels as label, index}
+						<span style="height: {cell}px; visibility: {index % 2 ? 'visible' : 'hidden'};"
+							>{label}</span
+						>
+					{/each}
+				</div>
 				<div
 					class="heatmap-grid"
 					role="group"
 					aria-label={$t('usage.heatmap')}
-					style="grid-template-columns: repeat({columns}, {cell}px); grid-template-rows: {useDayGrid
-						? `repeat(7, ${cell}px)`
-						: `${WEEK_CELL_H}px`}; gap: {GAP}px; width: {graphWidth}px; height: {graphHeight}px;"
+					style="grid-template-columns: repeat({columns}, {cell}px); grid-template-rows: repeat(7, {cell}px); gap: {GAP}px; width: {graphWidth}px; height: {graphHeight}px;"
 					onpointerleave={() => (hover = null)}
 				>
 					{#each weeks as week, column}
@@ -268,7 +251,6 @@
 								role={item.date ? 'img' : 'presentation'}
 								class="heatmap-cell"
 								class:is-empty={!item.date}
-								class:is-week={!useDayGrid}
 								aria-label={item.date ? ariaFor(item) : undefined}
 								style="grid-column: {column + 1}; grid-row: {row + 1}; background-color: {item.date
 									? levelColors[item.level]
@@ -302,20 +284,24 @@
 		style="left: {hover.left}px; top: {hover.top}px;"
 	>
 		<div class="heatmap-tip-date">{hover.cell.label}</div>
+		<div class="heatmap-tip-agent">Grok</div>
 		<div class="heatmap-tip-row">
 			<span>{$t('usage.tokensLabel')}</span>
-			<span>{formatCount(hover.cell.tokens, $locale)}</span>
+			<span>{formatCount(hover.cell.grokTokens, $locale)}</span>
 		</div>
 		<div class="heatmap-tip-row">
 			<span>{$t('usage.messagesLabel')}</span>
-			<span>{hover.cell.messages.toLocaleString($locale)}</span>
+			<span>{hover.cell.grokMessages.toLocaleString($locale)}</span>
 		</div>
-		{#if hover.cell.cumulative != null}
-			<div class="heatmap-tip-row">
-				<span>{$t('usage.cumulativeLabel')}</span>
-				<span>{formatCount(hover.cell.cumulative, $locale)}</span>
-			</div>
-		{/if}
+		<div class="heatmap-tip-agent">CodeBuddy</div>
+		<div class="heatmap-tip-row">
+			<span>{$t('usage.tokensLabel')}</span>
+			<span>{formatCount(hover.cell.codebuddyTokens, $locale)}</span>
+		</div>
+		<div class="heatmap-tip-row">
+			<span>{$t('usage.messagesLabel')}</span>
+			<span>{hover.cell.codebuddyMessages.toLocaleString($locale)}</span>
+		</div>
 	</div>
 {/if}
 
@@ -392,10 +378,6 @@
 			border-color 0.1s ease;
 	}
 
-	.heatmap-cell.is-week {
-		border-radius: 3px;
-	}
-
 	.heatmap-cell.is-empty {
 		opacity: 0;
 		pointer-events: none;
@@ -419,7 +401,7 @@
 	.heatmap-tip {
 		position: fixed;
 		z-index: 200;
-		width: 184px;
+		width: 208px;
 		padding: 0.4375rem 0.625rem;
 		border-radius: 0.5rem;
 		border: 1px solid color-mix(in oklab, var(--app-fg) 10%, transparent);
@@ -440,6 +422,11 @@
 		margin-bottom: 0.25rem;
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.heatmap-tip-agent {
+		margin-top: 0.375rem;
+		font-weight: 600;
 	}
 
 	.heatmap-tip-row {

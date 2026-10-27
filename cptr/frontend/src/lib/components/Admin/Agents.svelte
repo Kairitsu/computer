@@ -304,12 +304,6 @@
 				{$t('admin.agentsNoProfiles')}
 			</p>
 		{/if}
-
-		<div class="pt-4">
-			<span class="text-xs text-gray-500">
-				{profiles.length} profile{profiles.length === 1 ? '' : 's'}
-			</span>
-		</div>
 	{/if}
 
 	<div class="mt-5">

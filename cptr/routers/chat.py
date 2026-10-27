@@ -15,6 +15,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from cptr.models import Chat, ChatMessage, Config, is_internal_chat
+from cptr.utils.agents.models import (
+    default_agent_profiles,
+    get_raw_agent_profiles,
+    normalize_agent_profiles,
+    parse_agent_model_id,
+)
 from cptr.utils.config import check_access, now_ms
 from cptr.utils.db import get_db
 from cptr.utils.chat_export import chat_directory
@@ -321,6 +327,75 @@ def _message_tokens(usage: object) -> int:
         return 0
 
 
+_USAGE_AGENTS = ("grok", "codebuddy")
+
+
+def _empty_usage_day() -> dict:
+    """One calendar day's totals, with Grok and CodeBuddy counted apart."""
+    return {
+        "tokens": 0,
+        "messages": 0,
+        "models": {},
+        "by_agent": {agent: {"tokens": 0, "messages": 0} for agent in _USAGE_AGENTS},
+    }
+
+
+def _profile_agent_map(raw_profiles: object) -> dict[str, str]:
+    """Map each saved profile id to grok or codebuddy. A bad list uses the defaults."""
+    try:
+        profiles = normalize_agent_profiles(raw_profiles)
+    except HTTPException:
+        profiles = default_agent_profiles()
+    return {
+        str(profile["id"]): profile["agent"]
+        for profile in profiles
+        if profile.get("agent") in _USAGE_AGENTS
+    }
+
+
+def _agent_from_model(model_id: object, profile_agents: dict[str, str]) -> str | None:
+    """Agent that owns a stored model id. An empty model is unset, not Grok."""
+    if not isinstance(model_id, str) or not model_id.strip():
+        return None
+    parsed = parse_agent_model_id(model_id.strip())
+    if parsed is None:
+        # Model ids stored before agent profiles belong to Grok chats.
+        return "grok"
+    profile_id, _model = parsed
+    agent = profile_agents.get(profile_id)
+    if agent in _USAGE_AGENTS:
+        return agent
+    if profile_id in _USAGE_AGENTS:
+        return profile_id
+    return "grok"
+
+
+def _message_agents(messages: list, profile_agents: dict[str, str]) -> dict[str, str]:
+    """Agent for each message. A user row follows its latest assistant child.
+
+    The two counts still add up to the message total: a user message is counted
+    once, on the agent of the newest reply that hangs off it.
+    """
+    latest_child_model: dict[str, tuple[int, object]] = {}
+    for message in messages:
+        if getattr(message, "role", None) != "assistant" or not message.parent_id:
+            continue
+        stamp = _created_seconds(message.created_at)
+        current = latest_child_model.get(message.parent_id)
+        if current is None or stamp >= current[0]:
+            latest_child_model[message.parent_id] = (stamp, message.model)
+
+    agents: dict[str, str] = {}
+    for message in messages:
+        agent = _agent_from_model(message.model, profile_agents)
+        if agent is None and message.role == "user":
+            child = latest_child_model.get(message.id)
+            if child is not None:
+                agent = _agent_from_model(child[1], profile_agents)
+        agents[message.id] = agent or "grok"
+    return agents
+
+
 @router.get("/usage")
 async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=732)):
     """Aggregate personal chat usage for the settings Usage tab."""
@@ -343,8 +418,11 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
             )
             messages = list(message_result.scalars().all())
 
+    raw_profiles = await get_raw_agent_profiles()
+    message_agents = _message_agents(messages, _profile_agent_map(raw_profiles))
+
     chat_ids_by_day: dict[str, set[str]] = defaultdict(set)
-    day_stats: dict[str, dict] = defaultdict(lambda: {"tokens": 0, "messages": 0, "models": {}})
+    day_stats: dict[str, dict] = defaultdict(_empty_usage_day)
     model_stats: dict[str, dict] = defaultdict(lambda: {"messages": 0, "total_tokens": 0})
     tool_counts: dict[str, int] = defaultdict(int)
     models_used: set[str] = set()
@@ -389,6 +467,9 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
         day = day_date.isoformat()
         day_stats[day]["messages"] += 1
         chat_ids_by_day[day].add(message.chat_id)
+        agent = message_agents.get(message.id, "grok")
+        agent_bucket = day_stats[day]["by_agent"][agent]
+        agent_bucket["messages"] += 1
 
         if message.role == "user":
             user_messages += 1
@@ -398,6 +479,7 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
         model_id = message.model or None
         if tokens:
             day_stats[day]["tokens"] += tokens
+            agent_bucket["tokens"] += tokens
 
         if message.role == "assistant" and model_id:
             day_models = day_stats[day]["models"]
@@ -428,49 +510,20 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
                         stack.append(item[key])
 
     heatmap = []
-    cumulative_tokens = 0
-    cumulative_messages = 0
-    cumulative_chats = 0
-    cumulative_models: dict[str, int] = {}
-    weekly: dict[str, dict] = defaultdict(
-        lambda: {"tokens": 0, "messages": 0, "chats": 0, "models": {}}
-    )
-    cumulative = []
 
     for offset in range((today - start).days + 1):
         current = start + timedelta(days=offset)
         key = current.isoformat()
-        stats = day_stats.get(key, {"tokens": 0, "messages": 0, "models": {}})
+        stats = day_stats.get(key) or _empty_usage_day()
         chats_for_day = chat_ids_by_day.get(key, set())
-        entry = {
-            "date": key,
-            "tokens": stats["tokens"],
-            "messages": stats["messages"],
-            "chats": len(chats_for_day),
-            "models": stats["models"],
-        }
-        heatmap.append(entry)
-
-        week_key = (current - timedelta(days=current.weekday())).isoformat()
-        weekly_entry = weekly[week_key]
-        weekly_entry["tokens"] += stats["tokens"]
-        weekly_entry["messages"] += stats["messages"]
-        weekly_entry["chats"] += len(chats_for_day)
-        for model_id, count in stats["models"].items():
-            weekly_entry["models"][model_id] = weekly_entry["models"].get(model_id, 0) + count
-
-        cumulative_tokens += stats["tokens"]
-        cumulative_messages += stats["messages"]
-        cumulative_chats += len(chats_for_day)
-        for model_id, count in stats["models"].items():
-            cumulative_models[model_id] = cumulative_models.get(model_id, 0) + count
-        cumulative.append(
+        heatmap.append(
             {
                 "date": key,
-                "tokens": cumulative_tokens,
-                "messages": cumulative_messages,
-                "chats": cumulative_chats,
-                "models": dict(cumulative_models),
+                "tokens": stats["tokens"],
+                "messages": stats["messages"],
+                "chats": len(chats_for_day),
+                "models": stats["models"],
+                "by_agent": {agent: dict(stats["by_agent"][agent]) for agent in _USAGE_AGENTS},
             }
         )
 
@@ -493,16 +546,6 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
     total_chats = len(chats)
     longest_chat_seconds = max(active_seconds_by_chat.values(), default=0)
 
-    weekly_heatmap = [
-        {
-            "date": week,
-            "tokens": stats["tokens"],
-            "messages": stats["messages"],
-            "chats": stats["chats"],
-            "models": stats["models"],
-        }
-        for week, stats in sorted(weekly.items())
-    ]
     total_messages = user_messages + assistant_messages
 
     return {
@@ -533,8 +576,6 @@ async def get_usage(request: Request, days: int | None = Query(None, ge=7, le=73
             else 0,
         },
         "heatmap": heatmap,
-        "weekly_heatmap": weekly_heatmap,
-        "cumulative_heatmap": cumulative,
         "top_models": [
             {"model_id": model_id, **stats}
             for model_id, stats in sorted(
@@ -1227,9 +1268,7 @@ async def resolve_ask_user(
         arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
         # Approving the plan leaves plan mode. Save that before the agent continues,
         # so the approval card does not appear again after this turn.
-        approved_plan = (
-            arguments.get("kind") == "plan" and (answers or {}).get("plan") == "Approve"
-        )
+        approved_plan = arguments.get("kind") == "plan" and (answers or {}).get("plan") == "Approve"
         meta = dict(chat.meta or {})
         params = dict(meta.get("params") or {})
         cleared_plan = False
