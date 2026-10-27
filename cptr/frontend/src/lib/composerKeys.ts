@@ -1,7 +1,7 @@
-/** Which key inserts a line break in the session composer. The others do not. */
-export type ComposerNewline = 'shift-enter' | 'ctrl-enter' | 'alt-enter' | 'enter';
+/** Which key inserts a line break in the session composer. Enter sends. */
+export type ComposerNewline = 'shift-enter' | 'ctrl-enter' | 'alt-enter';
 
-/** Send key used only when Enter itself inserts the line break. */
+/** Kept so older saved preferences still parse. Enter no longer inserts a break. */
 export type ComposerSendKey = 'ctrl-enter' | 'alt-enter';
 
 export type EnterAction = 'newline' | 'send' | 'default';
@@ -15,7 +15,7 @@ type KeyEvent = {
 };
 
 /** The single modifier chord, or plain Enter. Cmd and mixed modifiers are ignored. */
-function enterChord(event: KeyEvent): ComposerNewline | null {
+function enterChord(event: KeyEvent): ComposerNewline | 'enter' | null {
 	if (event.key !== 'Enter') return null;
 	const pressed = [event.shiftKey, event.ctrlKey, event.metaKey, event.altKey].filter(Boolean);
 	if (pressed.length > 1 || event.metaKey) return null;
@@ -33,17 +33,11 @@ function enterChord(event: KeyEvent): ComposerNewline | null {
 export function enterAction(
 	event: KeyEvent,
 	newline: ComposerNewline,
-	sendKey: ComposerSendKey,
 	opts: { mobile: boolean; suggestionOpen: boolean }
 ): EnterAction {
 	const chord = enterChord(event);
 	if (!chord || opts.mobile) return 'default';
 	if (opts.suggestionOpen && chord === 'enter') return 'default';
-	if (newline === 'enter') {
-		if (chord === 'enter') return 'newline';
-		if (chord === sendKey) return 'send';
-		return 'default';
-	}
 	if (chord === newline) return 'newline';
 	if (chord === 'enter') return 'send';
 	return 'default';

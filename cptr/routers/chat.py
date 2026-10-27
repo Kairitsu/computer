@@ -1224,8 +1224,26 @@ async def resolve_ask_user(
     if call.get("native_agent"):
         # A coding agent's own question: its process is still mid-turn waiting for
         # the answer, so hand it over instead of starting a new turn.
+        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+        # Approving the plan leaves plan mode. Save that before the agent continues,
+        # so the approval card does not appear again after this turn.
+        approved_plan = (
+            arguments.get("kind") == "plan" and (answers or {}).get("plan") == "Approve"
+        )
+        meta = dict(chat.meta or {})
+        params = dict(meta.get("params") or {})
+        cleared_plan = False
+        if approved_plan and params.get("plan_mode"):
+            params["plan_mode"] = False
+            meta["params"] = params
+            cleared_plan = True
+            await Chat.update_meta(chat_id, meta, now_ms())
         if resolve_agent_ask_user(message_id, call_id, answers, timed_out):
             return
+        if cleared_plan:
+            params["plan_mode"] = True
+            meta["params"] = params
+            await Chat.update_meta(chat_id, meta, now_ms())
         if not is_running(message_id):
             # The agent that asked is gone (e.g. server restart); retire the card.
             call["status"] = "failed"

@@ -1168,6 +1168,8 @@ async def run_chat_task(
                 {},
             )
             arguments: dict[str, Any] = {"questions": ask.questions}
+            if ask.kind == "plan":
+                arguments["kind"] = "plan"
             call_item = {
                 "type": "function_call",
                 "id": existing.get("id") or f"agent-{ask.call_id}",

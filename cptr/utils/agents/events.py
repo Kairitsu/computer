@@ -45,6 +45,8 @@ class AgentAskUser:
     questions: list[dict[str, Any]]
     auto_resolve: bool = True
     answers: dict[str, str] | None = None
+    # "plan" is the plan-approval card. "question" is an ordinary question.
+    kind: str = "question"
 
 
 @dataclass

@@ -7,10 +7,10 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import CodeBuddyMark from '$lib/components/brand/CodeBuddyMark.svelte';
 	import GrokMark from '$lib/components/brand/GrokMark.svelte';
 	import Icon from '../Icon.svelte';
 	import BudgetSettings from './BudgetSettings.svelte';
-	import GrokAccountsModal from './GrokAccountsModal.svelte';
 	import UsageHeatmap, { type HeatmapMode } from './UsageHeatmap.svelte';
 	import { ApiError } from '$lib/apis';
 	import { getUsage, type UsageResponse } from '$lib/apis/chat';
@@ -19,17 +19,14 @@
 		getGrokAccount,
 		getGrokLogin,
 		logoutGrok,
-		removeGrokAccount,
-		saveGrokAccount,
 		startGrokLogin,
 		submitGrokLoginCode,
-		switchGrokAccount,
 		type GrokAccount,
 		type GrokLoginStatus
 	} from '$lib/apis/grok';
 	import { locale, t } from '$lib/i18n';
 	import { requestConfirm } from '$lib/stores/confirm';
-	import { formatCredits, isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
+	import { isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import {
 		formatCount,
@@ -39,7 +36,6 @@
 	} from '$lib/utils/usageFormat';
 
 	const USAGE_URL = 'https://grok.com/?_s=usage';
-	const SUBSCRIBE_URL = 'https://grok.com/supergrok?referrer=grok-build';
 	const LOGIN_POLL_MS = 1500;
 
 	let account = $state<GrokAccount | null>(null);
@@ -48,7 +44,6 @@
 	let usageLoading = $state(true);
 	let busy = $state(false);
 	let refreshing = $state(false);
-	let showAccounts = $state(false);
 	let heatmapMode = $state<HeatmapMode>('daily');
 	let pasteOpen = $state(false);
 	let pasteCode = $state('');
@@ -222,44 +217,10 @@
 		});
 	}
 
-	function switchAccount(id: string) {
-		return run(async () => {
-			const result = await switchGrokAccount(id);
-			showAccounts = false;
-			toast.success(
-				$t('grokAccount.switchedTo', {
-					name: result.profile.display_name || result.profile.email || 'Grok'
-				})
-			);
-			await Promise.all([loadAccount(true), refreshQuota(true)]);
-		});
-	}
-
-	function removeAccount(id: string) {
-		return run(async () => {
-			await removeGrokAccount(id);
-			await loadAccount();
-		});
-	}
-
-	function saveAccount() {
-		return run(async () => {
-			await saveGrokAccount();
-			toast.success($t('grokAccount.saved'));
-			await loadAccount();
-		});
-	}
-
-	async function addAccount() {
-		if (signedIn) await saveGrokAccount().catch(() => {});
-		showAccounts = false;
-		await startLogin('oauth');
-	}
 </script>
 
 <div class="usage-page">
 	<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('usage.title')}</h2>
-	<p class="page-hint">{$t('grokAccount.pageHint')}</p>
 
 	<!-- Hero: identity · actions, then plan + quota, then links -->
 	<section class="hero cptr-rise" style="--rise-delay: 40ms;">
@@ -285,20 +246,6 @@
 
 			<div class="actions">
 				{#if signedIn}
-					{#if canManage}
-						<button
-							type="button"
-							class="settings-action"
-							disabled={busy}
-							onclick={() => (showAccounts = true)}
-						>
-							<Icon name="user" size={13} />
-							{$t('grokAccount.switchAccount')}
-							{#if account?.accounts.length}
-								<span class="count">{account.accounts.length}</span>
-							{/if}
-						</button>
-					{/if}
 					<button type="button" class="settings-action" disabled={refreshing} onclick={refreshAll}>
 						{refreshing ? $t('grokAccount.refreshing') : $t('grokAccount.refresh')}
 					</button>
@@ -308,18 +255,6 @@
 						</button>
 					{/if}
 				{:else if !accountLoading}
-					{#if canManage && account?.accounts.length}
-						<button
-							type="button"
-							class="settings-action"
-							disabled={busy}
-							onclick={() => (showAccounts = true)}
-						>
-							<Icon name="user" size={13} />
-							{$t('grokAccount.switchAccount')}
-							<span class="count">{account.accounts.length}</span>
-						</button>
-					{/if}
 					{#if canManage && !loginRunning}
 						<button
 							type="button"
@@ -490,9 +425,6 @@
 				<a class="link-btn" href={USAGE_URL} target="_blank" rel="noopener noreferrer"
 					>{$t('grokAccount.viewUsage')}</a
 				>
-				<a class="link-btn" href={SUBSCRIBE_URL} target="_blank" rel="noopener noreferrer"
-					>{$t('grokAccount.manageSubscription')}</a
-				>
 			</div>
 		{/if}
 
@@ -503,90 +435,76 @@
 		{/if}
 	</section>
 
-	<!-- CodeBuddy: official credit packages, then credits this server's chats reported -->
-	<section class="plan">
-		<div class="plan-head">
-			<span class="plan-name">
-				CodeBuddy{codebuddy?.nickname ? ` · ${codebuddy.nickname}` : ''}
-			</span>
-			<span class="plan-remain">
-				{#if !codebuddy?.signed_in}
-					{$t('usageIndicator.codebuddySignedOutShort')}
-				{:else if codebuddyBalance}
-					{$t('usageIndicator.remaining', {
-						percent: Math.round(codebuddyBalance.remaining_percent)
-					})}
-					· {$t('usageIndicator.codebuddyCreditsAmount', {
-						credits: formatCredits(codebuddyBalance.remain)
-					})}
-				{:else}
-					{$t('usageIndicator.codebuddyQuotaErrorShort')}
-				{/if}
-			</span>
-		</div>
-		{#if codebuddyBalance}
-			<div class="quota-bar" aria-hidden="true">
-				<div
-					class="quota-fill"
-					class:is-warn={codebuddyBalance.used_percent >= 70}
-					class:is-danger={codebuddyBalance.used_percent >= 90}
-					style="width: {Math.min(100, Math.max(0, codebuddyBalance.used_percent))}%;"
-				></div>
-			</div>
-			<div class="plan-meta">
-				<span>
-					{$t('grokAccount.used', { percent: Math.round(codebuddyBalance.used_percent) })}
-					{#if codebuddyBalance.resets_at}
-						· {$t('grokAccount.resetsAt', {
-							time: formatResetTime(codebuddyBalance.resets_at, $locale)
-						})}
-					{/if}
-				</span>
-			</div>
-			{#each codebuddyBalance.packages as pkg (pkg.id)}
-				<div class="plan-meta-text flex justify-between gap-3 tabular-nums">
-					<span class="min-w-0 truncate" title={pkg.label}>{pkg.label}</span>
-					<span class="shrink-0">
-						{$t('usageIndicator.used', { percent: Math.round(pkg.used_percent) })}
-						· {$t('usageIndicator.codebuddyPackageRemain', {
-							remain: formatCredits(pkg.remain),
-							total: formatCredits(pkg.total)
-						})}
-					</span>
+	<!-- CodeBuddy: the same quota card as SuperGrok, with its own mark and usage page. -->
+	<section class="hero">
+		<div class="hero-top">
+			<div class="who">
+				<div class="avatar" aria-hidden="true">
+					<CodeBuddyMark size={32} />
 				</div>
-				{#if pkg.resets_at}
-					<div class="plan-meta-text -mt-1 tabular-nums">
-						{$t('usageIndicator.codebuddyExpires', {
-							time: formatResetTime(pkg.resets_at, $locale)
-						})}
+				<div class="min-w-0 flex-1">
+					<div class="name-row">
+						<span class="name">CodeBuddy</span>
+						{#if codebuddy && !codebuddy.signed_in}
+							<span class="badge">{$t('grokAccount.signedOut')}</span>
+						{/if}
 					</div>
-				{/if}
-			{/each}
-		{:else}
-			<p class="plan-meta-text">
-				{codebuddy?.signed_in
-					? $t('usageIndicator.codebuddyQuotaError')
-					: $t('usageIndicator.codebuddySignedOut')}
-			</p>
-		{/if}
-		{#if codebuddy?.signed_in && codebuddy.usage}
-			<p class="plan-meta-text">{$t('usageIndicator.codebuddyLocalUsage')}</p>
-			{#each ['day', 'week', 'month'] as const as period (period)}
-				<div class="plan-meta-text flex justify-between tabular-nums">
-					<span>{$t(`usageIndicator.period.${period}`)}</span>
+					{#if codebuddy?.nickname}
+						<div class="email">{codebuddy.nickname}</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+
+		<div class="plan">
+			{#if codebuddyBalance}
+				<div class="plan-head">
+					<span class="plan-name">CodeBuddy</span>
+					<span class="plan-remain"
+						>{$t('grokAccount.remaining', {
+							percent: Math.round(codebuddyBalance.remaining_percent)
+						})}</span
+					>
+				</div>
+				<div class="quota-bar" aria-hidden="true">
+					<div
+						class="quota-fill"
+						class:is-warn={codebuddyBalance.used_percent >= 70}
+						class:is-danger={codebuddyBalance.used_percent >= 90}
+						style="width: {Math.min(100, Math.max(0, codebuddyBalance.used_percent))}%;"
+					></div>
+				</div>
+				<div class="plan-meta">
 					<span>
-						{$t('usageIndicator.codebuddyPeriodUsage', {
-							credits: formatCredits(codebuddy.usage[period].credits),
-							replies: codebuddy.usage[period].replies
-						})}
+						{$t('grokAccount.used', { percent: Math.round(codebuddyBalance.used_percent) })}
+						{#if codebuddyBalance.resets_at}
+							· {$t('grokAccount.resetsAt', {
+								time: formatResetTime(codebuddyBalance.resets_at, $locale)
+							})}
+						{/if}
 					</span>
 				</div>
-			{/each}
-		{/if}
+			{:else}
+				<div class="plan-empty">
+					<span class="plan-name">CodeBuddy</span>
+					<span class="chip" class:chip-warn={!!codebuddy?.error}>
+						{codebuddy?.signed_in
+							? $t('grokAccount.quotaError')
+							: $t('grokAccount.quotaUnknown')}
+					</span>
+					<span class="plan-meta-text">
+						{codebuddy?.signed_in
+							? $t('usageIndicator.codebuddyQuotaError')
+							: $t('usageIndicator.codebuddySignedOut')}
+					</span>
+				</div>
+			{/if}
+		</div>
+
 		{#if codebuddy?.usage_url}
 			<div class="links">
 				<a class="link-btn" href={codebuddy.usage_url} target="_blank" rel="noopener noreferrer"
-					>{$t('usageIndicator.codebuddyOpenUsage')}</a
+					>{$t('grokAccount.viewUsage')}</a
 				>
 			</div>
 		{/if}
@@ -595,17 +513,7 @@
 	<!-- Activity heatmap -->
 	<section class="activity">
 		<div class="section-title cptr-rise" style="--rise-delay: 120ms;">
-			<span class="flex min-w-0 items-center gap-1.5">
-				<span>{$t('usage.heatmap')}</span>
-				<span
-					class="help"
-					role="img"
-					aria-label={$t('usage.heatmapHint')}
-					use:tooltip={{ content: $t('usage.heatmapHint'), placement: 'top', maxWidth: 260 }}
-				>
-					<Icon name="help-circle" size={13} />
-				</span>
-			</span>
+			<span>{$t('usage.heatmap')}</span>
 			<div class="segmented segmented-sm shrink-0" role="group" aria-label={$t('usage.heatmap')}>
 				{#each heatmapModes as mode}
 					<button
@@ -663,19 +571,6 @@
 	</section>
 </div>
 
-{#if showAccounts && account}
-	<GrokAccountsModal
-		accounts={account.accounts}
-		{signedIn}
-		{busy}
-		onswitch={switchAccount}
-		onremove={removeAccount}
-		onsave={saveAccount}
-		onadd={addAccount}
-		onclose={() => (showAccounts = false)}
-	/>
-{/if}
-
 <style>
 	.usage-page {
 		--card-border: color-mix(in oklab, var(--app-fg) 10%, transparent);
@@ -684,14 +579,6 @@
 		flex-direction: column;
 		gap: 1rem;
 		padding-bottom: 0.5rem;
-	}
-
-	.page-hint {
-		margin: -0.625rem 0 0;
-		max-width: 52ch;
-		font-size: 0.75rem;
-		line-height: 1.45;
-		color: var(--app-fg-subtle);
 	}
 
 	/* ── Hero ── */
@@ -778,21 +665,6 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: 0.375rem;
-	}
-
-	.count {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 1.125rem;
-		height: 1.125rem;
-		padding: 0 0.3125rem;
-		border-radius: 999px;
-		font-size: 0.6875rem;
-		font-weight: 600;
-		font-variant-numeric: tabular-nums;
-		color: var(--app-fg-muted);
-		background: var(--app-hover);
 	}
 
 	.login-panel {
@@ -987,12 +859,6 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		color: var(--app-fg-muted);
-	}
-
-	.help {
-		display: inline-flex;
-		color: var(--app-fg-subtle);
-		cursor: help;
 	}
 
 	.stats {

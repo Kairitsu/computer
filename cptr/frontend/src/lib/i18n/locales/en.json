@@ -715,6 +715,8 @@
 	"general.composerSendKey": "Send key",
 	"general.composerSendDescCtrl": "Ctrl+Enter sends.",
 	"general.composerSendDescAlt": "Alt+Enter sends.",
+	"general.idleProcesses": "Idle processes",
+	"general.idleProcessesDesc": "Idle Grok and CodeBuddy processes share this count and time. A process that is replying is never closed and is not counted. Past the count or the time, the least recently used idle process closes. Closing a chat tab closes its process. A closed chat's next message starts a new process that picks up the conversation.",
 	"general.grokProcesses": "Grok processes",
 	"general.maxIdleProcesses": "Idle processes to keep",
 	"general.idleTimeoutMinutes": "Close idle processes after (minutes)",

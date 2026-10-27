@@ -609,6 +609,8 @@
 	"general.composerSendKey": "傳送鍵",
 	"general.composerSendDescCtrl": "Ctrl+Enter 傳送。",
 	"general.composerSendDescAlt": "Alt+Enter 傳送。",
+	"general.idleProcesses": "閒置程序",
+	"general.idleProcessesDesc": "Grok 和 CodeBuddy 的閒置程序共用這一組個數和時間。正在回覆的程序不會被關閉，也不計入個數；超出個數或超過時間時，關閉最久未使用的閒置程序。關閉聊天分頁會同時關閉它的程序。已關閉的聊天下次傳送訊息時會啟動新程序，並接著先前的對話繼續。",
 	"general.grokProcesses": "Grok 程序",
 	"general.maxIdleProcesses": "同時保留的閒置程序數",
 	"general.idleTimeoutMinutes": "閒置多少分鐘後關閉程序",

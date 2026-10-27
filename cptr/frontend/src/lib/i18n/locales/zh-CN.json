@@ -637,6 +637,8 @@
 	"general.composerSendKey": "发送键",
 	"general.composerSendDescCtrl": "Ctrl+Enter 发送。",
 	"general.composerSendDescAlt": "Alt+Enter 发送。",
+	"general.idleProcesses": "闲置进程",
+	"general.idleProcessesDesc": "Grok 和 CodeBuddy 的闲置进程共用这一组个数和时间。正在回复的进程不会被关闭，也不计入个数；超出个数或超过时间时，关闭最久未使用的闲置进程。关闭聊天标签会同时关闭它的进程。已关闭的聊天下次发消息时会启动新进程，并接着之前的对话继续。",
 	"general.grokProcesses": "Grok 进程",
 	"general.maxIdleProcesses": "同时保留的闲置进程数",
 	"general.idleTimeoutMinutes": "闲置多少分钟后关闭进程",

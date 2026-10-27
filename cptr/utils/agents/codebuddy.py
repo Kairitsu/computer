@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from cptr.env import DATA_DIR
-from cptr.models import Config
 from cptr.utils.agents.acp import (
     ACP_PERMISSION_METHOD,
     AcpClient,
@@ -349,61 +348,23 @@ def cached_codebuddy_options(model: str) -> dict[str, Any]:
 # ── One live `codebuddy --acp` process per chat ─────────────
 #
 # A process keeps the session loaded, so a turn starts without CodeBuddy restoring
-# the session and refreshing its login again. Each process holds about 450 MB, so idle
-# ones close after the idle timeout and beyond the most recently used few.
-
-MAX_IDLE_PROCESSES_KEY = "codebuddy.max_idle_processes"
-IDLE_TIMEOUT_MINUTES_KEY = "codebuddy.idle_timeout_minutes"
-DEFAULT_MAX_IDLE_PROCESSES = 2
-DEFAULT_IDLE_TIMEOUT_MINUTES = 30
-MAX_IDLE_PROCESSES_LIMIT = 100
-IDLE_TIMEOUT_MINUTES_LIMIT = 7 * 24 * 60
-
-
-def _int_setting(value: Any, default: int, limit: int) -> int:
-    if value is None or isinstance(value, bool):
-        return default
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return default
-    return min(max(number, 0), limit)
-
+# the session and refreshing its login again. Each process holds about 450 MB. Idle
+# Grok and CodeBuddy processes share one count and one timeout.
 
 async def codebuddy_process_settings() -> dict[str, int]:
-    """How many idle CodeBuddy processes are kept, and for how long."""
-    try:
-        config = await Config.get_namespace("codebuddy")
-    except Exception:  # noqa: BLE001 - the defaults still apply.
-        config = {}
-    return {
-        "max_idle_processes": _int_setting(
-            config.get(MAX_IDLE_PROCESSES_KEY), DEFAULT_MAX_IDLE_PROCESSES, MAX_IDLE_PROCESSES_LIMIT
-        ),
-        "idle_timeout_minutes": _int_setting(
-            config.get(IDLE_TIMEOUT_MINUTES_KEY),
-            DEFAULT_IDLE_TIMEOUT_MINUTES,
-            IDLE_TIMEOUT_MINUTES_LIMIT,
-        ),
-    }
+    """The shared idle-process count and timeout."""
+    from cptr.utils.agents.process_limits import agent_process_settings
+
+    return await agent_process_settings()
 
 
 async def save_codebuddy_process_settings(
     max_idle_processes: int | None = None, idle_timeout_minutes: int | None = None
 ) -> dict[str, int]:
-    updates: dict[str, int] = {}
-    if max_idle_processes is not None:
-        updates[MAX_IDLE_PROCESSES_KEY] = _int_setting(
-            max_idle_processes, DEFAULT_MAX_IDLE_PROCESSES, MAX_IDLE_PROCESSES_LIMIT
-        )
-    if idle_timeout_minutes is not None:
-        updates[IDLE_TIMEOUT_MINUTES_KEY] = _int_setting(
-            idle_timeout_minutes, DEFAULT_IDLE_TIMEOUT_MINUTES, IDLE_TIMEOUT_MINUTES_LIMIT
-        )
-    if updates:
-        await Config.upsert(updates)
-    await _trim_idle()
-    return await codebuddy_process_settings()
+    """Save the shared limits and apply them to the processes kept now."""
+    from cptr.utils.agents.process_limits import save_agent_process_settings
+
+    return await save_agent_process_settings(max_idle_processes, idle_timeout_minutes)
 
 
 @dataclass
@@ -479,21 +440,28 @@ async def _checkout(session_id: str | None, key: tuple[Any, ...]) -> _LiveCodeBu
     return None
 
 
+def idle_process_snapshots() -> list[tuple[str, float, bool]]:
+    """Idle CodeBuddy processes: session id, last used, and whether it is alive."""
+    return [
+        (session_id, live.last_used, live.alive())
+        for session_id, live in _live_sessions.items()
+        if not live.lock.locked()
+    ]
+
+
+async def close_idle_process(session_id: str) -> None:
+    """Close one idle CodeBuddy process. A process in a turn is left running."""
+    live = _live_sessions.get(session_id)
+    if live is None or live.lock.locked():
+        return
+    await _close_live(session_id, live)
+
+
 async def _trim_idle() -> None:
-    settings = await codebuddy_process_settings()
-    max_idle = settings["max_idle_processes"]
-    idle_timeout = settings["idle_timeout_minutes"] * 60
-    now = time.monotonic()
-    idle = sorted(
-        ((sid, live) for sid, live in _live_sessions.items() if not live.lock.locked()),
-        key=lambda item: item[1].last_used,
-        reverse=True,
-    )
-    for index, (session_id, live) in enumerate(idle):
-        if live.lock.locked():
-            continue
-        if index >= max_idle or now - live.last_used >= idle_timeout or not live.alive():
-            await _close_live(session_id, live)
+    """Apply the shared idle limit to Grok and CodeBuddy together."""
+    from cptr.utils.agents.process_limits import trim_idle_processes
+
+    await trim_idle_processes()
 
 
 async def _reap_idle_sessions() -> None:

@@ -14,7 +14,6 @@ from typing import Any, AsyncIterator
 
 from PIL import Image
 
-from cptr.models import Config
 from cptr.utils.agents.attachments import AgentAttachment, PreparedAgentAttachments
 from cptr.utils.agents.acp import (
     ACP_PERMISSION_METHOD,
@@ -151,16 +150,16 @@ def _ask_user_question_response(ask: AgentAskUser, keys: list[str]) -> dict[str,
     return response
 
 
-def _exit_plan_mode_question(request_id: Any, params: dict[str, Any]) -> AgentAskUser:
-    plan = params.get("planContent")
-    plan = plan.strip() if isinstance(plan, str) else ""
+def _exit_plan_mode_question(request_id: Any, _params: dict[str, Any]) -> AgentAskUser:
+    # The plan is already in the assistant message. This ask is only the approval,
+    # shown as the plan card rather than a second copy of the plan.
     return AgentAskUser(
-        call_id=_ext_call_id(params, request_id),
+        call_id=_ext_call_id(_params, request_id),
         questions=[
             {
                 "id": "plan",
                 "header": "Plan ready",
-                "question": plan or "The agent finished planning without writing a plan.",
+                "question": "Approve this plan and start implementing?",
                 "options": [
                     {
                         "label": PLAN_APPROVE_LABEL,
@@ -175,6 +174,7 @@ def _exit_plan_mode_question(request_id: Any, params: dict[str, Any]) -> AgentAs
         ],
         # Leaving plan mode unlocks edits, so never pick an answer for the user.
         auto_resolve=False,
+        kind="plan",
     )
 
 
@@ -478,66 +478,26 @@ async def _apply_session_settings(
 # Grok tracks how full its context window is inside the process. A process that only
 # reloads the session (session/load) starts that count near zero, so Grok's turn-start
 # auto-compaction never fires. Keeping each chat's process between turns keeps the
-# count. Each process holds its MCP servers, so idle ones close after the idle timeout
-# and beyond the most recently used few (both in Settings → General); running turns
-# are never closed. Closing a chat's tab closes its process too
+# count. Idle Grok and CodeBuddy processes share one count and one timeout
+# (Settings → General, utils/agents/process_limits.py). A process serving a turn
+# is never closed and is not counted. Closing a chat's tab closes its process too
 # (chat_task.release_chat_agents). A closed chat's next turn reloads the session.
-
-MAX_IDLE_PROCESSES_KEY = "grok.max_idle_processes"
-IDLE_TIMEOUT_MINUTES_KEY = "grok.idle_timeout_minutes"
-DEFAULT_MAX_IDLE_PROCESSES = 3
-DEFAULT_IDLE_TIMEOUT_MINUTES = 30
-MAX_IDLE_PROCESSES_LIMIT = 100
-IDLE_TIMEOUT_MINUTES_LIMIT = 7 * 24 * 60
-
-
-def _int_setting(value: Any, default: int, limit: int) -> int:
-    if value is None or isinstance(value, bool):
-        return default
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return default
-    return min(max(number, 0), limit)
 
 
 async def grok_process_settings() -> dict[str, int]:
-    """How many idle Grok processes are kept, and for how long."""
-    try:
-        config = await Config.get_namespace("grok")
-    except Exception:  # noqa: BLE001 - the defaults still apply.
-        config = {}
-    return {
-        "max_idle_processes": _int_setting(
-            config.get(MAX_IDLE_PROCESSES_KEY),
-            DEFAULT_MAX_IDLE_PROCESSES,
-            MAX_IDLE_PROCESSES_LIMIT,
-        ),
-        "idle_timeout_minutes": _int_setting(
-            config.get(IDLE_TIMEOUT_MINUTES_KEY),
-            DEFAULT_IDLE_TIMEOUT_MINUTES,
-            IDLE_TIMEOUT_MINUTES_LIMIT,
-        ),
-    }
+    """The shared idle-process count and timeout."""
+    from cptr.utils.agents.process_limits import agent_process_settings
+
+    return await agent_process_settings()
 
 
 async def save_grok_process_settings(
     max_idle_processes: int | None = None, idle_timeout_minutes: int | None = None
 ) -> dict[str, int]:
-    """Save the limits and apply them to the processes kept now."""
-    updates: dict[str, int] = {}
-    if max_idle_processes is not None:
-        updates[MAX_IDLE_PROCESSES_KEY] = _int_setting(
-            max_idle_processes, DEFAULT_MAX_IDLE_PROCESSES, MAX_IDLE_PROCESSES_LIMIT
-        )
-    if idle_timeout_minutes is not None:
-        updates[IDLE_TIMEOUT_MINUTES_KEY] = _int_setting(
-            idle_timeout_minutes, DEFAULT_IDLE_TIMEOUT_MINUTES, IDLE_TIMEOUT_MINUTES_LIMIT
-        )
-    if updates:
-        await Config.upsert(updates)
-    await _trim_idle()
-    return await grok_process_settings()
+    """Save the shared limits and apply them to the processes kept now."""
+    from cptr.utils.agents.process_limits import save_agent_process_settings
+
+    return await save_agent_process_settings(max_idle_processes, idle_timeout_minutes)
 
 
 @dataclass
@@ -624,30 +584,28 @@ async def _checkout(session_id: str | None, key: tuple[Any, ...]) -> _LiveGrok |
     return None
 
 
-async def _trim_idle() -> None:
-    """Close processes idle too long, and the oldest beyond the idle limit.
+def idle_process_snapshots() -> list[tuple[str, float, bool]]:
+    """Idle Grok processes: session id, last used, and whether the process is alive."""
+    return [
+        (session_id, live.last_used, live.alive())
+        for session_id, live in _live_sessions.items()
+        if not live.lock.locked()
+    ]
 
-    Processes serving a turn are neither closed nor counted.
-    """
-    settings = await grok_process_settings()
-    max_idle = settings["max_idle_processes"]
-    idle_timeout = settings["idle_timeout_minutes"] * 60
-    now = time.monotonic()
-    idle = sorted(
-        (
-            (session_id, live)
-            for session_id, live in _live_sessions.items()
-            if not live.lock.locked()
-        ),
-        key=lambda item: item[1].last_used,
-        reverse=True,
-    )
-    for index, (session_id, live) in enumerate(idle):
-        if live.lock.locked():
-            # A turn took it while an earlier one was closing.
-            continue
-        if index >= max_idle or now - live.last_used >= idle_timeout or not live.alive():
-            await _close_live(session_id, live)
+
+async def close_idle_process(session_id: str) -> None:
+    """Close one idle Grok process. A process that started a turn is left running."""
+    live = _live_sessions.get(session_id)
+    if live is None or live.lock.locked():
+        return
+    await _close_live(session_id, live)
+
+
+async def _trim_idle() -> None:
+    """Apply the shared idle limit to Grok and CodeBuddy together."""
+    from cptr.utils.agents.process_limits import trim_idle_processes
+
+    await trim_idle_processes()
 
 
 async def _reap_idle_sessions() -> None:

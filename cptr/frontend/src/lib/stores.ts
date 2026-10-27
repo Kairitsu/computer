@@ -358,9 +358,9 @@ export const showSearch = writable(false);
 export const stateLoaded = writable(false);
 export type StreamingBehavior = 'queue' | 'interrupt';
 export const streamingBehavior = writable<StreamingBehavior>('queue');
-/** Session composer: which chord inserts a line break. Enter sends unless this is 'enter'. */
+/** Session composer: which chord inserts a line break. Enter sends. */
 export const composerNewline = writable<ComposerNewline>('shift-enter');
-/** Used only when composerNewline is 'enter'. */
+/** Unused. Kept so a preference saved when Enter could insert a break still loads. */
 export const composerSendKey = writable<ComposerSendKey>('ctrl-enter');
 export const pwaPreferences = writable<PwaPreferences>(defaultPwaPreferences);
 export const themeConfig = writable<ThemeConfig | null>(null);
@@ -621,10 +621,11 @@ export async function loadPreferences(): Promise<void> {
 		if (
 			prefs.composerNewline === 'shift-enter' ||
 			prefs.composerNewline === 'ctrl-enter' ||
-			prefs.composerNewline === 'alt-enter' ||
-			prefs.composerNewline === 'enter'
+			prefs.composerNewline === 'alt-enter'
 		) {
 			composerNewline.set(prefs.composerNewline);
+		} else if (prefs.composerNewline === 'enter') {
+			composerNewline.set('shift-enter');
 		}
 		if (prefs.composerSendKey === 'ctrl-enter' || prefs.composerSendKey === 'alt-enter') {
 			composerSendKey.set(prefs.composerSendKey);

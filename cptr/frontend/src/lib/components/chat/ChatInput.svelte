@@ -9,7 +9,7 @@
 	import { createFileMention, type FileMentionAttrs } from './FileMention';
 	import { canonicalComposerText, plainTextSlice, plainTextToDoc } from '$lib/composerPlainText';
 	import { enterAction } from '$lib/composerKeys';
-	import { composerNewline, composerSendKey } from '$lib/stores';
+	import { composerNewline } from '$lib/stores';
 	import { createSlashCommandMention } from './SlashCommandMention';
 	import FileSuggestionPopup from './FileSuggestionPopup.svelte';
 	import { searchFiles } from '$lib/apis/files';
@@ -52,6 +52,9 @@
 		planApproval?: boolean;
 		onplanapprove?: () => void;
 		onplanrevise?: () => void;
+		/** Approve or revise the plan while the agent is blocked on exit-plan. */
+		onplanaskapprove?: () => void | Promise<void>;
+		onplanaskrevise?: () => void | Promise<void>;
 		queuedMessages?: { id: string; content: string }[];
 		hasChatContent?: boolean;
 		onsend: () => void;
@@ -90,6 +93,8 @@
 		planApproval = false,
 		onplanapprove,
 		onplanrevise,
+		onplanaskapprove,
+		onplanaskrevise,
 		queuedMessages = [],
 		hasChatContent = false,
 		onsend,
@@ -543,7 +548,7 @@
 					return true;
 				},
 				handleKeyDown: (_view, event) => {
-					const action = enterAction(event, get(composerNewline), get(composerSendKey), {
+					const action = enterAction(event, get(composerNewline), {
 						mobile: isMobileInput(),
 						suggestionOpen: !!popupComponent || slashSuggestionItems.length > 0
 					});
@@ -704,6 +709,8 @@
 
 	// Allow sending during streaming (message will be enqueued server-side)
 	const canSend = $derived(!!(inputText.trim() && selectedModel && !sending));
+	// Grok's exit-plan request uses the plan card, not the question card.
+	const planAsk = $derived(askUser?.item?.arguments?.kind === 'plan');
 </script>
 
 <div
@@ -723,7 +730,11 @@
 	}}
 	role="presentation"
 >
-	{#if askUser && onaskuseranswer}
+	{#if planAsk && onplanaskapprove && onplanaskrevise}
+		<div class="mx-1">
+			<PlanApprovalCard onapprove={onplanaskapprove} onrevise={onplanaskrevise} />
+		</div>
+	{:else if askUser && onaskuseranswer}
 		<div class="mx-1">
 			<AskUserCard
 				item={askUser.item}
@@ -735,7 +746,7 @@
 		</div>
 	{/if}
 
-	{#if planApproval && onplanapprove && onplanrevise}
+	{#if !planAsk && planApproval && onplanapprove && onplanrevise}
 		<div class="mx-1">
 			<PlanApprovalCard onapprove={onplanapprove} onrevise={onplanrevise} />
 		</div>

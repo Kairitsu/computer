@@ -1136,6 +1136,43 @@
 		await send();
 	}
 
+	let planAskBusy = false;
+
+	async function handlePlanAskApprove() {
+		// The agent is waiting on this answer. Approving lets it implement now.
+		if (planAskBusy) return;
+		const pending = pendingAskUser;
+		if (!pending || pending.item?.arguments?.kind !== 'plan') return;
+		planAskBusy = true;
+		planMode = false;
+		try {
+			await handleAskUserAnswer(pending.messageId, pending.item.call_id, { plan: 'Approve' }, false);
+			await persistChatSettings();
+		} catch {
+			planMode = true;
+		} finally {
+			planAskBusy = false;
+		}
+	}
+
+	async function handlePlanAskRevise() {
+		if (planAskBusy) return;
+		const pending = pendingAskUser;
+		if (!pending || pending.item?.arguments?.kind !== 'plan') return;
+		planAskBusy = true;
+		try {
+			await handleAskUserAnswer(
+				pending.messageId,
+				pending.item.call_id,
+				{ plan: 'Keep planning' },
+				false
+			);
+			chatInputEl?.focus();
+		} finally {
+			planAskBusy = false;
+		}
+	}
+
 	function handlePlanRevise() {
 		planRevisingId = planApprovalMessageId;
 		chatInputEl?.focus();
@@ -1535,6 +1572,8 @@
 					tasks={chatTasks}
 					askUser={pendingAskUser}
 					onaskuseranswer={handleAskUserAnswer}
+					onplanaskapprove={handlePlanAskApprove}
+					onplanaskrevise={handlePlanAskRevise}
 					onsend={send}
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
@@ -1657,6 +1696,8 @@
 					tasks={chatTasks}
 					askUser={pendingAskUser}
 					onaskuseranswer={handleAskUserAnswer}
+					onplanaskapprove={handlePlanAskApprove}
+					onplanaskrevise={handlePlanAskRevise}
 					planApproval={!!planApprovalMessageId && planApprovalMessageId !== planRevisingId}
 					onplanapprove={handlePlanApprove}
 					onplanrevise={handlePlanRevise}
