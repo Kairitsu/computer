@@ -36,7 +36,11 @@ from cptr.utils.agents.events import (
     AgentToolUpdate,
     AgentTurnStarted,
 )
-from cptr.utils.agents.params import agent_params
+from cptr.utils.agents.params import (
+    agent_params,
+    highest_reasoning_effort,
+    longest_context_window,
+)
 from cptr.utils.agents.prompts import session_turn_prompt_text
 from cptr.utils.identity import env_for, preexec_for
 
@@ -372,24 +376,14 @@ async def await_grok_model_catalog(
         client.setup_result["models"] = catalog
 
 
-def _session_reasoning_effort(setup: dict[str, Any]) -> str | None:
-    for option in setup.get("configOptions") or []:
-        if isinstance(option, dict) and option.get("id") == "reasoning_effort":
-            value = option.get("currentValue")
-            return value if isinstance(value, str) and value else None
-    return None
-
-
 def grok_model_options(
     setup: dict[str, Any], initialize_meta: Any = None
 ) -> dict[str, dict[str, Any]]:
-    """Reasoning efforts and context windows Grok offers per model, with Grok's defaults.
+    """Reasoning efforts and context windows Grok offers per model.
 
-    The default effort is the session's (`[models].default_reasoning_effort` in Grok's
-    config) when the model offers it, else the model's own default. The default context
-    window is the model's catalog window.
+    The advertised default is the strongest effort and the longest window, which is
+    what a new choice of this model runs with unless the chat already picked another.
     """
-    session_effort = _session_reasoning_effort(setup)
     result: dict[str, dict[str, Any]] = {}
     for item in _model_state(setup, initialize_meta).get("availableModels") or []:
         model_id = item.get("modelId") if isinstance(item, dict) else None
@@ -398,7 +392,6 @@ def grok_model_options(
         meta = item.get("_meta") if isinstance(item.get("_meta"), dict) else {}
 
         efforts: list[dict[str, str]] = []
-        recommended = None
         if meta.get("supportsReasoningEffort") is True:
             for raw in meta.get("reasoningEfforts") or []:
                 value = raw.get("value") if isinstance(raw, dict) else None
@@ -413,27 +406,17 @@ def grok_model_options(
                         "description": description if isinstance(description, str) else "",
                     }
                 )
-                if raw.get("default") is True:
-                    recommended = value
-        values = [effort["value"] for effort in efforts]
-        default_effort = next(
-            (
-                value
-                for value in (session_effort, meta.get("reasoningEffort"), recommended)
-                if value in values
-            ),
-            values[0] if values else None,
-        )
 
         windows = [
             window
             for window in (_positive_int(raw) for raw in meta.get("contextWindows") or [])
             if window
         ]
-        default_window = _positive_int(meta.get("totalContextTokens"))
-        if default_window and default_window not in windows:
-            windows.insert(0, default_window)
-        default_window = default_window or (windows[0] if windows else None)
+        catalog_window = _positive_int(meta.get("totalContextTokens"))
+        if catalog_window and catalog_window not in windows:
+            windows.insert(0, catalog_window)
+        default_effort = highest_reasoning_effort(efforts)
+        default_window = longest_context_window(windows) or catalog_window
 
         result[model_id.strip()] = {
             "reasoning_efforts": efforts,
@@ -449,10 +432,10 @@ async def _apply_session_settings(
 ) -> int | None:
     """Carry the composer's model, context window and reasoning effort into the session.
 
-    Only values Grok offers for the model are sent, so a leftover choice made for another
-    model falls back to Grok's own default. `grok agent --reasoning-effort` does not reach
-    ACP sessions, which is why the effort goes through session/set_config_option.
-    Returns the context window the session runs with, when Grok lists it.
+    Only values Grok offers for the model are sent. A missing or leftover choice falls
+    back to the strongest effort and the longest window. `grok agent --reasoning-effort`
+    does not reach ACP sessions, which is why the effort goes through
+    session/set_config_option. Returns the context window the session runs with.
     """
     setup = client.setup_result
     initialize_meta = client.initialize_result.get("_meta")
@@ -462,15 +445,21 @@ async def _apply_session_settings(
         target = current if isinstance(current, str) else ""
     options = grok_model_options(setup, initialize_meta).get(target, {})
 
+    windows = options.get("context_windows") or []
     window = _positive_int(chat_params.get("context_window"))
-    meta = {"contextWindow": window} if window in options.get("context_windows", []) else None
+    if window not in windows:
+        window = longest_context_window(windows)
+    meta = {"contextWindow": window} if window else None
     if target and (model != "default" or meta):
         await client.set_model(target, meta=meta)
 
+    efforts = options.get("reasoning_efforts") or []
     effort = chat_params.get("reasoning_effort")
-    if any(option["value"] == effort for option in options.get("reasoning_efforts", [])):
+    if not any(option["value"] == effort for option in efforts):
+        effort = highest_reasoning_effort(efforts)
+    if effort:
         await client.set_config_option("reasoning_effort", effort)
-    return meta["contextWindow"] if meta else options.get("default_context_window")
+    return window or options.get("default_context_window")
 
 
 # ── One live `grok agent` process per chat ──────────────────

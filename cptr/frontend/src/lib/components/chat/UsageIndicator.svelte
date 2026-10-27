@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Composer chip with the current context fullness and the selected agent's quota.
-	 * Click for details: context tokens, SuperGrok or local budget, CodeBuddy credits.
+	 * Click for details: context tokens, SuperGrok or local budget, CodeBuddy remaining credits.
 	 */
 	import type { ContextUsage } from '$lib/apis/chat';
 	import {
@@ -59,14 +59,6 @@
 			: null;
 	});
 	const tone = (percent: number) => (percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'ok');
-
-	function formatDay(seconds: number | null) {
-		if (!seconds) return '';
-		return new Date(seconds * 1000).toLocaleDateString(i18next.language, {
-			month: 'short',
-			day: 'numeric'
-		});
-	}
 
 	function formatReset(seconds: number | null) {
 		if (!seconds) return '';
@@ -180,7 +172,6 @@
 				{#if $quotaSummary.source === 'codebuddy'}
 					{@const summary = $quotaSummary}
 					{@const balance = summary.codebuddy?.balance}
-					{@const usage = summary.codebuddy?.usage}
 					<div class="flex items-baseline justify-between gap-2">
 						<span class="usage-meta truncate">
 							CodeBuddy{summary.codebuddy?.nickname ? ` · ${summary.codebuddy.nickname}` : ''}
@@ -212,47 +203,10 @@
 								· {$t('usageIndicator.resetsAt', { time: formatReset(summary.resetsAt) })}
 							{/if}
 						</p>
-						{#each balance.packages as pkg (pkg.id)}
-							<div class="usage-meta flex justify-between gap-2 tabular-nums">
-								<span class="min-w-0 truncate" title={pkg.label}>{pkg.label}</span>
-								<span class="shrink-0"
-									>{$t('usageIndicator.used', { percent: Math.round(pkg.used_percent) })}</span
-								>
-							</div>
-							<div class="usage-meta flex justify-between gap-2 tabular-nums">
-								<span>
-									{$t('usageIndicator.codebuddyPackageRemain', {
-										remain: formatCredits(pkg.remain),
-										total: formatCredits(pkg.total)
-									})}
-								</span>
-								{#if pkg.resets_at}
-									<span class="shrink-0"
-										>{$t('usageIndicator.codebuddyExpires', {
-											time: formatDay(pkg.resets_at)
-										})}</span
-									>
-								{/if}
-							</div>
-						{/each}
 					{:else if summary.signedIn}
 						<p class="usage-meta">{$t('usageIndicator.codebuddyQuotaError')}</p>
 					{:else}
 						<p class="usage-meta">{$t('usageIndicator.codebuddySignedOut')}</p>
-					{/if}
-					{#if usage}
-						<p class="usage-meta">{$t('usageIndicator.codebuddyLocalUsage')}</p>
-						{#each ['day', 'week', 'month'] as const as period (period)}
-							<div class="usage-meta flex justify-between tabular-nums">
-								<span>{$t(`usageIndicator.period.${period}`)}</span>
-								<span>
-									{$t('usageIndicator.codebuddyPeriodUsage', {
-										credits: formatCredits(usage[period].credits),
-										replies: usage[period].replies
-									})}
-								</span>
-							</div>
-						{/each}
 					{/if}
 					{#if summary.codebuddy?.usage_url}
 						<a

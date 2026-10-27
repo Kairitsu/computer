@@ -44,7 +44,11 @@ from cptr.utils.agents.events import (
     AgentToolUpdate,
     AgentTurnStarted,
 )
-from cptr.utils.agents.params import agent_params
+from cptr.utils.agents.params import (
+    agent_params,
+    highest_reasoning_effort,
+    longest_context_window,
+)
 from cptr.utils.agents.prompts import session_turn_prompt_text
 from cptr.utils.identity import env_for, preexec_for
 
@@ -197,17 +201,16 @@ def _model_settings(config_options: Any, max_input_tokens: Any = None) -> dict[s
         for window in (_positive_int(choice["value"]) for choice in _choices(window_option))
         if window
     ]
-    default_window = _positive_int((window_option or {}).get("currentValue")) or _positive_int(
+    current_window = _positive_int((window_option or {}).get("currentValue")) or _positive_int(
         max_input_tokens
     )
-    if default_window and default_window not in windows:
-        windows.insert(0, default_window)
+    if current_window and current_window not in windows:
+        windows.insert(0, current_window)
     return {
         "reasoning_efforts": efforts,
-        # None leaves the effort to the model (CodeBuddy's "enabled").
-        "default_reasoning_effort": None,
+        "default_reasoning_effort": highest_reasoning_effort(efforts),
         "context_windows": windows,
-        "default_context_window": default_window,
+        "default_context_window": longest_context_window(windows) or current_window,
     }
 
 
@@ -492,25 +495,25 @@ async def _apply_settings(
 ) -> int | None:
     """Put the session on the chat's model, effort, window and permission mode.
 
-    session/load and a model switch reset the effort and window to the model's
-    defaults, so they are set again after the model. Only values CodeBuddy offers for
-    the model are sent. Returns the window the session runs with.
+    session/load and a model switch reset the effort and window, so they are set
+    again after the model. A missing or leftover choice uses the strongest effort and
+    the longest window CodeBuddy lists. Returns the window the session runs with.
     """
     request = {"sessionId": client.session_id, "configId": "model", "value": model}
     result = await client.request("session/set_config_option", request)
     options = _model_settings(result.get("configOptions"))
+    efforts = options["reasoning_efforts"]
     effort = params.get("reasoning_effort")
-    if any(choice["value"] == effort for choice in options["reasoning_efforts"]):
+    if not any(choice["value"] == effort for choice in efforts):
+        effort = highest_reasoning_effort(efforts)
+    if effort:
         await client.set_config_option("thought_level", effort)
+    windows = options["context_windows"]
     window = _positive_int(params.get("context_window"))
-    if (
-        window
-        and window != options["default_context_window"]
-        and (window in options["context_windows"])
-    ):
+    if window not in windows:
+        window = longest_context_window(windows) or options.get("default_context_window")
+    if window and (not windows or window in windows):
         await client.set_config_option("context_window", str(window))
-    else:
-        window = options["default_context_window"]
     await client.request("session/set_mode", {"sessionId": client.session_id, "modeId": mode})
     return window
 

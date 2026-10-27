@@ -2,12 +2,13 @@
 	/**
 	 * Composer model hub: one chip for model + reasoning effort + context window,
 	 * modelled on Grok App's combined model/effort menu. When the model's agent CLI
-	 * lists its efforts / context windows (Grok, CodeBuddy), the hub offers exactly those,
-	 * with the CLI's defaults.
+	 * lists its efforts / context windows (Grok, CodeBuddy), the hub offers exactly those.
+	 * Switching models selects the strongest effort and the longest window.
 	 */
 	import { tick } from 'svelte';
 	import type { ReasoningEffort } from '$lib/apis/chat';
-	import { chatModels } from '$lib/stores/chat';
+	import { highestEffort, longestContext } from '$lib/modelCaps';
+	import { chatModels, profileOfModel } from '$lib/stores/chat';
 	import { formatTokens } from '$lib/stores/quota';
 	import { t } from '$lib/i18n';
 	import Icon from '../Icon.svelte';
@@ -19,6 +20,8 @@
 		contextWindow?: number | null;
 		onchange?: () => void;
 		onclose?: () => void;
+		/** Save the current agent's settings before a different agent's model is shown. */
+		onbeforeprofilechange?: (profile: string, modelId: string) => void;
 	}
 
 	let {
@@ -26,12 +29,13 @@
 		reasoningEffort = $bindable(null),
 		contextWindow = $bindable(null),
 		onchange,
-		onclose
+		onclose,
+		onbeforeprofilechange
 	}: Props = $props();
 
 	type Page = 'main' | 'models' | 'effort' | 'context';
 
-	const EFFORTS: (ReasoningEffort | null)[] = [null, 'low', 'medium', 'high', 'xhigh'];
+	const FALLBACK_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 	const EFFORT_LEVELS: Record<string, number> = {
 		minimal: 0,
 		low: 1,
@@ -56,25 +60,20 @@
 	const supportsEffort = $derived(model?.supports_reasoning_effort === true);
 	const cliEfforts = $derived(model?.reasoning_efforts?.length ? model.reasoning_efforts : null);
 	const cliContextWindows = $derived(model?.context_windows?.length ? model.context_windows : null);
-	// What the CLI will run with: the composer's choice when it offers it, else its default.
+	// A choice the model does not offer shows as its strongest effort and longest window.
 	const effectiveEffort = $derived(
 		cliEfforts && !cliEfforts.some((option) => option.value === reasoningEffort)
-			? (model?.default_reasoning_effort ?? null)
+			? highestEffort(model)
 			: reasoningEffort
 	);
 	const effectiveContextWindow = $derived(
 		cliContextWindows && !(contextWindow && cliContextWindows.includes(contextWindow))
-			? (model?.context_window ?? null)
-			: contextWindow
+			? longestContext(model)
+			: (contextWindow ?? model?.context_window ?? null)
 	);
-	const effortLabel = $derived(effortName(effectiveEffort));
-	const defaultContextLabel = $derived(
-		model?.context_window ? formatTokens(model.context_window) : $t('effort.default')
-	);
+	const effortLabel = $derived(effectiveEffort ? effortName(effectiveEffort) : '');
 	const contextLabel = $derived(
-		effectiveContextWindow
-			? formatTokens(effectiveContextWindow)
-			: `${$t('effort.default')} · ${defaultContextLabel}`
+		effectiveContextWindow ? formatTokens(effectiveContextWindow) : '—'
 	);
 	const filteredModels = $derived(
 		search.trim()
@@ -128,24 +127,20 @@
 	}
 
 	function selectModel(id: string) {
-		const next = $chatModels.find((m) => m.id === id);
-		const sameAgent = next?.profile_id === model?.profile_id;
-		selectedModel = id;
-		// Another agent's model brings that agent's own settings (see ChatPanel).
-		if (!sameAgent) {
-			onchange?.();
+		if (id === selectedModel) {
 			page = 'main';
 			return;
 		}
-		const efforts = next?.reasoning_efforts;
-		if (
-			!next?.supports_reasoning_effort ||
-			(efforts?.length && !efforts.some((option) => option.value === reasoningEffort))
-		) {
-			reasoningEffort = null;
+		const next = $chatModels.find((m) => m.id === id);
+		const nextProfile = profileOfModel(id);
+		const sameAgent = nextProfile === profileOfModel(selectedModel);
+		// Another agent's model keeps its permission mode, then takes that model's top caps.
+		if (!sameAgent && nextProfile) onbeforeprofilechange?.(nextProfile, id);
+		else {
+			reasoningEffort = highestEffort(next);
+			contextWindow = longestContext(next);
 		}
-		const windows = next?.context_windows;
-		if (contextWindow && windows?.length && !windows.includes(contextWindow)) contextWindow = null;
+		selectedModel = id;
 		onchange?.();
 		page = 'main';
 	}
@@ -231,7 +226,9 @@
 					<Icon name="brain" size={14} />
 					<span class="hub-row-label">{$t('modelHub.effort')}</span>
 					<span class="hub-row-value"
-						>{supportsEffort ? effortLabel : $t('modelHub.effortUnsupportedShort')}</span
+						>{supportsEffort
+							? effortLabel || '—'
+							: $t('modelHub.effortUnsupportedShort')}</span
 					>
 					<Icon name="chevron-right" size={12} class="shrink-0 opacity-60" />
 				</button>
@@ -301,20 +298,6 @@
 						{/each}
 					</div>
 				{:else if page === 'effort' && cliEfforts}
-					{#if model?.default_reasoning_effort == null}
-						<!-- The CLI's own default for the model is not one of its listed efforts. -->
-						<button
-							type="button"
-							class="hub-option"
-							class:active={effectiveEffort === null}
-							onclick={() => selectEffort(null)}
-						>
-							<span class="flex-1 text-left">{$t('effort.default')}</span>
-							{#if effectiveEffort === null}
-								<Icon name="check" size={12} class="shrink-0 hub-check" />
-							{/if}
-						</button>
-					{/if}
 					{#each cliEfforts as option (option.value)}
 						<button
 							type="button"
@@ -323,15 +306,7 @@
 							onclick={() => selectEffort(option.value)}
 						>
 							<span class="flex-1 min-w-0 text-left">
-								<span class="block"
-									>{effortName(
-										option.value
-									)}{#if option.value === model?.default_reasoning_effort}<span
-											class="ml-1 text-gray-400"
-										>
-											· {$t('effort.default')}</span
-										>{/if}</span
-								>
+								<span class="block">{effortName(option.value)}</span>
 								{#if option.description}
 									<span class="block text-[0.625rem] leading-snug opacity-70"
 										>{option.description}</span
@@ -354,7 +329,7 @@
 						{$t('modelHub.cliEffortHint')}
 					</p>
 				{:else if page === 'effort'}
-					{#each EFFORTS as effort}
+					{#each FALLBACK_EFFORTS as effort}
 						<button
 							type="button"
 							class="hub-option"
@@ -362,10 +337,10 @@
 							onclick={() => selectEffort(effort)}
 						>
 							<span class="flex-1 text-left">{effortName(effort)}</span>
-							{#if effort}
+							{#if EFFORT_LEVELS[effort]}
 								<span class="effort-bars" aria-hidden="true">
 									{#each [1, 2, 3, 4] as level}
-										<span class:on={level <= EFFORTS.indexOf(effort)}></span>
+										<span class:on={level <= EFFORT_LEVELS[effort]}></span>
 									{/each}
 								</span>
 							{/if}
@@ -385,13 +360,7 @@
 							class:active={effectiveContextWindow === value}
 							onclick={() => selectContext(value)}
 						>
-							<span class="flex-1 text-left tabular-nums"
-								>{formatTokens(value)}{#if value === model?.context_window}<span
-										class="ml-1 text-gray-400"
-									>
-										· {$t('effort.default')}</span
-									>{/if}</span
-							>
+							<span class="flex-1 text-left tabular-nums">{formatTokens(value)}</span>
 							{#if effectiveContextWindow === value}
 								<Icon name="check" size={12} class="shrink-0 hub-check" />
 							{/if}
@@ -401,29 +370,15 @@
 						{$t('modelHub.cliContextHint')}
 					</p>
 				{:else}
-					<button
-						type="button"
-						class="hub-option"
-						class:active={!contextWindow}
-						onclick={() => selectContext(null)}
-					>
-						<span class="flex-1 text-left"
-							>{$t('effort.default')}
-							<span class="text-gray-400">· {defaultContextLabel}</span></span
-						>
-						{#if !contextWindow}
-							<Icon name="check" size={12} class="shrink-0 hub-check" />
-						{/if}
-					</button>
 					{#each CONTEXT_WINDOWS as value}
 						<button
 							type="button"
 							class="hub-option"
-							class:active={contextWindow === value}
+							class:active={effectiveContextWindow === value}
 							onclick={() => selectContext(value)}
 						>
 							<span class="flex-1 text-left tabular-nums">{formatTokens(value)}</span>
-							{#if contextWindow === value}
+							{#if effectiveContextWindow === value}
 								<Icon name="check" size={12} class="shrink-0 hub-check" />
 							{/if}
 						</button>

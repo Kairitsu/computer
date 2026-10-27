@@ -72,6 +72,7 @@
 		onqueueedit?: (id: string) => void;
 		onqueuedelete?: (id: string) => void;
 		onsettingschange?: () => void;
+		onbeforeprofilechange?: (profile: string, modelId: string) => void;
 		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
 		onpermissionmodechange?: (mode: string) => void;
 	}
@@ -107,6 +108,7 @@
 		onqueueedit,
 		onqueuedelete,
 		onsettingschange,
+		onbeforeprofilechange,
 		ontoolapprovalchange,
 		onpermissionmodechange
 	}: Props = $props();
@@ -938,6 +940,7 @@
 					bind:reasoningEffort
 					bind:contextWindow
 					onchange={onsettingschange}
+					{onbeforeprofilechange}
 					onclose={focusAfterModelSelectorClose}
 				/>
 			</div>

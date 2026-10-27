@@ -747,7 +747,7 @@ async def _get_context_leaf_message_id(chat) -> str | None:
 def _agent_context_window(app_state, model_id: str | None, params: object) -> int | None:
     """Window an agent that lists its context windows (Grok, CodeBuddy) runs the chat with.
 
-    A chosen window the CLI does not offer is not sent to it, so the CLI default applies.
+    A chosen window the CLI does not offer falls back to the longest window it lists.
     """
     from cptr.utils.agents.detection import cached_agent_model_options
     from cptr.utils.agents.models import parse_agent_model_id

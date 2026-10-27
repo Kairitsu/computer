@@ -5,9 +5,10 @@ read to call CodeBuddy's own billing endpoint and to tell whether the login is s
 valid. It is never logged or returned.
 
 The balance is `POST /v2/billing/meter/get-user-resource` on the login's site
-(www.codebuddy.cn for this install). Each active credit package is one row: size,
-used, remaining, and when it expires. `usage` is separate: the credits CodeBuddy
-reported for model calls made from this server's chats.
+(www.codebuddy.cn for this install). Each active credit package is one row.
+`CapacityUsed` stays at the package face value and does not move as credits are
+spent; the current cycle (`CycleCapacity*`) is what decreases. `usage` is separate:
+the credits CodeBuddy reported for model calls made from this server's chats.
 """
 
 from __future__ import annotations
@@ -133,12 +134,44 @@ async def usage_summary(user_id: str, now: datetime | None = None) -> dict[str, 
     return periods
 
 
-def _amount(account: dict[str, Any], precise: str, whole: str) -> float:
+def _amount(account: dict[str, Any], precise: str, whole: str) -> float | None:
+    """A credit amount. Precise fields arrive as strings; missing is not zero."""
     for key in (precise, whole):
         value = account.get(key)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
             return float(value)
-    return 0.0
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                continue
+            try:
+                return float(text)
+            except ValueError:
+                continue
+    return None
+
+
+def _package_figures(account: dict[str, Any]) -> tuple[float, float, float]:
+    """Size, used, and remaining for the cycle that spending actually draws down."""
+    cycle_total = _amount(account, "CycleCapacitySizePrecise", "CycleCapacitySize")
+    cycle_used = _amount(account, "CycleCapacityUsedPrecise", "CycleCapacityUsed")
+    if cycle_used is None:
+        cycle_used = _amount(account, "ActualCycleCapacityUsed", "ActualCycleCapacityUsed")
+    cycle_remain = _amount(account, "CycleCapacityRemainPrecise", "CycleCapacityRemain")
+    if (
+        cycle_total is not None
+        and cycle_total > 0
+        and cycle_used is not None
+        and cycle_remain is not None
+    ):
+        return cycle_total, cycle_used, cycle_remain
+    return (
+        _amount(account, "CapacitySizePrecise", "CapacitySize") or 0.0,
+        _amount(account, "CapacityUsedPrecise", "CapacityUsed") or 0.0,
+        _amount(account, "CapacityRemainPrecise", "CapacityRemain") or 0.0,
+    )
 
 
 def _round_credits(value: float) -> float:
@@ -190,9 +223,7 @@ def parse_user_resource(payload: Any) -> dict[str, Any]:
     for index, account in enumerate(accounts):
         if not isinstance(account, dict) or account.get("Status") not in (0, "0"):
             continue
-        total = _amount(account, "CapacitySizePrecise", "CapacitySize")
-        used = _amount(account, "CapacityUsedPrecise", "CapacityUsed")
-        remain = _amount(account, "CapacityRemainPrecise", "CapacityRemain")
+        total, used, remain = _package_figures(account)
         if total <= 0 and used <= 0 and remain <= 0:
             continue
         name = account.get("PackageName")

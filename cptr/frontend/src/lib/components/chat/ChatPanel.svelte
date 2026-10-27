@@ -45,6 +45,7 @@
 		toolApprovalMode as defaultToolApprovalMode,
 		widescreenMode
 	} from '$lib/stores';
+	import { highestEffort, longestContext } from '$lib/modelCaps';
 	import { getPathDisplayName } from '$lib/utils/paths';
 	import {
 		BOTTOM_SLACK_PX,
@@ -117,7 +118,7 @@
 		return settings;
 	}
 
-	/** New-chat settings: the agent's last choices, else its CLI defaults. */
+	/** New-chat settings: the agent's last choices. An empty effort or window is filled later. */
 	function defaultAgentSettings(profile: string): AgentSendParams {
 		if (profile !== GROK_PROFILE) return { ...(get(agentDefaults)[profile] ?? {}) };
 		const settings: AgentSendParams = { tool_approval_mode: get(defaultToolApprovalMode) };
@@ -128,16 +129,51 @@
 		return settings;
 	}
 
-	function showAgentSettings(profile: string) {
+	function showAgentSettings(profile: string, modelId = selectedModel) {
 		settingsProfile = profile;
 		const settings = agentSettings[profile] ?? {};
 		toolApprovalMode = settings.tool_approval_mode ?? get(defaultToolApprovalMode);
 		permissionMode = settings.permission_mode ?? null;
 		reasoningEffort = settings.reasoning_effort ?? null;
 		contextWindow = settings.context_window ?? null;
+		fillUnsetCaps(modelId);
 	}
 
-	// Picking another agent's model shows that agent's settings, starting from its defaults.
+	/** A saved effort or window stays. An empty or impossible one becomes the model's top cap. */
+	function fillUnsetCaps(modelId: string) {
+		const model = get(chatModels).find((item) => item.id === modelId);
+		const efforts = model?.reasoning_efforts ?? [];
+		const windows = model?.context_windows ?? [];
+		if (
+			efforts.length &&
+			model?.supports_reasoning_effort !== false &&
+			(!reasoningEffort || !efforts.some((option) => option.value === reasoningEffort))
+		) {
+			reasoningEffort = highestEffort(model);
+		}
+		if (windows.length && (!contextWindow || !windows.includes(contextWindow))) {
+			contextWindow = longestContext(model);
+		}
+	}
+
+	/** Keep the other agent's permission mode, then take this model's strongest caps. */
+	function prepareProfileSwitch(profile: string, modelId: string) {
+		if (settingsProfile && settingsProfile !== profile) {
+			agentSettings[settingsProfile] = currentAgentSettings();
+		}
+		const model = get(chatModels).find((item) => item.id === modelId);
+		const previous = agentSettings[profile] ?? defaultAgentSettings(profile);
+		const effort = highestEffort(model);
+		const window = longestContext(model);
+		agentSettings[profile] = {
+			...previous,
+			...(effort ? { reasoning_effort: effort } : {}),
+			...(window ? { context_window: window } : {})
+		};
+		showAgentSettings(profile, modelId);
+	}
+
+	// A model change the menu did not prepare still shows that agent's saved settings.
 	$effect(() => {
 		const profile = profileOfModel(selectedModel);
 		untrack(() => {
@@ -662,7 +698,7 @@
 		resetChatSettings();
 		const params = meta?.params && typeof meta.params === 'object' ? meta.params : {};
 		planMode = params.plan_mode === true;
-		// Existing chats keep what each agent was sent with; missing = the CLI's default.
+		// Existing chats keep an effort or window that was sent. An empty one is the model's top cap.
 		agentSettings = {};
 		if (params.agents && typeof params.agents === 'object') {
 			for (const [profile, saved] of Object.entries(params.agents)) {
@@ -1577,6 +1613,7 @@
 					onsend={send}
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
+					onbeforeprofilechange={prepareProfileSwitch}
 					ontoolapprovalchange={handleToolApprovalModeChange}
 					onpermissionmodechange={handlePermissionModeChange}
 					{queuedMessages}
@@ -1705,6 +1742,7 @@
 					onfork={handleForkChat}
 					onplan={handlePlanCommand}
 					onsettingschange={handleSettingsChange}
+					onbeforeprofilechange={prepareProfileSwitch}
 					ontoolapprovalchange={handleToolApprovalModeChange}
 					onpermissionmodechange={handlePermissionModeChange}
 					onstatus={handleStatusCommand}
