@@ -4,7 +4,8 @@
 	 * When the model's agent CLI lists its efforts / context windows (Grok, CodeBuddy),
 	 * the hub offers exactly those, and effort names are the CLI values themselves.
 	 * Switching models selects the strongest effort and the longest window.
-	 * After the chat has a user message, the chip only displays the current choice.
+	 * After the chat has a user message, the same menu still opens, but model,
+	 * effort, and context only display their current values.
 	 */
 	import { tick } from 'svelte';
 	import type { ReasoningEffort } from '$lib/apis/chat';
@@ -23,7 +24,7 @@
 		onclose?: () => void;
 		/** Save the current agent's settings before a different agent's model is shown. */
 		onbeforeprofilechange?: (profile: string, modelId: string) => void;
-		/** A sent chat shows the current model, effort, and context, and cannot change them. */
+		/** A sent chat can open the menu, but model, effort, and context stay as they are. */
 		locked?: boolean;
 	}
 
@@ -119,7 +120,6 @@
 	}
 
 	function toggle() {
-		if (locked) return;
 		if (open) return close();
 		open = true;
 		page = 'main';
@@ -132,6 +132,7 @@
 	}
 
 	function selectModel(id: string) {
+		if (locked) return;
 		if (id === selectedModel) {
 			page = 'main';
 			return;
@@ -151,12 +152,14 @@
 	}
 
 	function selectEffort(effort: ReasoningEffort | null) {
+		if (locked) return;
 		reasoningEffort = effort;
 		onchange?.();
 		page = 'main';
 	}
 
 	function selectContext(value: number | null) {
+		if (locked) return;
 		contextWindow = value;
 		onchange?.();
 		page = 'main';
@@ -192,41 +195,51 @@
 	}
 </script>
 
-{#if locked}
-	<div class="hub-chip hub-chip-locked" title={lockedTitle}>
-		<Icon name="flash" size={13} class="shrink-0" />
-		<span class="truncate max-w-[11rem]">{triggerLabel}</span>
-		{#if supportsEffort && effortLabel}
-			<span class="shrink-0">{effortLabel}</span>
-		{/if}
-		{#if effectiveContextWindow}
-			<span class="shrink-0 tabular-nums">{contextLabel}</span>
-		{/if}
-	</div>
-{:else}
-	<button
-		bind:this={btnEl}
-		type="button"
-		class="hub-chip"
-		aria-haspopup="menu"
-		aria-expanded={open}
-		title={triggerLabel}
-		onclick={toggle}
-	>
-		<Icon name="flash" size={13} class="shrink-0" />
-		<span class="truncate max-w-[11rem]">{triggerLabel}</span>
-		{#if supportsEffort && effortLabel}
-			<span class="shrink-0">{effortLabel}</span>
-		{/if}
-		{#if $chatModels.length > 0}
-			<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
-		{/if}
-	</button>
-{/if}
+<button
+	bind:this={btnEl}
+	type="button"
+	class="hub-chip"
+	aria-haspopup="menu"
+	aria-expanded={open}
+	title={locked ? lockedTitle : triggerLabel}
+	onclick={toggle}
+>
+	<Icon name="flash" size={13} class="shrink-0" />
+	<span class="truncate max-w-[11rem]">{triggerLabel}</span>
+	{#if supportsEffort && effortLabel}
+		<span class="shrink-0">{effortLabel}</span>
+	{/if}
+	{#if $chatModels.length > 0}
+		<Icon name="chevron-down" size={11} class="shrink-0 opacity-60" />
+	{/if}
+</button>
 
-{#if !locked && open && btnEl}
+{#if open && btnEl}
 	<Popover anchor={btnEl} align="end" width="16rem" onclose={close}>
-		{#if page === 'main'}
+		{#if locked}
+			<div class="hub-page">
+				<div class="hub-row hub-row-static">
+					<Icon name="cube" size={14} />
+					<span class="hub-row-label">{$t('modelHub.model')}</span>
+					<span class="hub-row-value">{model?.name ?? '—'}</span>
+				</div>
+				<div
+					class="hub-row hub-row-static"
+					title={supportsEffort ? undefined : $t('modelHub.effortUnsupported')}
+				>
+					<Icon name="brain" size={14} />
+					<span class="hub-row-label">{$t('modelHub.effort')}</span>
+					<span class="hub-row-value"
+						>{supportsEffort ? effortLabel || '—' : $t('modelHub.effortUnsupportedShort')}</span
+					>
+				</div>
+				<div class="hub-row hub-row-static">
+					<Icon name="list" size={14} />
+					<span class="hub-row-label">{$t('modelHub.context')}</span>
+					<span class="hub-row-value">{contextLabel}</span>
+				</div>
+			</div>
+		{:else if page === 'main'}
 			<div class="hub-page">
 				<button type="button" class="hub-row" onclick={() => showPage('models')}>
 					<Icon name="cube" size={14} />
@@ -435,12 +448,8 @@
 		transition: border-color 0.1s;
 	}
 
-	.hub-chip:hover:not(.hub-chip-locked) {
+	.hub-chip:hover {
 		border-color: color-mix(in oklab, var(--app-accent) 40%, transparent);
-	}
-
-	.hub-chip-locked {
-		cursor: default;
 	}
 
 	.hub-page {
@@ -479,11 +488,15 @@
 			color 0.075s;
 	}
 
-	.hub-row:hover:not(:disabled),
+	.hub-row:hover:not(:disabled):not(.hub-row-static),
 	.hub-option:hover,
 	.hub-option.highlighted {
 		background: var(--app-hover);
 		color: var(--app-fg);
+	}
+
+	.hub-row-static {
+		cursor: default;
 	}
 
 	.hub-row:disabled {

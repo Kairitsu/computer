@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.5.6] - 2026-10-27
+
+### Changed
+
+- **发出后仍可点开查看当前设定** 消息发出之后，点输入框旁的模型，会向上列出当前的模型、思考强度和上下文。这三项只显示现在的值，不能点进去改，旁边也不再有箭头。
+
 ## [5.5.5] - 2026-10-27
 
 ### Changed
