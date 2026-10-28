@@ -27,6 +27,7 @@ from cptr.utils.agents.acp import (
     acp_event_stream,
     acp_models_from_setup,
     acp_permission_events,
+    acp_permission_outcome,
     acp_text_from_update,
     acp_thought_from_update,
     acp_tool_from_update,
@@ -67,6 +68,9 @@ EXTENSION_REQUESTS = frozenset({QUESTION_METHOD, ACP_PERMISSION_METHOD})
 AUTH_DIR = Path(".local/share/CodeBuddyExtension/Data/Public/auth")
 DEFAULT_PERMISSION_MODE = "default"
 PLAN_MODE = "plan"
+# CodeBuddy lists this mode. Plan mode does not: its strategy table has no
+# full-access entry, so a plan turn falls back to asking for every command.
+FULL_ACCESS = "fullAccess"
 # Agent phases in which an update's `requestId` is the prompt's stored id.
 MODEL_PHASES = frozenset({"model_requesting", "model_streaming", "model_done"})
 # thought_level value for the model's own default effort.
@@ -665,6 +669,16 @@ def _exit_plan_request(params: dict[str, Any]) -> bool:
     )
 
 
+def _plan_grants_full_access(mode: str, permission: str) -> bool:
+    """The menu's full access applies during planning, not only after it.
+
+    Plan mode delegates each check to the mode from before the plan. Full access
+    is not one of those strategies, so CodeBuddy asks for every command. The
+    chosen permission still means those commands may run.
+    """
+    return mode == PLAN_MODE and permission == FULL_ACCESS
+
+
 def _plan_text(params: dict[str, Any]) -> str:
     meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
     tool_call = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
@@ -853,20 +867,27 @@ async def run_codebuddy_agent(
                 params_ = event.get("params") if isinstance(event.get("params"), dict) else {}
                 if "id" in event and method == ACP_PERMISSION_METHOD:
                     if not _exit_plan_request(params_):
+                        if _plan_grants_full_access(mode, permission):
+                            await client.respond(
+                                event.get("id"), acp_permission_outcome(params_, True)
+                            )
+                            continue
                         async for permission_event in acp_permission_events(client, event):
                             yield permission_event
                         continue
-                    leaves_plan = False
                     async for plan_event in _plan_approval_events(client, event):
                         yield plan_event
                         answer = (getattr(plan_event, "answers", None) or {}).get("plan")
-                        leaves_plan = answer in (PLAN_APPROVE_LABEL, PLAN_EXIT_LABEL)
-                    if leaves_plan and live.mode == PLAN_MODE:
-                        # Back to the permission the menu still shows. CodeBuddy also
-                        # restores the mode it left, which was set to this permission.
-                        restore = live.pre_plan_mode or permission
-                        live.mode = agent_mode = restore
-                        await _set_mode(client, restore)
+                        # Switch while CodeBuddy is still waiting on this answer.
+                        # Once it accepts, ExitPlanMode restores the mode it froze
+                        # on entering the plan, which is often "ask every time".
+                        if (
+                            answer in (PLAN_APPROVE_LABEL, PLAN_EXIT_LABEL)
+                            and live.mode == PLAN_MODE
+                        ):
+                            restore = live.pre_plan_mode or permission
+                            live.mode = agent_mode = restore
+                            await _set_mode(client, restore)
                     continue
                 if "id" in event and method == QUESTION_METHOD:
                     async for ask_event in _question_events(client, event):

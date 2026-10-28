@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.5.8] - 2026-10-28
+
+### Fixed
+
+- **计划时按所选权限执行命令** 同时选择完全访问和计划模式时，计划过程中的命令不再逐条询问。批准之后按完全访问去做，不再退回每次询问。
+
 ## [5.5.7] - 2026-10-28
 
 ### Fixed
