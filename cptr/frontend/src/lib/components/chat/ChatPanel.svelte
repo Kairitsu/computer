@@ -106,13 +106,11 @@
 	let contextWindow = $state<number | null>(null);
 	let settingsProfile = $state('');
 	let agentSettings: Record<string, AgentSendParams> = {};
-	// CodeBuddy's mode before `/plan` switched it to plan, to switch back to.
-	let modeBeforePlan: string | null = null;
 
 	function currentAgentSettings(): AgentSendParams {
 		const settings: AgentSendParams = {};
 		if (settingsProfile === GROK_PROFILE) settings.tool_approval_mode = toolApprovalMode;
-		else if (permissionMode) settings.permission_mode = permissionMode;
+		else if (permissionMode && permissionMode !== 'plan') settings.permission_mode = permissionMode;
 		if (reasoningEffort) settings.reasoning_effort = reasoningEffort;
 		if (contextWindow) settings.context_window = contextWindow;
 		return settings;
@@ -570,7 +568,12 @@
 			contextUsage = data.context_usage;
 		}
 		// The agent switched its own permission mode (CodeBuddy leaving plan mode).
-		if (data.agent_settings?.profile_id && data.agent_settings.permission_mode) {
+		// Plan is the + menu switch, so a report of plan does not replace the menu.
+		if (
+			data.agent_settings?.profile_id &&
+			data.agent_settings.permission_mode &&
+			data.agent_settings.permission_mode !== 'plan'
+		) {
 			const { profile_id, permission_mode } = data.agent_settings;
 			agentSettings[profile_id] = { ...agentSettings[profile_id], permission_mode };
 			if (profile_id === settingsProfile) permissionMode = permission_mode;
@@ -665,7 +668,6 @@
 		if (dm) selectedModel = dm;
 		else if (models.length) selectedModel = models[0].id;
 		planMode = false;
-		modeBeforePlan = null;
 		const profile = profileOfModel(selectedModel);
 		agentSettings = { [profile]: defaultAgentSettings(profile) };
 		showAgentSettings(profile);
@@ -719,7 +721,39 @@
 		}
 		const profile = profileOfModel(selectedModel);
 		agentSettings[profile] ??= profile === GROK_PROFILE ? defaultAgentSettings(profile) : {};
+		for (const savedProfile of Object.keys(agentSettings)) {
+			const modelId =
+				savedProfile === profile
+					? selectedModel
+					: (get(chatModels).find((model) => model.profile_id === savedProfile)?.id ??
+						selectedModel);
+			restorePlanPermission(savedProfile, modelId);
+		}
 		showAgentSettings(profile);
+	}
+
+	/** A chat that stored plan as its permission opens with the plan switch on. */
+	function permissionWithoutPlan(modelId: string): string | null {
+		const model = get(chatModels).find((item) => item.id === modelId);
+		const modes = (model?.permission_modes ?? []).filter((item) => item.value !== 'plan');
+		const fallback = model?.default_permission_mode;
+		if (
+			typeof fallback === 'string' &&
+			fallback !== 'plan' &&
+			(modes.length === 0 || modes.some((item) => item.value === fallback))
+		) {
+			return fallback;
+		}
+		return modes[0]?.value ?? null;
+	}
+
+	function restorePlanPermission(profile: string, modelId: string) {
+		const settings = agentSettings[profile];
+		if (!settings || settings.permission_mode !== 'plan') return;
+		planMode = true;
+		const replacement = permissionWithoutPlan(modelId);
+		if (replacement) settings.permission_mode = replacement;
+		else delete settings.permission_mode;
 	}
 
 	async function persistChatSettings() {
@@ -1146,19 +1180,6 @@
 	}
 
 	function handlePlanCommand() {
-		if (settingsProfile !== GROK_PROFILE) {
-			// CodeBuddy plans in its own plan permission mode.
-			const model = $chatModels.find((m) => m.id === selectedModel);
-			if (!model?.permission_modes?.some((mode) => mode.value === 'plan')) return;
-			const fallback = model.default_permission_mode ?? 'default';
-			if (permissionMode === 'plan') {
-				handlePermissionModeChange(modeBeforePlan ?? fallback);
-			} else {
-				modeBeforePlan = permissionMode ?? fallback;
-				handlePermissionModeChange('plan');
-			}
-			return;
-		}
 		planMode = !planMode;
 		persistChatSettings();
 	}
@@ -1361,6 +1382,17 @@
 		return false;
 	}
 
+	function answerLeavesPlan(answers: Record<string, string>): boolean {
+		const answer = answers.plan;
+		if (answer !== 'Approve' && answer !== 'Exit plan mode') return false;
+		const questions = pendingAskUser?.item?.arguments?.questions;
+		if (!Array.isArray(questions)) return false;
+		return questions.some((question: { id?: string; options?: { label?: string }[] }) => {
+			if (!question || question.id !== 'plan' || !Array.isArray(question.options)) return false;
+			return question.options.some((option) => option?.label === 'Exit plan mode');
+		});
+	}
+
 	async function handleAskUserAnswer(
 		messageId: string,
 		callId: string,
@@ -1369,9 +1401,13 @@
 	): Promise<void> {
 		const id = chatId;
 		if (!id) return;
+		const leavesPlan = answerLeavesPlan(answers);
+		if (leavesPlan) planMode = false;
 		try {
 			await answerAskUser(id, messageId, callId, answers, timedOut);
+			if (leavesPlan) await persistChatSettings();
 		} catch (err) {
+			if (leavesPlan) planMode = true;
 			console.error('[chat] ask_user answer error', err);
 			if (err instanceof Error && err.message) toast.error(err.message);
 			loadChat(id);

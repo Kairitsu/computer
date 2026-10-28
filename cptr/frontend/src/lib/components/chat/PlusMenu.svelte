@@ -5,7 +5,7 @@
 	interface Props {
 		onfiles: (files: FileList) => void;
 		planMode?: boolean;
-		/** False for agents that plan in a permission mode of their own (CodeBuddy). */
+		/** False hides the plan switch. Grok and CodeBuddy both show it. */
 		showPlanMode?: boolean;
 		onchange?: () => void;
 	}

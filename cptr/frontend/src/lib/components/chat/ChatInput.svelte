@@ -126,8 +126,10 @@
 	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
 	// Grok's auto mode is its auto-review: risky calls are refused rather than asked about.
 	const grokSelected = $derived(selectedChatModel?.agent_id === 'grok');
-	// CodeBuddy lists its own permission modes, and plans in its plan mode.
-	const ownModes = $derived(selectedChatModel?.permission_modes ?? []);
+	// CodeBuddy lists its own permission modes. Plan is a separate switch, same as Grok.
+	const ownModes = $derived(
+		(selectedChatModel?.permission_modes ?? []).filter((mode) => mode.value !== 'plan')
+	);
 	const usesOwnModes = $derived(!grokSelected && ownModes.length > 0);
 	// Modes that skip CodeBuddy's permission checks.
 	const DANGER_MODES = new Set(['full', 'bypassPermissions', 'fullAccess']);
@@ -156,11 +158,16 @@
 					}
 				]
 	);
-	const currentApprovalMode = $derived(
-		usesOwnModes
-			? (permissionMode ?? selectedChatModel?.default_permission_mode ?? ownModes[0]?.value)
-			: toolApprovalMode
-	);
+	const currentApprovalMode = $derived.by(() => {
+		if (!usesOwnModes) return toolApprovalMode;
+		const values = new Set(ownModes.map((mode) => mode.value));
+		const usable = (mode: string | null | undefined) =>
+			!!mode && mode !== 'plan' && (values.size === 0 || values.has(mode));
+		if (usable(permissionMode)) return permissionMode;
+		const fallback = selectedChatModel?.default_permission_mode;
+		if (usable(fallback)) return fallback;
+		return ownModes[0]?.value;
+	});
 	const approvalDanger = $derived(DANGER_MODES.has(currentApprovalMode ?? ''));
 	const approvalLabel = $derived(
 		approvalModes.find((mode) => mode.value === currentApprovalMode)?.label ??
@@ -827,9 +834,7 @@
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{$t('chat.commandPlan')}</span>
 						<span class="app-muted text-[0.625rem] truncate shrink-0">
-							{(usesOwnModes ? permissionMode === 'plan' : planMode)
-								? $t('chat.commandPlanOn')
-								: $t('chat.commandPlanOff')}
+							{planMode ? $t('chat.commandPlanOn') : $t('chat.commandPlanOff')}
 						</span>
 					</span>
 				</button>
@@ -1041,7 +1046,6 @@
 			<div class="ml-0.5 self-end flex items-center gap-1">
 				<PlusMenu
 					bind:planMode
-					showPlanMode={!usesOwnModes}
 					onchange={onsettingschange}
 					onfiles={(files) => {
 						if (files) processFiles(Array.from(files));
@@ -1084,7 +1088,7 @@
 						{/each}
 					</Popover>
 				{/if}
-				{#if planMode && !usesOwnModes}
+				{#if planMode}
 					<button
 						type="button"
 						aria-label={$t('chat.commandPlanOff')}

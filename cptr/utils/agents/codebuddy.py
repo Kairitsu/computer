@@ -169,11 +169,17 @@ def _choices(option: dict[str, Any] | None) -> list[dict[str, str]]:
 
 
 def _permission_modes(setup: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
+    """Permission choices for the composer menu.
+
+    Plan is not one of them. The plan switch is separate, so a chat can stay on
+    full access and plan at the same time. CodeBuddy still enters plan as a
+    session mode for that turn only.
+    """
     modes = setup.get("modes") if isinstance(setup.get("modes"), dict) else {}
     result = []
     for raw in modes.get("availableModes") or []:
         mode_id = raw.get("id") if isinstance(raw, dict) else None
-        if not isinstance(mode_id, str) or not mode_id:
+        if not isinstance(mode_id, str) or not mode_id or mode_id == PLAN_MODE:
             continue
         name = raw.get("name")
         description = raw.get("description")
@@ -185,7 +191,33 @@ def _permission_modes(setup: dict[str, Any]) -> tuple[list[dict[str, str]], str]
             }
         )
     current = modes.get("currentModeId")
-    return result, current if isinstance(current, str) and current else DEFAULT_PERMISSION_MODE
+    if (
+        not isinstance(current, str)
+        or not current
+        or current == PLAN_MODE
+        or not any(item["value"] == current for item in result)
+    ):
+        current = result[0]["value"] if result else DEFAULT_PERMISSION_MODE
+    return result, current
+
+
+def chat_permission_mode(params: dict[str, Any]) -> str:
+    """The permission the user picked. Plan is never stored as that permission."""
+    mode = params.get("permission_mode")
+    if isinstance(mode, str) and mode and mode != PLAN_MODE:
+        return mode
+    return DEFAULT_PERMISSION_MODE
+
+
+def session_mode(params: dict[str, Any]) -> str:
+    """Mode for this turn: plan while the plan switch is on, otherwise the permission.
+
+    A chat saved when plan was still a permission entry keeps planning, and the
+    permission falls back to CodeBuddy's ordinary default.
+    """
+    if params.get("plan_mode") is True or params.get("permission_mode") == PLAN_MODE:
+        return PLAN_MODE
+    return chat_permission_mode(params)
 
 
 def _model_settings(config_options: Any, max_input_tokens: Any = None) -> dict[str, Any]:
@@ -490,14 +522,26 @@ def _check_in(session_id: str, live: _LiveCodeBuddy) -> None:
 # ── Turn helpers ────────────────────────────────────────────
 
 
+async def _set_mode(client: AcpClient, mode: str) -> None:
+    await client.request("session/set_mode", {"sessionId": client.session_id, "modeId": mode})
+
+
 async def _apply_settings(
-    client: AcpClient, model: str, params: dict[str, Any], mode: str
+    client: AcpClient,
+    model: str,
+    params: dict[str, Any],
+    mode: str,
+    *,
+    permission: str,
 ) -> int | None:
-    """Put the session on the chat's model, effort, window and permission mode.
+    """Put the session on the chat's model, effort, window and mode.
 
     session/load and a model switch reset the effort and window, so they are set
     again after the model. A missing or leftover choice uses the strongest effort and
-    the longest window CodeBuddy lists. Returns the window the session runs with.
+    the longest window CodeBuddy lists. Plan mode is a session mode on top of the
+    chosen permission: that permission is set first, so leaving the plan returns to
+    it (for example full access) instead of whatever the session used before.
+    Returns the window the session runs with.
     """
     request = {"sessionId": client.session_id, "configId": "model", "value": model}
     result = await client.request("session/set_config_option", request)
@@ -514,7 +558,9 @@ async def _apply_settings(
         window = longest_context_window(windows) or options.get("default_context_window")
     if window and (not windows or window in windows):
         await client.set_config_option("context_window", str(window))
-    await client.request("session/set_mode", {"sessionId": client.session_id, "modeId": mode})
+    if mode == PLAN_MODE and permission != PLAN_MODE:
+        await _set_mode(client, permission)
+    await _set_mode(client, mode)
     return window
 
 
@@ -716,9 +762,8 @@ async def run_codebuddy_agent(
 ) -> AsyncIterator[AgentEvent]:
     params = agent_params(chat_params, profile["id"])
     env = codebuddy_env(profile, identity, workspace)
-    mode = params.get("permission_mode")
-    if not isinstance(mode, str) or not mode:
-        mode = DEFAULT_PERMISSION_MODE
+    permission = chat_permission_mode(params)
+    mode = session_mode(params)
 
     session_id = None
     if resume_state and isinstance(resume_state.get("session_id"), str):
@@ -773,11 +818,15 @@ async def run_codebuddy_agent(
             params.get("reasoning_effort"),
             params.get("context_window"),
         )
-        if live.settings != settings or live.mode != mode:
-            if mode == PLAN_MODE and live.mode != PLAN_MODE:
-                # CodeBuddy saves the mode it leaves for plan mode the same way.
-                live.pre_plan_mode = live.mode or DEFAULT_PERMISSION_MODE
-            live.context_window = await _apply_settings(client, model, params, mode)
+        permission_changed = mode == PLAN_MODE and live.pre_plan_mode != permission
+        if live.settings != settings or live.mode != mode or permission_changed:
+            if mode == PLAN_MODE:
+                # Remember the menu's permission. CodeBuddy restores the mode set
+                # just before plan, which _apply_settings sets to this value.
+                live.pre_plan_mode = permission
+            live.context_window = await _apply_settings(
+                client, model, params, mode, permission=permission
+            )
             live.settings, live.mode = settings, mode
             # Drop the updates these settings caused, so none reads as CodeBuddy's own change.
             await asyncio.sleep(0.1)
@@ -813,8 +862,11 @@ async def run_codebuddy_agent(
                         answer = (getattr(plan_event, "answers", None) or {}).get("plan")
                         leaves_plan = answer in (PLAN_APPROVE_LABEL, PLAN_EXIT_LABEL)
                     if leaves_plan and live.mode == PLAN_MODE:
-                        # CodeBuddy goes back to its pre-plan mode without telling the client.
-                        live.mode = agent_mode = live.pre_plan_mode or DEFAULT_PERMISSION_MODE
+                        # Back to the permission the menu still shows. CodeBuddy also
+                        # restores the mode it left, which was set to this permission.
+                        restore = live.pre_plan_mode or permission
+                        live.mode = agent_mode = restore
+                        await _set_mode(client, restore)
                     continue
                 if "id" in event and method == QUESTION_METHOD:
                     async for ask_event in _question_events(client, event):
@@ -862,9 +914,13 @@ async def run_codebuddy_agent(
                         option = _config_option(update.get("configOptions"), "mode") or {}
                         current = option.get("currentValue")
                     if isinstance(current, str) and current and current != live.mode:
-                        # CodeBuddy changed it, e.g. leaving plan mode once the plan was
-                        # approved; the chat takes the new mode (see chat_task.save_session).
-                        live.mode = agent_mode = current
+                        if current == PLAN_MODE:
+                            # Plan is the separate switch, not the chat's permission.
+                            live.mode = PLAN_MODE
+                        else:
+                            # CodeBuddy changed it, e.g. leaving plan mode once the plan
+                            # was approved; the chat takes the new mode.
+                            live.mode = agent_mode = current
                     continue
                 meta = update.get("_meta") if isinstance(update.get("_meta"), dict) else {}
                 if meta.get(COMPACT_META) is True:
@@ -918,7 +974,7 @@ async def run_codebuddy_agent(
                 "session_id": client.session_id,
                 "workspace": workspace,
                 "model": model,
-                **({"permission_mode": agent_mode} if agent_mode else {}),
+                **({"permission_mode": agent_mode} if agent_mode and agent_mode != PLAN_MODE else {}),
                 "context_tokens": saved_tokens,
                 "context_window": context_window,
                 "compactions": compactions,

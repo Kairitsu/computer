@@ -1230,6 +1230,33 @@ class AskUserNotPendingError(ValueError):
     pass
 
 
+def _answer_leaves_plan(arguments: dict, answers: dict[str, str] | None) -> bool:
+    """True when this answer turns the plan switch off.
+
+    Grok's plan card leaves on Approve. CodeBuddy's question card leaves on
+    Approve or Exit plan mode, and stays on Keep planning.
+    """
+    answer = (answers or {}).get("plan")
+    if not isinstance(answer, str):
+        return False
+    if arguments.get("kind") == "plan":
+        return answer == "Approve"
+    questions = arguments.get("questions")
+    if not isinstance(questions, list):
+        return False
+    for question in questions:
+        if not isinstance(question, dict) or question.get("id") != "plan":
+            continue
+        labels = {
+            option.get("label")
+            for option in (question.get("options") or [])
+            if isinstance(option, dict)
+        }
+        if "Exit plan mode" in labels and answer in ("Approve", "Exit plan mode"):
+            return True
+    return False
+
+
 async def resolve_ask_user(
     app,
     chat_id: str,
@@ -1267,8 +1294,9 @@ async def resolve_ask_user(
         # the answer, so hand it over instead of starting a new turn.
         arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
         # Approving the plan leaves plan mode. Save that before the agent continues,
-        # so the approval card does not appear again after this turn.
-        approved_plan = arguments.get("kind") == "plan" and (answers or {}).get("plan") == "Approve"
+        # so the approval card does not appear again after this turn. CodeBuddy's
+        # question card also leaves on "Exit plan mode"; "Keep planning" stays.
+        approved_plan = _answer_leaves_plan(arguments, answers)
         meta = dict(chat.meta or {})
         params = dict(meta.get("params") or {})
         cleared_plan = False

@@ -1036,7 +1036,11 @@ async def run_chat_task(
         resume_state = dict(resume_state)
         # A permission mode the agent switched to itself during the turn (CodeBuddy
         # leaving plan mode) becomes the chat's, so the next turn does not undo it.
+        # Plan is not a permission: the plan switch owns that, and writing it here
+        # would replace the mode the menu still shows.
         agent_mode = resume_state.pop("permission_mode", None)
+        if agent_mode == "plan":
+            agent_mode = None
         if isinstance(agent_mode, str) and agent_mode:
             params = dict(meta.get("params") or {})
             agents = dict(params.get("agents") or {})
@@ -1118,7 +1122,8 @@ async def run_chat_task(
         if agent_target.agent == "grok" and chat_params.get("plan_mode", False):
             # A resumed agent session only receives the latest user message, so append the
             # instruction to it rather than adding a message that would replace it.
-            # CodeBuddy plans in its own plan permission mode instead.
+            # CodeBuddy plans by switching its session to plan mode, and keeps the
+            # permission the menu shows.
             _append_prompt_suffix(messages, f"\n\n{PLAN_MODE_PROMPT}")
 
         resume_state = None
