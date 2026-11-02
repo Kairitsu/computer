@@ -10,6 +10,7 @@ from typing import Optional
 
 from cptr.models import Config
 from cptr.utils.config import AuthResult, check_access
+from cptr.utils.agents.cli_update import AgentUpdateError, apply_agent_update, check_agent_updates
 from cptr.utils.agents.detection import get_agent_status, invalidate_agent_detection_cache
 from cptr.utils.agents.models import save_agent_profiles
 from cptr.utils.chat_retention import (
@@ -130,6 +131,37 @@ async def refresh_agents(request: Request):
     require_admin(request)
     invalidate_agent_detection_cache(request.app.state)
     return await get_agent_status(request.app.state, refresh=True)
+
+
+class AgentCliUpdateRequest(BaseModel):
+    agent: str
+
+
+@router.post("/agents/updates/check")
+async def check_agent_cli_updates(request: Request):
+    """See whether Grok or CodeBuddy has a newer release. Does not install it."""
+    require_admin(request)
+    return await check_agent_updates()
+
+
+@router.post("/agents/updates/apply")
+async def apply_agent_cli_update(request: Request, body: AgentCliUpdateRequest):
+    """Install the confirmed Grok or CodeBuddy release."""
+    require_admin(request)
+    try:
+        result = await apply_agent_update(body.agent)
+    except AgentUpdateError as exc:
+        return {
+            "agent": body.agent,
+            "ok": False,
+            "version": None,
+            "previous_version": None,
+            "error": exc.code,
+            "detail": exc.detail,
+            "log": exc.detail,
+        }
+    invalidate_agent_detection_cache(request.app.state)
+    return result
 
 
 # ── Request Models ───────────────────────────────────────────

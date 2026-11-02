@@ -83,6 +83,41 @@ export const updateAgents = (profiles: AgentProfile[]): Promise<AgentsResponse> 
 export const refreshAgents = async (): Promise<AgentsResponse> =>
 	fetchJSON<AgentsResponse>('/api/admin/agents/refresh', { method: 'POST' });
 
+export interface AgentCliUpdate {
+	agent: 'grok' | 'codebuddy';
+	name: string;
+	command: string | null;
+	current_version: string | null;
+	latest_version: string | null;
+	update_available: boolean;
+	can_update: boolean;
+	channel: string | null;
+	notes: string;
+	notes_available: boolean;
+	error: string | null;
+	detail: string;
+}
+
+export interface AgentCliUpdateReport {
+	agents: AgentCliUpdate[];
+}
+
+export interface AgentCliUpdateResult {
+	agent: string;
+	ok: boolean;
+	version: string | null;
+	previous_version: string | null;
+	error: string | null;
+	detail: string;
+	log: string;
+}
+
+export const checkAgentCliUpdates = (): Promise<AgentCliUpdateReport> =>
+	fetchJSON<AgentCliUpdateReport>('/api/admin/agents/updates/check', { method: 'POST' });
+
+export const applyAgentCliUpdate = (agent: 'grok' | 'codebuddy'): Promise<AgentCliUpdateResult> =>
+	fetchJSON<AgentCliUpdateResult>('/api/admin/agents/updates/apply', jsonBody({ agent }));
+
 // ── Model Config ────────────────────────────────────────────
 
 export interface ModelConfigEntry {

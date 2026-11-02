@@ -2,9 +2,13 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
+		applyAgentCliUpdate,
+		checkAgentCliUpdates,
 		getAgents,
 		refreshAgents,
 		updateAgents,
+		type AgentCliUpdate,
+		type AgentCliUpdateReport,
 		type AgentProfile,
 		type AgentsResponseProfile
 	} from '$lib/apis/admin';
@@ -14,7 +18,10 @@
 	import { t } from '$lib/i18n';
 	import { refreshChatState } from '$lib/stores/chat';
 	import AgentProfileModal from './AgentProfileModal.svelte';
+	import AgentUpdateModal from './AgentUpdateModal.svelte';
 	import Models from './Models.svelte';
+
+	type UpdatePhase = 'closed' | 'checking' | 'summary' | 'ask' | 'installing' | 'failed' | 'done';
 
 	type ModalState =
 		| { mode: 'create'; profile: AgentProfile }
@@ -30,6 +37,18 @@
 	let modal = $state<ModalState | null>(null);
 	let deletedProfile = $state(false);
 	let modelsApi: { refresh: () => Promise<void>; save: () => Promise<void> } | null = null;
+	let updatePhase = $state<UpdatePhase>('closed');
+	let updateReport = $state<AgentCliUpdateReport | null>(null);
+	let updateQueue = $state<AgentCliUpdate[]>([]);
+	let updateIndex = $state(0);
+	let installedVersion = $state<string | null>(null);
+	let updateErrorCode = $state<string | null>(null);
+	let updateErrorDetail = $state('');
+	let installedAny = $state(false);
+
+	const currentUpdate = $derived(updateQueue[updateIndex] ?? null);
+	const updateHasNext = $derived(updateIndex + 1 < updateQueue.length);
+	const updateBusy = $derived(updatePhase === 'checking' || updatePhase === 'installing');
 
 	function registerModels(api: { refresh: () => Promise<void>; save: () => Promise<void> }) {
 		modelsApi = api;
@@ -192,6 +211,91 @@
 		}
 	}
 
+	function finishUpdateQueue() {
+		const shouldRefresh = installedAny;
+		updatePhase = 'closed';
+		updateReport = null;
+		updateQueue = [];
+		updateIndex = 0;
+		installedVersion = null;
+		updateErrorCode = null;
+		updateErrorDetail = '';
+		installedAny = false;
+		if (shouldRefresh) void refresh();
+	}
+
+	function advanceUpdate() {
+		if (updateIndex + 1 < updateQueue.length) {
+			updateIndex += 1;
+			installedVersion = null;
+			updateErrorCode = null;
+			updateErrorDetail = '';
+			updatePhase = 'ask';
+			return;
+		}
+		finishUpdateQueue();
+	}
+
+	function closeUpdate() {
+		if (updateBusy) return;
+		if (updatePhase === 'summary' || (updatePhase === 'failed' && !currentUpdate)) {
+			finishUpdateQueue();
+			return;
+		}
+		advanceUpdate();
+	}
+
+	async function checkCliUpdates() {
+		if (updatePhase !== 'closed' || refreshing || saving || modal) return;
+		updatePhase = 'checking';
+		updateReport = null;
+		updateQueue = [];
+		updateIndex = 0;
+		installedVersion = null;
+		updateErrorCode = null;
+		updateErrorDetail = '';
+		installedAny = false;
+		try {
+			const report = await checkAgentCliUpdates();
+			updateReport = report;
+			const queue = report.agents.filter((entry) => entry.update_available || entry.error);
+			if (queue.length === 0) {
+				updatePhase = 'summary';
+				return;
+			}
+			updateQueue = queue;
+			updatePhase = 'ask';
+		} catch (error) {
+			updateErrorCode = 'check_failed';
+			updateErrorDetail = error instanceof Error ? error.message : '';
+			updatePhase = 'failed';
+		}
+	}
+
+	async function confirmCliUpdate() {
+		const entry = currentUpdate;
+		if (!entry || (updatePhase !== 'ask' && updatePhase !== 'failed')) return;
+		updatePhase = 'installing';
+		updateErrorCode = null;
+		updateErrorDetail = '';
+		try {
+			const result = await applyAgentCliUpdate(entry.agent);
+			if (!result.ok) {
+				updateErrorCode = result.error || 'install_failed';
+				updateErrorDetail = result.detail || result.log || '';
+				updatePhase = 'failed';
+				return;
+			}
+			installedVersion = result.version;
+			installedAny = true;
+			updatePhase = 'done';
+		} catch (error) {
+			updateErrorCode = 'install_failed';
+			updateErrorDetail = error instanceof Error ? error.message : '';
+			updatePhase = 'failed';
+		}
+	}
+
 	async function refresh() {
 		refreshing = true;
 		let agentsOk = false;
@@ -239,7 +343,7 @@
 				type="button"
 				class="settings-icon"
 				onclick={refresh}
-				disabled={refreshing || saving}
+				disabled={refreshing || saving || updatePhase !== 'closed'}
 				title={$t('admin.agentsRefresh')}
 			>
 				{#if refreshing}
@@ -252,9 +356,24 @@
 				type="button"
 				class="settings-icon"
 				onclick={() => (modal = { mode: 'create', profile: newProfile() })}
+				disabled={updatePhase !== 'closed'}
 				title={$t('admin.agentsAddProfile')}
 			>
 				<Icon name="plus" size={14} />
+			</button>
+			<button
+				type="button"
+				class="settings-icon"
+				onclick={checkCliUpdates}
+				disabled={refreshing || saving || updatePhase !== 'closed' || modal !== null}
+				title={$t('agentUpdate.action')}
+				aria-label={$t('agentUpdate.action')}
+			>
+				{#if updateBusy}
+					<Spinner size={13} />
+				{:else}
+					<Icon name="download" size={14} />
+				{/if}
 			</button>
 		</div>
 	</div>
@@ -328,5 +447,22 @@
 		onclose={() => (modal = null)}
 		onsave={saveProfile}
 		ondelete={deleteProfile}
+	/>
+{/if}
+
+{#if updatePhase !== 'closed'}
+	<AgentUpdateModal
+		phase={updatePhase === 'closed' ? 'checking' : updatePhase}
+		report={updateReport}
+		current={currentUpdate}
+		{installedVersion}
+		errorCode={updateErrorCode}
+		errorDetail={updateErrorDetail}
+		hasNext={updateHasNext}
+		onclose={closeUpdate}
+		onlater={advanceUpdate}
+		onconfirm={confirmCliUpdate}
+		onretry={confirmCliUpdate}
+		onadvance={advanceUpdate}
 	/>
 {/if}

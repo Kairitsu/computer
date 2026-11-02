@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.6.8] - 2026-11-02
+
+### Added
+
+- **代理可以检查并更新** 设置里的代理页新增「更新」。它会查看 Grok 和 CodeBuddy 有没有新版本，有的话先给出这一轮的更新说明，再由你决定要不要安装。两个都有更新时，先确认 Grok，接着再确认 CodeBuddy。
+
 ## [5.5.8] - 2026-10-28
 
 ### Fixed
