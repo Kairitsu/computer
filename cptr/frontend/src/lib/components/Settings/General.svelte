@@ -43,7 +43,7 @@
 	const REPO_URL = 'https://github.com/Kairitsu/computer';
 
 	let resetting = $state(false);
-	// One idle-process count and timeout for Grok and CodeBuddy. Admins set them.
+	// Idle Grok process count and timeout. Admins set them.
 	let processSettings = $state<GrokProcessSettings | null>(null);
 	const processFields = $derived([
 		{ key: 'max_idle_processes' as const, label: $t('general.maxIdleProcesses'), max: 100 },

@@ -1,33 +1,13 @@
 /**
- * Subscription quota shown in the composer and sidebar footer, for the selected agent.
+ * Subscription quota shown in the composer.
  *
- * Grok: SuperGrok (the local Grok CLI login) is preferred; otherwise the user's local
+ * SuperGrok (the local Grok CLI login) is preferred; otherwise the user's local
  * token budget from Settings → Usage is compared with this period's usage.
- * CodeBuddy: official credit packages (used and remaining), like SuperGrok's product rows.
  */
 import { derived, get, writable } from 'svelte/store';
-import {
-	getQuota,
-	type CodeBuddyQuota,
-	type QuotaResponse,
-	type SuperGrokQuota
-} from '$lib/apis/chat';
+import { getQuota, type QuotaResponse, type SuperGrokQuota } from '$lib/apis/chat';
 import { quotaBudget, type QuotaPeriod } from '$lib/stores';
 import { socketStore } from '$lib/stores/socket.svelte';
-
-export type QuotaProfileId = 'grok' | 'codebuddy';
-
-/** Which agent's quota the composer and sidebar should show. */
-export const activeQuotaProfile = writable<QuotaProfileId>('grok');
-
-export function quotaProfileForModel(
-	model: { agent_id?: string; id?: string } | undefined
-): QuotaProfileId {
-	if (model?.agent_id === 'codebuddy' || model?.id?.startsWith('agent:codebuddy/')) {
-		return 'codebuddy';
-	}
-	return 'grok';
-}
 
 const MIN_REFRESH_MS = 60_000;
 const POLL_MS = 5 * 60_000;
@@ -94,18 +74,6 @@ export type QuotaSummary =
 			supergrok: SuperGrokQuota;
 	  }
 	| {
-			source: 'codebuddy';
-			signedIn: boolean;
-			/** Credits used this week (UTC, from Monday) by this user's CodeBuddy turns. */
-			weekCredits: number;
-			codebuddy: CodeBuddyQuota | null;
-			/** null when the official balance could not be read. */
-			usedPercent: number | null;
-			remainingPercent: number | null;
-			remainCredits: number | null;
-			resetsAt: number | null;
-	  }
-	| {
 			source: 'budget';
 			usedPercent: number;
 			remainingPercent: number;
@@ -117,22 +85,8 @@ export type QuotaSummary =
 	| { source: 'none'; error: string | null; tokensUsed: number | null; period: QuotaPeriod };
 
 export const quotaSummary = derived(
-	[quotaData, quotaBudget, activeQuotaProfile],
-	([$quota, $budget, $profile]): QuotaSummary => {
-	if ($profile === 'codebuddy') {
-		const codebuddy = $quota?.codebuddy ?? null;
-		const balance = codebuddy?.balance ?? null;
-		return {
-			source: 'codebuddy',
-			signedIn: codebuddy?.signed_in === true,
-			weekCredits: codebuddy?.usage?.week.credits ?? 0,
-			codebuddy,
-			usedPercent: balance ? balance.used_percent : null,
-			remainingPercent: balance ? balance.remaining_percent : null,
-			remainCredits: balance ? balance.remain : null,
-			resetsAt: balance?.resets_at ?? null
-		};
-	}
+	[quotaData, quotaBudget],
+	([$quota, $budget]): QuotaSummary => {
 	const supergrok = $quota?.supergrok ?? null;
 	if (isSuperGrokQuota(supergrok)) {
 		return {
@@ -162,11 +116,6 @@ export const quotaSummary = derived(
 		period: $budget.period
 	};
 });
-
-/** Credits as CodeBuddy counts them: up to two decimals. */
-export function formatCredits(value: number): string {
-	return String(Math.round(value * 100) / 100);
-}
 
 /** Compact token count: 128000 → "128K", 1000000 → "1M". */
 export function formatTokens(value: number): string {

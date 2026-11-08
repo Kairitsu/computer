@@ -57,7 +57,6 @@
 	} from '$lib/chatScrollFollow';
 
 	import ChatInput from './ChatInput.svelte';
-	import { activeQuotaProfile, quotaProfileForModel } from '$lib/stores/quota';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import StatusModal from './StatusModal.svelte';
@@ -89,18 +88,10 @@
 	let chatId = $state<string | null>(initialChatId ?? null);
 	let selectedModel = $state('');
 
-	$effect(() => {
-		if (!active) return;
-		activeQuotaProfile.set(
-			quotaProfileForModel($chatModels.find((model) => model.id === selectedModel))
-		);
-	});
-	// The composer shows the selected agent's own settings: Grok's approval mode, or
-	// CodeBuddy's permission mode, plus that agent's effort and window. Each agent
-	// keeps its settings in `agentSettings`, so switching agents never carries them over.
+	// The composer shows the selected profile's approval mode, effort, and window.
+	// Each profile keeps its settings in `agentSettings`.
 	const GROK_PROFILE = 'grok';
 	let toolApprovalMode = $state<ToolApprovalMode>('auto');
-	let permissionMode = $state<string | null>(null);
 	let planMode = $state(false);
 	let reasoningEffort = $state<ReasoningEffort | null>(null);
 	let contextWindow = $state<number | null>(null);
@@ -110,7 +101,6 @@
 	function currentAgentSettings(): AgentSendParams {
 		const settings: AgentSendParams = {};
 		if (settingsProfile === GROK_PROFILE) settings.tool_approval_mode = toolApprovalMode;
-		else if (permissionMode && permissionMode !== 'plan') settings.permission_mode = permissionMode;
 		if (reasoningEffort) settings.reasoning_effort = reasoningEffort;
 		if (contextWindow) settings.context_window = contextWindow;
 		return settings;
@@ -131,7 +121,6 @@
 		settingsProfile = profile;
 		const settings = agentSettings[profile] ?? {};
 		toolApprovalMode = settings.tool_approval_mode ?? get(defaultToolApprovalMode);
-		permissionMode = settings.permission_mode ?? null;
 		reasoningEffort = settings.reasoning_effort ?? null;
 		contextWindow = settings.context_window ?? null;
 		fillUnsetCaps(modelId);
@@ -154,7 +143,7 @@
 		}
 	}
 
-	/** Keep the other agent's permission mode, then take this model's strongest caps. */
+	/** Keep the other profile's settings, then take this model's strongest caps. */
 	function prepareProfileSwitch(profile: string, modelId: string) {
 		if (settingsProfile && settingsProfile !== profile) {
 			agentSettings[settingsProfile] = currentAgentSettings();
@@ -536,7 +525,6 @@
 		output?: any;
 		tasks?: ChatTask[];
 		context_usage?: ContextUsage | null;
-		agent_settings?: { profile_id?: string; permission_mode?: string };
 		done?: boolean;
 		error?: string;
 		pending_inputs_processed?: boolean;
@@ -566,17 +554,6 @@
 		}
 		if (data.context_usage) {
 			contextUsage = data.context_usage;
-		}
-		// The agent switched its own permission mode (CodeBuddy leaving plan mode).
-		// Plan is the + menu switch, so a report of plan does not replace the menu.
-		if (
-			data.agent_settings?.profile_id &&
-			data.agent_settings.permission_mode &&
-			data.agent_settings.permission_mode !== 'plan'
-		) {
-			const { profile_id, permission_mode } = data.agent_settings;
-			agentSettings[profile_id] = { ...agentSettings[profile_id], permission_mode };
-			if (profile_id === settingsProfile) permissionMode = permission_mode;
 		}
 
 		// Follow-up state changed server-side: reload to see new transcript/generation state.
@@ -684,9 +661,6 @@
 		) {
 			settings.tool_approval_mode = value.tool_approval_mode;
 		}
-		if (typeof value.permission_mode === 'string' && value.permission_mode) {
-			settings.permission_mode = value.permission_mode;
-		}
 		if (typeof value.reasoning_effort === 'string' && value.reasoning_effort) {
 			settings.reasoning_effort = value.reasoning_effort;
 		}
@@ -721,39 +695,7 @@
 		}
 		const profile = profileOfModel(selectedModel);
 		agentSettings[profile] ??= profile === GROK_PROFILE ? defaultAgentSettings(profile) : {};
-		for (const savedProfile of Object.keys(agentSettings)) {
-			const modelId =
-				savedProfile === profile
-					? selectedModel
-					: (get(chatModels).find((model) => model.profile_id === savedProfile)?.id ??
-						selectedModel);
-			restorePlanPermission(savedProfile, modelId);
-		}
 		showAgentSettings(profile);
-	}
-
-	/** A chat that stored plan as its permission opens with the plan switch on. */
-	function permissionWithoutPlan(modelId: string): string | null {
-		const model = get(chatModels).find((item) => item.id === modelId);
-		const modes = (model?.permission_modes ?? []).filter((item) => item.value !== 'plan');
-		const fallback = model?.default_permission_mode;
-		if (
-			typeof fallback === 'string' &&
-			fallback !== 'plan' &&
-			(modes.length === 0 || modes.some((item) => item.value === fallback))
-		) {
-			return fallback;
-		}
-		return modes[0]?.value ?? null;
-	}
-
-	function restorePlanPermission(profile: string, modelId: string) {
-		const settings = agentSettings[profile];
-		if (!settings || settings.permission_mode !== 'plan') return;
-		planMode = true;
-		const replacement = permissionWithoutPlan(modelId);
-		if (replacement) settings.permission_mode = replacement;
-		else delete settings.permission_mode;
 	}
 
 	async function persistChatSettings() {
@@ -1241,11 +1183,6 @@
 		persistChatSettings();
 	}
 
-	function handlePermissionModeChange(mode: string) {
-		permissionMode = mode;
-		handleSettingsChange();
-	}
-
 	function firstUserMessageTitle(): string {
 		const message = allMessages.find((m) => m.role === 'user' && !isPendingHiddenMessage(m));
 		return message ? message.content.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
@@ -1634,7 +1571,6 @@
 					bind:inputText
 					bind:selectedModel
 					bind:toolApprovalMode
-					bind:permissionMode
 					bind:planMode
 					bind:reasoningEffort
 					bind:contextWindow
@@ -1651,7 +1587,6 @@
 					onsettingschange={handleSettingsChange}
 					onbeforeprofilechange={prepareProfileSwitch}
 					ontoolapprovalchange={handleToolApprovalModeChange}
-					onpermissionmodechange={handlePermissionModeChange}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}
@@ -1756,7 +1691,6 @@
 					bind:inputText
 					bind:selectedModel
 					bind:toolApprovalMode
-					bind:permissionMode
 					bind:planMode
 					bind:reasoningEffort
 					bind:contextWindow
@@ -1781,7 +1715,6 @@
 					onsettingschange={handleSettingsChange}
 					onbeforeprofilechange={prepareProfileSwitch}
 					ontoolapprovalchange={handleToolApprovalModeChange}
-					onpermissionmodechange={handlePermissionModeChange}
 					onstatus={handleStatusCommand}
 					oncancel={handleCancel}
 					{queuedMessages}

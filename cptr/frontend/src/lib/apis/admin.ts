@@ -35,7 +35,7 @@ export const updateChatRetention = (days: number) =>
 
 // ── Agents ─────────────────────────────────────────────────
 
-export type AgentType = 'grok' | 'codebuddy';
+export type AgentType = 'grok';
 export type AgentMode = 'auto' | 'enabled' | 'disabled';
 export type AgentStatus = 'ready' | 'not_found' | 'missing_dependency' | 'auth_unknown' | 'error';
 
@@ -84,7 +84,7 @@ export const refreshAgents = async (): Promise<AgentsResponse> =>
 	fetchJSON<AgentsResponse>('/api/admin/agents/refresh', { method: 'POST' });
 
 export interface AgentCliUpdate {
-	agent: 'grok' | 'codebuddy';
+	agent: 'grok';
 	name: string;
 	command: string | null;
 	current_version: string | null;
@@ -115,7 +115,7 @@ export interface AgentCliUpdateResult {
 export const checkAgentCliUpdates = (): Promise<AgentCliUpdateReport> =>
 	fetchJSON<AgentCliUpdateReport>('/api/admin/agents/updates/check', { method: 'POST' });
 
-export const applyAgentCliUpdate = (agent: 'grok' | 'codebuddy'): Promise<AgentCliUpdateResult> =>
+export const applyAgentCliUpdate = (agent: 'grok'): Promise<AgentCliUpdateResult> =>
 	fetchJSON<AgentCliUpdateResult>('/api/admin/agents/updates/apply', jsonBody({ agent }));
 
 // ── Model Config ────────────────────────────────────────────

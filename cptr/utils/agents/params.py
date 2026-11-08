@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 # Settings each agent keeps for itself under `params.agents[<profile id>]`.
-AGENT_PARAM_KEYS = ("reasoning_effort", "context_window", "tool_approval_mode", "permission_mode")
+AGENT_PARAM_KEYS = ("reasoning_effort", "context_window", "tool_approval_mode")
 # Chats from before per-agent settings keep Grok's choices at the top level of `params`.
 LEGACY_PARAMS_PROFILE = "grok"
 # Higher is more thinking. "enabled" is a model's own unmarked default, not a strength.
@@ -51,9 +51,9 @@ def longest_context_window(windows: list[Any]) -> int | None:
 def agent_params(chat_params: Any, profile_id: str | None) -> dict[str, Any]:
     """The chat's params with one agent's own model settings in place.
 
-    Agents never share these settings: switching a chat from Grok to CodeBuddy starts
-    CodeBuddy from its own choices, not Grok's. A missing effort or window is filled
-    by the caller with that model's strongest effort and longest window.
+    Each profile keeps its own effort, window, and approval mode. A missing effort
+    or window is filled by the caller with that model's strongest effort and
+    longest window.
     """
     params = dict(chat_params) if isinstance(chat_params, dict) else {}
     agents = params.pop("agents", None)

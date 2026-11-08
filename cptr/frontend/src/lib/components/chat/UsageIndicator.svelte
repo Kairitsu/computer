@@ -1,16 +1,10 @@
 <script lang="ts">
 	/**
 	 * Composer chip with the current context fullness and the selected agent's quota.
-	 * Click for details: context tokens, SuperGrok or local budget, CodeBuddy remaining credits.
+	 * Click for details: context tokens, and SuperGrok or the local budget.
 	 */
 	import type { ContextUsage } from '$lib/apis/chat';
-	import {
-		formatCredits,
-		formatTokens,
-		quotaLoading,
-		quotaSummary,
-		refreshQuota
-	} from '$lib/stores/quota';
+	import { formatTokens, quotaLoading, quotaSummary, refreshQuota } from '$lib/stores/quota';
 	import { i18next, t } from '$lib/i18n';
 	import Icon from '../Icon.svelte';
 	import Popover from '../common/Popover.svelte';
@@ -38,22 +32,9 @@
 		if (summary.source === 'supergrok' || summary.source === 'budget') {
 			return Math.round(summary.remainingPercent);
 		}
-		if (summary.source === 'codebuddy' && summary.remainingPercent != null) {
-			return Math.round(summary.remainingPercent);
-		}
 		return null;
 	});
 	const quotaLabel = $derived.by(() => {
-		const summary = $quotaSummary;
-		if (summary.source === 'codebuddy') {
-			if (!summary.signedIn) return $t('usageIndicator.codebuddySignedOutShort');
-			if (summary.remainingPercent != null) {
-				return $t('usageIndicator.quotaShort', {
-					percent: Math.round(summary.remainingPercent)
-				});
-			}
-			return $t('usageIndicator.codebuddyQuotaErrorShort');
-		}
 		return quotaRemaining !== null
 			? $t('usageIndicator.quotaShort', { percent: quotaRemaining })
 			: null;
@@ -169,54 +150,7 @@
 					</button>
 				</div>
 
-				{#if $quotaSummary.source === 'codebuddy'}
-					{@const summary = $quotaSummary}
-					{@const balance = summary.codebuddy?.balance}
-					<div class="flex items-baseline justify-between gap-2">
-						<span class="usage-meta truncate">
-							CodeBuddy{summary.codebuddy?.nickname ? ` · ${summary.codebuddy.nickname}` : ''}
-						</span>
-						<span class="text-xs font-medium shrink-0 tabular-nums">
-							{#if !summary.signedIn}
-								{$t('usageIndicator.codebuddySignedOutShort')}
-							{:else if summary.remainingPercent != null}
-								{$t('usageIndicator.remaining', {
-									percent: Math.round(summary.remainingPercent)
-								})}
-							{:else}
-								{$t('usageIndicator.codebuddyQuotaErrorShort')}
-							{/if}
-						</span>
-					</div>
-					{#if balance}
-						<div class="usage-bar">
-							<span
-								class={tone(balance.used_percent)}
-								style="width: {Math.min(balance.used_percent, 100)}%;"
-							></span>
-						</div>
-						<p class="usage-meta tabular-nums">
-							{$t('usageIndicator.codebuddyCreditsAmount', {
-								credits: formatCredits(balance.remain)
-							})}
-							{#if summary.resetsAt}
-								· {$t('usageIndicator.resetsAt', { time: formatReset(summary.resetsAt) })}
-							{/if}
-						</p>
-					{:else if summary.signedIn}
-						<p class="usage-meta">{$t('usageIndicator.codebuddyQuotaError')}</p>
-					{:else}
-						<p class="usage-meta">{$t('usageIndicator.codebuddySignedOut')}</p>
-					{/if}
-					{#if summary.codebuddy?.usage_url}
-						<a
-							class="usage-link block"
-							href={summary.codebuddy.usage_url}
-							target="_blank"
-							rel="noopener noreferrer">{$t('usageIndicator.codebuddyOpenUsage')}</a
-						>
-					{/if}
-				{:else if $quotaSummary.source === 'supergrok'}
+				{#if $quotaSummary.source === 'supergrok'}
 					{@const summary = $quotaSummary}
 					<div class="flex items-baseline justify-between">
 						<span class="usage-meta">SuperGrok</span>

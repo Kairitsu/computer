@@ -122,12 +122,12 @@
 		return agent;
 	}
 
-	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok', codebuddy: 'codebuddy' }[agent];
+	function defaultCommand(_agent: AgentProfile['agent']): string {
+		return 'grok';
 	}
 
-	function agentLabel(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok', codebuddy: 'CodeBuddy' }[agent];
+	function agentLabel(_agent: AgentProfile['agent']): string {
+		return 'Grok';
 	}
 
 	function statusKey(profile: AgentProfile): string {

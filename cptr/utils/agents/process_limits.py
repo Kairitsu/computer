@@ -1,8 +1,8 @@
-"""One idle-process limit for every coding agent.
+"""One idle-process limit for Grok.
 
-Grok and CodeBuddy each keep a process per chat between turns. Those idle
-processes share one count and one timeout from Settings → General. A process
-that is serving a turn is left alone and is not counted.
+Each chat keeps a Grok process between turns. Idle processes share one count
+and one timeout from Settings → General. A process that is serving a turn is
+left alone and is not counted.
 """
 
 from __future__ import annotations
@@ -95,10 +95,6 @@ async def save_agent_process_settings(
 
 
 def _agent_sources() -> list[tuple[str, IdleSnapshot, CloseIdle]]:
-    from cptr.utils.agents.codebuddy import (
-        close_idle_process as close_codebuddy,
-        idle_process_snapshots as snap_codebuddy,
-    )
     from cptr.utils.agents.grok import (
         close_idle_process as close_grok,
         idle_process_snapshots as snap_grok,
@@ -106,12 +102,11 @@ def _agent_sources() -> list[tuple[str, IdleSnapshot, CloseIdle]]:
 
     return [
         ("grok", snap_grok, close_grok),
-        ("codebuddy", snap_codebuddy, close_codebuddy),
     ]
 
 
 async def trim_idle_processes() -> None:
-    """Close idle Grok and CodeBuddy processes against the one shared limit."""
+    """Close idle Grok processes against the shared limit."""
     settings = await agent_process_settings()
     now = time.monotonic()
     entries: list[IdleEntry] = []

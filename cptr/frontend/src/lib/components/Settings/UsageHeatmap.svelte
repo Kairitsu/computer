@@ -4,8 +4,8 @@
 	 * Sunday-first week columns that fit the card, month labels on top,
 	 * Mon/Wed/Fri on the left and a hover tip.
 	 *
-	 * One cell per day. The tip lists that day's tokens and messages for Grok
-	 * and for CodeBuddy. The cell color is the day's combined total.
+	 * One cell per day. The tip lists that day's tokens and messages.
+	 * The cell color uses the same totals.
 	 */
 	import type { UsageHeatmapEntry } from '$lib/apis/chat';
 	import { locale, t } from '$lib/i18n';
@@ -22,10 +22,6 @@
 		label: string;
 		tokens: number;
 		messages: number;
-		grokTokens: number;
-		grokMessages: number;
-		codebuddyTokens: number;
-		codebuddyMessages: number;
 		value: number;
 		level: number;
 	};
@@ -116,25 +112,6 @@
 		return [t1, t2, Math.max(at(0.75), t2)];
 	}
 
-	function agentSplit(entry: UsageHeatmapEntry | undefined) {
-		const grok = entry?.by_agent?.grok;
-		const codebuddy = entry?.by_agent?.codebuddy;
-		if (!grok && !codebuddy) {
-			return {
-				grokTokens: entry?.tokens ?? 0,
-				grokMessages: entry?.messages ?? 0,
-				codebuddyTokens: 0,
-				codebuddyMessages: 0
-			};
-		}
-		return {
-			grokTokens: grok?.tokens ?? 0,
-			grokMessages: grok?.messages ?? 0,
-			codebuddyTokens: codebuddy?.tokens ?? 0,
-			codebuddyMessages: codebuddy?.messages ?? 0
-		};
-	}
-
 	function buildWeeks(
 		data: UsageHeatmapEntry[],
 		count: number,
@@ -160,7 +137,6 @@
 				label: key,
 				tokens: entry?.tokens ?? 0,
 				messages: entry?.messages ?? 0,
-				...agentSplit(entry),
 				value: entry?.[valueOf] ?? 0,
 				level: 0
 			});
@@ -200,7 +176,7 @@
 		if (!item.date) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const tipWidth = TIP_WIDTH;
-		const above = rect.top - 168 >= 8;
+		const above = rect.top - 96 >= 8;
 		const left = Math.min(
 			Math.max(8, rect.left + rect.width / 2 - tipWidth / 2),
 			Math.max(8, window.innerWidth - tipWidth - 8)
@@ -211,9 +187,7 @@
 	function ariaFor(item: Cell) {
 		const tokens = $t('usage.tokensLabel');
 		const messages = $t('usage.messagesLabel');
-		const line = (name: string, tokenCount: number, messageCount: number) =>
-			`${name} ${tokens} ${formatCount(tokenCount, $locale)}, ${messages} ${messageCount.toLocaleString($locale)}`;
-		return `${item.label}, ${line('Grok', item.grokTokens, item.grokMessages)}, ${line('CodeBuddy', item.codebuddyTokens, item.codebuddyMessages)}`;
+		return `${item.label}, ${tokens} ${formatCount(item.tokens, $locale)}, ${messages} ${item.messages.toLocaleString($locale)}`;
 	}
 </script>
 
@@ -284,23 +258,13 @@
 		style="left: {hover.left}px; top: {hover.top}px;"
 	>
 		<div class="heatmap-tip-date">{hover.cell.label}</div>
-		<div class="heatmap-tip-agent">Grok</div>
 		<div class="heatmap-tip-row">
 			<span>{$t('usage.tokensLabel')}</span>
-			<span>{formatCount(hover.cell.grokTokens, $locale)}</span>
+			<span>{formatCount(hover.cell.tokens, $locale)}</span>
 		</div>
 		<div class="heatmap-tip-row">
 			<span>{$t('usage.messagesLabel')}</span>
-			<span>{hover.cell.grokMessages.toLocaleString($locale)}</span>
-		</div>
-		<div class="heatmap-tip-agent">CodeBuddy</div>
-		<div class="heatmap-tip-row">
-			<span>{$t('usage.tokensLabel')}</span>
-			<span>{formatCount(hover.cell.codebuddyTokens, $locale)}</span>
-		</div>
-		<div class="heatmap-tip-row">
-			<span>{$t('usage.messagesLabel')}</span>
-			<span>{hover.cell.codebuddyMessages.toLocaleString($locale)}</span>
+			<span>{hover.cell.messages.toLocaleString($locale)}</span>
 		</div>
 	</div>
 {/if}
@@ -422,11 +386,6 @@
 		margin-bottom: 0.25rem;
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
-	}
-
-	.heatmap-tip-agent {
-		margin-top: 0.375rem;
-		font-weight: 600;
 	}
 
 	.heatmap-tip-row {

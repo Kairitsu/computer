@@ -23,24 +23,13 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
         "models": [],
         "default_model": "",
     },
-    {
-        "id": "codebuddy",
-        "agent": "codebuddy",
-        "name": "CodeBuddy",
-        "mode": "auto",
-        "command": "codebuddy",
-        "home": None,
-        "models": [],
-        "default_model": "",
-    },
 ]
 
 _PROFILE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_VALID_AGENTS = {"grok", "codebuddy"}
+_VALID_AGENTS = {"grok"}
 _VALID_MODES = {"auto", "enabled", "disabled"}
 _AGENT_DEFAULTS: dict[str, dict[str, str]] = {
     "grok": {"name": "Grok", "command": "grok", "model": ""},
-    "codebuddy": {"name": "CodeBuddy", "command": "codebuddy", "model": ""},
 }
 
 
@@ -56,7 +45,7 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
 
     agent = str(profile.get("agent") or "").strip()
     if agent not in _VALID_AGENTS:
-        raise HTTPException(400, "agent must be grok or codebuddy")
+        raise HTTPException(400, "agent must be grok")
     defaults = _AGENT_DEFAULTS[agent]
 
     mode = str(profile.get("mode") or "auto").strip()
@@ -115,12 +104,12 @@ def normalize_agent_profiles(raw_profiles: Any) -> list[dict[str, Any]]:
     for profile in raw_profiles:
         if not isinstance(profile, dict):
             raise HTTPException(400, "agent profiles must be objects")
-        # Retired runners (Codex, Claude Code, and the rest) are ignored so an
-        # old saved list still loads the other profiles.
+        # Retired runners (Codex, Claude Code, CodeBuddy, and the rest) are ignored
+        # so an old saved list still loads.
         if str(profile.get("agent") or "").strip() not in _VALID_AGENTS:
             continue
         profiles.append(normalize_agent_profile(profile))
-    # Every agent keeps a profile; a saved list from before CodeBuddy gains its default.
+    # A saved list with no current agent still gets Grok.
     present = {profile["agent"] for profile in profiles}
     profiles.extend(
         deepcopy(default) for default in DEFAULT_AGENT_PROFILES if default["agent"] not in present

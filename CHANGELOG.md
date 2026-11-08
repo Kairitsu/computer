@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.6.9] - 2026-11-08
+
+### Removed
+
+- **不再支持 CodeBuddy** 模型菜单、对话、权限和计划模式里的 CodeBuddy 全部去掉，用量页和输入框旁也不再显示它的积分。设置里的代理更新只检查 Grok。已经用 CodeBuddy 开过的对话还在列表里，但不能再接着用它发消息。
+
 ## [5.6.8] - 2026-11-02
 
 ### Added

@@ -2,8 +2,7 @@
 
 A chat leaves data in several places besides its DB rows: the exported chat file, the
 attachments staged for the agent, uploaded files, the agent processes kept between
-turns, and the agents' own copies of the conversation: Grok's under ``~/.grok/sessions``,
-CodeBuddy's under ``~/.codebuddy/projects``.
+turns, and Grok's own copy of the conversation under ``~/.grok/sessions``.
 """
 
 from __future__ import annotations
@@ -98,11 +97,10 @@ async def _meta_mentions(value: str, exclude_chat_ids: set[str]) -> bool:
 
 
 def _agent_session_ids(chat: Chat, messages: list[ChatMessage]) -> set[str]:
-    """Grok and CodeBuddy sessions the chat continues or ever ran a turn in."""
-    from cptr.utils.agents.codebuddy import codebuddy_session_ids
+    """Grok sessions the chat continues or ever ran a turn in."""
     from cptr.utils.agents.grok import grok_session_ids
 
-    ids = {*grok_session_ids(chat), *codebuddy_session_ids(chat)}
+    ids = set(grok_session_ids(chat))
     for message in messages:
         turn = (message.meta or {}).get("agent_turn")
         if isinstance(turn, dict) and isinstance(turn.get("session_id"), str):
@@ -168,38 +166,6 @@ def _grok_session_dirs(homes: list[Path], session_id: str) -> list[Path]:
     return found
 
 
-async def _codebuddy_homes(request) -> list[Path]:
-    """Homes CodeBuddy keeps sessions in for cptr's processes (see codebuddy_env)."""
-    from cptr.utils.agents.models import get_raw_agent_profiles, normalize_agent_profiles
-    from cptr.utils.identity import identity_for_request
-
-    homes: list[Path] = []
-    try:
-        identity = await identity_for_request(request)
-        homes.append(Path(identity.home))
-    except Exception:
-        homes.append(Path.home())
-    try:
-        profiles = normalize_agent_profiles(await get_raw_agent_profiles())
-    except Exception:
-        profiles = []
-    for profile in profiles:
-        if profile.get("agent") == "codebuddy" and profile.get("home"):
-            homes.append(Path(str(profile["home"])).expanduser())
-    return list(dict.fromkeys(homes))
-
-
-def _codebuddy_session_paths(homes: list[Path], session_id: str) -> list[Path]:
-    """A CodeBuddy session's transcript and the folder its subagents' transcripts sit in."""
-    if not _SESSION_ID_RE.match(session_id):
-        return []
-    found: list[Path] = []
-    for home in homes:
-        projects = home / ".codebuddy" / "projects"
-        found += [*projects.glob(f"*/{session_id}.jsonl"), *projects.glob(f"*/{session_id}")]
-    return found
-
-
 async def _delete_path(request, path: Path) -> None:
     try:
         await Runtime.delete_item(request, str(path))
@@ -212,10 +178,9 @@ async def purge_chat(request, chat: Chat) -> None:
 
     Covers its internal child chats, their messages (with tool calls and reasoning),
     exported chat files, staged attachments, uploads no other chat uses, kept agent
-    processes, and Grok and CodeBuddy sessions no other chat uses.
+    processes, and Grok sessions no other chat uses.
     """
     from cptr.socket.main import emit_to_user
-    from cptr.utils.agents.codebuddy import close_codebuddy_session, codebuddy_session_ids
     from cptr.utils.agents.grok import close_grok_session, grok_session_ids
     from cptr.utils.chat_task import get_active_chat_ids
     from cptr.utils.storage import get_storage
@@ -231,8 +196,6 @@ async def purge_chat(request, chat: Chat) -> None:
         # Stop the agent processes these chats kept between turns.
         for session_id in grok_session_ids(owner):
             await close_grok_session(session_id)
-        for session_id in codebuddy_session_ids(owner):
-            await close_codebuddy_session(session_id)
     upload_ids = _upload_ids(messages)
 
     # Files first: the chat list re-imports chat files that have no DB row.
@@ -261,14 +224,10 @@ async def purge_chat(request, chat: Chat) -> None:
 
     if session_ids:
         homes = await _grok_homes(request)
-        codebuddy_homes = await _codebuddy_homes(request)
         for session_id in session_ids:
             if await _meta_mentions(session_id, owner_ids):
                 continue
-            for path in [
-                *_grok_session_dirs(homes, session_id),
-                *_codebuddy_session_paths(codebuddy_homes, session_id),
-            ]:
+            for path in _grok_session_dirs(homes, session_id):
                 await _delete_path(request, path)
 
     workspace = (chat.meta or {}).get("workspace") or ""

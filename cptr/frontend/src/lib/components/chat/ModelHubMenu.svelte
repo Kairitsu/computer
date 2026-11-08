@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Composer model hub: one chip for model + reasoning effort + context window.
-	 * When the model's agent CLI lists its efforts / context windows (Grok, CodeBuddy),
+	 * When the Grok CLI lists its efforts and context windows,
 	 * the hub offers exactly those, and effort names are the CLI values themselves.
 	 * Switching models selects the strongest effort and the longest window.
 	 * After the chat has a user message, the same menu still opens, but model,
@@ -310,12 +310,6 @@
 								onmouseenter={() => (highlightedIndex = index)}
 							>
 								<span class="truncate flex-1 text-left">{option.name}</span>
-								{#if option.credits}
-									<!-- CodeBuddy's credit rate for the model -->
-									<span class="shrink-0 text-[0.625rem] tabular-nums text-gray-400"
-										>{option.credits}</span
-									>
-								{/if}
 								{#if option.id === selectedModel}
 									<Icon name="check" size={12} class="shrink-0 hub-check" />
 								{/if}

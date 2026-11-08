@@ -37,8 +37,6 @@
 		inputText: string;
 		selectedModel: string;
 		toolApprovalMode?: ToolApprovalMode;
-		/** CodeBuddy's permission mode; null = the mode CodeBuddy starts in. */
-		permissionMode?: string | null;
 		planMode?: boolean;
 		reasoningEffort?: ReasoningEffort | null;
 		contextWindow?: number | null;
@@ -76,13 +74,11 @@
 		onsettingschange?: () => void;
 		onbeforeprofilechange?: (profile: string, modelId: string) => void;
 		ontoolapprovalchange?: (mode: ToolApprovalMode) => void;
-		onpermissionmodechange?: (mode: string) => void;
 	}
 	let {
 		inputText = $bindable(),
 		selectedModel = $bindable(),
 		toolApprovalMode = $bindable('auto'),
-		permissionMode = $bindable(null),
 		planMode = $bindable(false),
 		reasoningEffort = $bindable(null),
 		contextWindow = $bindable(null),
@@ -112,8 +108,7 @@
 		onqueuedelete,
 		onsettingschange,
 		onbeforeprofilechange,
-		ontoolapprovalchange,
-		onpermissionmodechange
+		ontoolapprovalchange
 	}: Props = $props();
 
 	let editorEl: HTMLDivElement | undefined = $state();
@@ -125,50 +120,25 @@
 	let approvalMenuOpen = $state(false);
 	const selectedChatModel = $derived($chatModels.find((model) => model.id === selectedModel));
 	// Grok's auto mode is its auto-review: risky calls are refused rather than asked about.
-	const grokSelected = $derived(selectedChatModel?.agent_id === 'grok');
-	// CodeBuddy lists its own permission modes. Plan is a separate switch, same as Grok.
-	const ownModes = $derived(
-		(selectedChatModel?.permission_modes ?? []).filter((mode) => mode.value !== 'plan')
-	);
-	const usesOwnModes = $derived(!grokSelected && ownModes.length > 0);
-	// Modes that skip CodeBuddy's permission checks.
-	const DANGER_MODES = new Set(['full', 'bypassPermissions', 'fullAccess']);
-	const approvalModes = $derived(
-		usesOwnModes
-			? ownModes.map((mode) => ({
-					value: mode.value,
-					label: $t(`codebuddyMode.${mode.value}`, { defaultValue: mode.label }),
-					desc: $t(`codebuddyMode.${mode.value}Desc`, { defaultValue: mode.description ?? '' })
-				}))
-			: [
-					{
-						value: 'ask',
-						label: $t('plusMenu.askApproval'),
-						desc: $t('plusMenu.askApprovalDesc')
-					},
-					{
-						value: 'auto',
-						label: $t(grokSelected ? 'plusMenu.grokAutoReview' : 'plusMenu.autoApprove'),
-						desc: $t(grokSelected ? 'plusMenu.grokAutoReviewDesc' : 'plusMenu.autoApproveDesc')
-					},
-					{
-						value: 'full',
-						label: $t('plusMenu.fullAccess'),
-						desc: $t('plusMenu.fullAccessDesc')
-					}
-				]
-	);
-	const currentApprovalMode = $derived.by(() => {
-		if (!usesOwnModes) return toolApprovalMode;
-		const values = new Set(ownModes.map((mode) => mode.value));
-		const usable = (mode: string | null | undefined) =>
-			!!mode && mode !== 'plan' && (values.size === 0 || values.has(mode));
-		if (usable(permissionMode)) return permissionMode;
-		const fallback = selectedChatModel?.default_permission_mode;
-		if (usable(fallback)) return fallback;
-		return ownModes[0]?.value;
-	});
-	const approvalDanger = $derived(DANGER_MODES.has(currentApprovalMode ?? ''));
+	const approvalModes = $derived([
+		{
+			value: 'ask',
+			label: $t('plusMenu.askApproval'),
+			desc: $t('plusMenu.askApprovalDesc')
+		},
+		{
+			value: 'auto',
+			label: $t('plusMenu.grokAutoReview'),
+			desc: $t('plusMenu.grokAutoReviewDesc')
+		},
+		{
+			value: 'full',
+			label: $t('plusMenu.fullAccess'),
+			desc: $t('plusMenu.fullAccessDesc')
+		}
+	]);
+	const currentApprovalMode = $derived(toolApprovalMode);
+	const approvalDanger = $derived(currentApprovalMode === 'full');
 	const approvalLabel = $derived(
 		approvalModes.find((mode) => mode.value === currentApprovalMode)?.label ??
 			$t('plusMenu.toolPermissions')
@@ -185,12 +155,6 @@
 
 	function selectApprovalMode(mode: string) {
 		approvalMenuOpen = false;
-		if (usesOwnModes) {
-			permissionMode = mode;
-			if (onpermissionmodechange) onpermissionmodechange(mode);
-			else onsettingschange?.();
-			return;
-		}
 		toolApprovalMode = mode as ToolApprovalMode;
 		if (ontoolapprovalchange) ontoolapprovalchange(mode as ToolApprovalMode);
 		else onsettingschange?.();

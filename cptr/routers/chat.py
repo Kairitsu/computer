@@ -33,7 +33,7 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 COOKIE_NAME = "cptr_session"
 
 # Coding agents that accept a per-turn reasoning effort (see utils/agents).
-REASONING_EFFORT_AGENTS = frozenset({"grok", "codebuddy"})
+REASONING_EFFORT_AGENTS = frozenset({"grok"})
 
 
 def _get_user(request: Request) -> str:
@@ -261,7 +261,7 @@ async def warm_model_cache(app_state) -> None:
 
 @router.get("/models")
 async def get_models(request: Request):
-    """List the models of the configured coding agents (Grok and CodeBuddy)."""
+    """List the models of the configured Grok agent."""
     _get_user(request)
     from cptr.utils.context import resolve_compact_token_threshold
 
@@ -327,11 +327,11 @@ def _message_tokens(usage: object) -> int:
         return 0
 
 
-_USAGE_AGENTS = ("grok", "codebuddy")
+_USAGE_AGENTS = ("grok",)
 
 
 def _empty_usage_day() -> dict:
-    """One calendar day's totals, with Grok and CodeBuddy counted apart."""
+    """One calendar day's totals. Messages are attributed to Grok."""
     return {
         "tokens": 0,
         "messages": 0,
@@ -341,7 +341,7 @@ def _empty_usage_day() -> dict:
 
 
 def _profile_agent_map(raw_profiles: object) -> dict[str, str]:
-    """Map each saved profile id to grok or codebuddy. A bad list uses the defaults."""
+    """Map each saved profile id to its agent. A bad list uses the defaults."""
     try:
         profiles = normalize_agent_profiles(raw_profiles)
     except HTTPException:
@@ -619,14 +619,12 @@ async def get_quota(
     """Subscription quota for the composer and sidebar.
 
     `supergrok` is the Grok CLI login's SuperGrok credit snapshot (None when not
-    signed in). `codebuddy` is CodeBuddy's login, its credit packages, and the
-    credits its turns on this server used. `local` is this user's token usage in
-    the current budget period; the budget itself is a client preference.
+    signed in). `local` is this user's token usage in the current budget period;
+    the budget itself is a client preference.
     """
     user_id = _get_user(request)
     from sqlalchemy import and_, or_
 
-    from cptr.utils.codebuddy_account import get_codebuddy_quota
     from cptr.utils.supergrok import get_supergrok_quota
 
     start, resets_at = _quota_period_bounds(period, datetime.now(timezone.utc))
@@ -664,7 +662,6 @@ async def get_quota(
 
     return {
         "supergrok": await get_supergrok_quota(force=refresh),
-        "codebuddy": await get_codebuddy_quota(user_id, force=refresh),
         "local": {
             "period": period,
             "tokens_used": tokens_used,
@@ -745,7 +742,7 @@ async def _get_context_leaf_message_id(chat) -> str | None:
 
 
 def _agent_context_window(app_state, model_id: str | None, params: object) -> int | None:
-    """Window an agent that lists its context windows (Grok, CodeBuddy) runs the chat with.
+    """Window Grok runs the chat with when the CLI lists context windows.
 
     A chosen window the CLI does not offer falls back to the longest window it lists.
     """
@@ -1231,30 +1228,9 @@ class AskUserNotPendingError(ValueError):
 
 
 def _answer_leaves_plan(arguments: dict, answers: dict[str, str] | None) -> bool:
-    """True when this answer turns the plan switch off.
-
-    Grok's plan card leaves on Approve. CodeBuddy's question card leaves on
-    Approve or Exit plan mode, and stays on Keep planning.
-    """
+    """True when approving Grok's plan turns the plan switch off."""
     answer = (answers or {}).get("plan")
-    if not isinstance(answer, str):
-        return False
-    if arguments.get("kind") == "plan":
-        return answer == "Approve"
-    questions = arguments.get("questions")
-    if not isinstance(questions, list):
-        return False
-    for question in questions:
-        if not isinstance(question, dict) or question.get("id") != "plan":
-            continue
-        labels = {
-            option.get("label")
-            for option in (question.get("options") or [])
-            if isinstance(option, dict)
-        }
-        if "Exit plan mode" in labels and answer in ("Approve", "Exit plan mode"):
-            return True
-    return False
+    return arguments.get("kind") == "plan" and answer == "Approve"
 
 
 async def resolve_ask_user(
@@ -1294,8 +1270,7 @@ async def resolve_ask_user(
         # the answer, so hand it over instead of starting a new turn.
         arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
         # Approving the plan leaves plan mode. Save that before the agent continues,
-        # so the approval card does not appear again after this turn. CodeBuddy's
-        # question card also leaves on "Exit plan mode"; "Keep planning" stays.
+        # so the approval card does not appear again after this turn.
         approved_plan = _answer_leaves_plan(arguments, answers)
         meta = dict(chat.meta or {})
         params = dict(meta.get("params") or {})
@@ -1509,10 +1484,9 @@ async def retract_message(request: Request, chat_id: str, message_id: str):
             await ChatMessage.delete(message.id)
         await Chat.update_current_message(chat_id, target.parent_id, now_ms())
 
-        # Rewind the agent session before its next turn (see run_grok_agent and
-        # run_codebuddy_agent). Grok rewinds to the turn's prompt index, CodeBuddy to its
-        # request id; without either, CodeBuddy starts a new session. Only the session the
-        # chat resumes matters; a turn sent to a new session is dropped with it.
+        # Rewind the Grok session before its next turn (see run_grok_agent). Grok
+        # rewinds to the turn's prompt index. Only the session the chat resumes
+        # matters; a turn sent to a new session is dropped with it.
         chat = await Chat.get_by_id(chat_id)
         meta = dict((chat.meta if chat else None) or {})
         sessions = dict(meta.get("agent_sessions") or {})
@@ -1520,7 +1494,7 @@ async def retract_message(request: Request, chat_id: str, message_id: str):
             entry = sessions.get(turn.get("profile_id"))
             if not isinstance(entry, dict) or entry.get("session_id") != turn.get("session_id"):
                 continue
-            if entry.get("agent") == "grok" and not isinstance(turn.get("prompt_index"), int):
+            if entry.get("agent") != "grok" or not isinstance(turn.get("prompt_index"), int):
                 continue
             pending = entry.get("rewind")
             if isinstance(pending, dict) and pending.get("session_id") == turn["session_id"]:
@@ -1533,7 +1507,7 @@ async def retract_message(request: Request, chat_id: str, message_id: str):
                 **entry,
                 "rewind": {
                     key: turn[key]
-                    for key in ("session_id", "prompt_index", "request_id")
+                    for key in ("session_id", "prompt_index")
                     if turn.get(key) is not None
                 },
             }

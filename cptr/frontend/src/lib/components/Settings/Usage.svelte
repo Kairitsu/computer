@@ -7,7 +7,6 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import CodeBuddyMark from '$lib/components/brand/CodeBuddyMark.svelte';
 	import GrokMark from '$lib/components/brand/GrokMark.svelte';
 	import Icon from '../Icon.svelte';
 	import BudgetSettings from './BudgetSettings.svelte';
@@ -26,7 +25,7 @@
 	} from '$lib/apis/grok';
 	import { locale, t } from '$lib/i18n';
 	import { requestConfirm } from '$lib/stores/confirm';
-	import { isSuperGrokQuota, quotaData, refreshQuota } from '$lib/stores/quota';
+	import { isSuperGrokQuota, refreshQuota } from '$lib/stores/quota';
 	import { tooltip } from '$lib/tooltip';
 	import {
 		formatCount,
@@ -70,8 +69,6 @@
 	const displayName = $derived(
 		signedIn ? profile?.display_name || profile?.email || 'Grok' : $t('grokAccount.signedOutName')
 	);
-	const codebuddy = $derived($quotaData?.codebuddy ?? null);
-	const codebuddyBalance = $derived(codebuddy?.balance ?? null);
 	const hasSamples = $derived(
 		!!usage && usage.heatmap.some((day) => day.tokens > 0 || day.messages > 0)
 	);
@@ -424,81 +421,6 @@
 		{#if !accountLoading && !quota}
 			<div class="plan">
 				<BudgetSettings />
-			</div>
-		{/if}
-	</section>
-
-	<!-- CodeBuddy: the same quota card as SuperGrok, with its own mark and usage page. -->
-	<section class="hero">
-		<div class="hero-top">
-			<div class="who">
-				<div class="avatar" aria-hidden="true">
-					<CodeBuddyMark size={32} />
-				</div>
-				<div class="min-w-0 flex-1">
-					<div class="name-row">
-						<span class="name">CodeBuddy</span>
-						{#if codebuddy && !codebuddy.signed_in}
-							<span class="badge">{$t('grokAccount.signedOut')}</span>
-						{/if}
-					</div>
-					{#if codebuddy?.nickname}
-						<div class="email">{codebuddy.nickname}</div>
-					{/if}
-				</div>
-			</div>
-		</div>
-
-		<div class="plan">
-			{#if codebuddyBalance}
-				<div class="plan-head">
-					<span class="plan-name">CodeBuddy</span>
-					<span class="plan-remain"
-						>{$t('grokAccount.remaining', {
-							percent: Math.round(codebuddyBalance.remaining_percent)
-						})}</span
-					>
-				</div>
-				<div class="quota-bar" aria-hidden="true">
-					<div
-						class="quota-fill"
-						class:is-warn={codebuddyBalance.used_percent >= 70}
-						class:is-danger={codebuddyBalance.used_percent >= 90}
-						style="width: {Math.min(100, Math.max(0, codebuddyBalance.used_percent))}%;"
-					></div>
-				</div>
-				<div class="plan-meta">
-					<span>
-						{$t('grokAccount.used', { percent: Math.round(codebuddyBalance.used_percent) })}
-						{#if codebuddyBalance.resets_at}
-							· {$t('grokAccount.resetsAt', {
-								time: formatResetTime(codebuddyBalance.resets_at, $locale)
-							})}
-						{/if}
-					</span>
-				</div>
-			{:else}
-				<div class="plan-empty">
-					<span class="plan-name">CodeBuddy</span>
-					<span class="chip" class:chip-warn={!!codebuddy?.error}>
-						{codebuddy?.signed_in
-							? $t('grokAccount.quotaError')
-							: $t('grokAccount.quotaUnknown')}
-					</span>
-					<span class="plan-meta-text">
-						{codebuddy?.signed_in
-							? $t('usageIndicator.codebuddyQuotaError')
-							: $t('usageIndicator.codebuddySignedOut')}
-					</span>
-				</div>
-			{/if}
-		</div>
-
-		{#if codebuddy?.usage_url}
-			<div class="links">
-				<a class="link-btn" href={codebuddy.usage_url} target="_blank" rel="noopener noreferrer"
-					>{$t('grokAccount.viewUsage')}</a
-				>
 			</div>
 		{/if}
 	</section>

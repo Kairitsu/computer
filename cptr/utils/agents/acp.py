@@ -1,4 +1,4 @@
-"""Small ACP JSON-RPC client for the Grok and CodeBuddy agents."""
+"""Small ACP JSON-RPC client for the Grok agent."""
 
 from __future__ import annotations
 
@@ -35,8 +35,7 @@ class AcpClient:
         self.cwd = cwd
         self.env = env
         self.auth_method_id = auth_method_id
-        # False for agents that sign in on their own: CodeBuddy's first auth method
-        # would start a new login instead of using the saved one.
+        # False skips ACP authenticate and keeps the process's existing login.
         self.authenticate = authenticate
         self.client_capabilities = client_capabilities or {}
         self.resume_session_id = resume_session_id

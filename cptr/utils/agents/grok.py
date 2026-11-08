@@ -467,7 +467,7 @@ async def _apply_session_settings(
 # Grok tracks how full its context window is inside the process. A process that only
 # reloads the session (session/load) starts that count near zero, so Grok's turn-start
 # auto-compaction never fires. Keeping each chat's process between turns keeps the
-# count. Idle Grok and CodeBuddy processes share one count and one timeout
+# count. Idle Grok processes share one count and one timeout
 # (Settings → General, utils/agents/process_limits.py). A process serving a turn
 # is never closed and is not counted. Closing a chat's tab closes its process too
 # (chat_task.release_chat_agents). A closed chat's next turn reloads the session.
@@ -591,7 +591,7 @@ async def close_idle_process(session_id: str) -> None:
 
 
 async def _trim_idle() -> None:
-    """Apply the shared idle limit to Grok and CodeBuddy together."""
+    """Apply the shared idle limit to Grok processes."""
     from cptr.utils.agents.process_limits import trim_idle_processes
 
     await trim_idle_processes()

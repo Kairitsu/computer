@@ -37,12 +37,12 @@
 		};
 	}
 
-	function defaultCommand(agent: AgentProfile['agent']): string {
-		return { grok: 'grok', codebuddy: 'codebuddy' }[agent];
+	function defaultCommand(_agent: AgentProfile['agent']): string {
+		return 'grok';
 	}
 
-	function defaultName(agent: AgentProfile['agent']): string {
-		return { grok: 'Grok', codebuddy: 'CodeBuddy' }[agent];
+	function defaultName(_agent: AgentProfile['agent']): string {
+		return 'Grok';
 	}
 </script>
 
@@ -96,7 +96,6 @@
 					class="settings-field mt-1 w-full"
 				>
 					<option value="grok">Grok</option>
-					<option value="codebuddy">CodeBuddy</option>
 				</select>
 			</div>
 		</div>

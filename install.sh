@@ -206,20 +206,6 @@ ensure_grok() {
 	fi
 }
 
-# CodeBuddy 不由这里安装：它要用户自己装好（npm i -g @tencent-ai/codebuddy-code）并登录。
-# 这里只检查一下，缺了就提醒，Grok 照常可用。
-ensure_codebuddy() {
-	if ! have codebuddy; then
-		info "CodeBuddy：没有找到 codebuddy 命令，CodeBuddy 暂时不能用。"
-		return 0
-	fi
-	if ls "$HOME/.local/share/CodeBuddyExtension/Data/Public/auth/"*.info >/dev/null 2>&1; then
-		info "CodeBuddy：$(codebuddy --version 2>/dev/null | head -n 1)，已登录"
-	else
-		warn "CodeBuddy 还没有为 $(id -un) 登录。运行 codebuddy 并登录后，CodeBuddy 才能用。"
-	fi
-}
-
 # ── 代码 ─────────────────────────────────────────────────────
 
 fetch_code() {
@@ -500,7 +486,6 @@ main() {
 	ensure_uv
 	ensure_node
 	ensure_grok
-	ensure_codebuddy
 	fetch_code
 	build
 	save_settings

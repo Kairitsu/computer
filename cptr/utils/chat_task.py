@@ -222,13 +222,10 @@ _released_chats: set[str] = set()
 
 
 async def _close_chat_agents(chat: Chat | None) -> None:
-    from cptr.utils.agents.codebuddy import close_codebuddy_session, codebuddy_session_ids
     from cptr.utils.agents.grok import close_grok_session, grok_session_ids
 
     for session_id in grok_session_ids(chat):
         await close_grok_session(session_id, running=False)
-    for session_id in codebuddy_session_ids(chat):
-        await close_codebuddy_session(session_id, running=False)
 
 
 async def release_chat_agents(chat_id: str) -> None:
@@ -1034,21 +1031,6 @@ async def run_chat_task(
             return
         meta = dict(chat.meta or {})
         resume_state = dict(resume_state)
-        # A permission mode the agent switched to itself during the turn (CodeBuddy
-        # leaving plan mode) becomes the chat's, so the next turn does not undo it.
-        # Plan is not a permission: the plan switch owns that, and writing it here
-        # would replace the mode the menu still shows.
-        agent_mode = resume_state.pop("permission_mode", None)
-        if agent_mode == "plan":
-            agent_mode = None
-        if isinstance(agent_mode, str) and agent_mode:
-            params = dict(meta.get("params") or {})
-            agents = dict(params.get("agents") or {})
-            agents[agent_target.profile_id] = {
-                **(agents.get(agent_target.profile_id) or {}),
-                "permission_mode": agent_mode,
-            }
-            meta["params"] = {**params, "agents": agents}
         sessions = dict(meta.get("agent_sessions") or {})
         sessions[agent_target.profile_id] = {
             **resume_state,
@@ -1060,13 +1042,6 @@ async def run_chat_task(
         }
         meta["agent_sessions"] = sessions
         await Chat.update_meta(chat_id, meta, now_ms())
-        if isinstance(agent_mode, str) and agent_mode:
-            await emit(
-                agent_settings={
-                    "profile_id": agent_target.profile_id,
-                    "permission_mode": agent_mode,
-                }
-            )
 
     async def record_turn_start(agent_target: AgentModelTarget, event: AgentTurnStarted):
         """Note where this turn sits in the agent session, so it can be rewound later.
@@ -1078,8 +1053,6 @@ async def run_chat_task(
             "session_id": event.session_id,
             "prompt_index": event.prompt_index,
         }
-        if event.request_id:
-            message_meta["agent_turn"]["request_id"] = event.request_id
         await ChatMessage.update(message_id, meta=message_meta)
         chat = await Chat.get_by_id(chat_id)
         sessions = dict(((chat.meta or {}).get("agent_sessions") or {}) if chat else {})
@@ -1092,7 +1065,6 @@ async def run_chat_task(
 
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
-        from cptr.utils.agents.codebuddy import run_codebuddy_agent
         from cptr.utils.agents.grok import run_grok_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
@@ -1122,8 +1094,6 @@ async def run_chat_task(
         if agent_target.agent == "grok" and chat_params.get("plan_mode", False):
             # A resumed agent session only receives the latest user message, so append the
             # instruction to it rather than adding a message that would replace it.
-            # CodeBuddy plans by switching its session to plan mode, and keeps the
-            # permission the menu shows.
             _append_prompt_suffix(messages, f"\n\n{PLAN_MODE_PROMPT}")
 
         resume_state = None
@@ -1134,13 +1104,9 @@ async def run_chat_task(
                 if isinstance(candidate, dict):
                     resume_state = candidate
 
-        runners = {
-            "grok": run_grok_agent,
-            "codebuddy": run_codebuddy_agent,
-        }
-        runner = runners.get(agent_target.agent)
-        if runner is None:
+        if agent_target.agent != "grok":
             raise RuntimeError(f"Unsupported agent type: {agent_target.agent}")
+        runner = run_grok_agent
 
         def _active_reasoning_item():
             return next(

@@ -139,14 +139,14 @@ class AgentCliUpdateRequest(BaseModel):
 
 @router.post("/agents/updates/check")
 async def check_agent_cli_updates(request: Request):
-    """See whether Grok or CodeBuddy has a newer release. Does not install it."""
+    """See whether Grok has a newer release. Does not install it."""
     require_admin(request)
     return await check_agent_updates()
 
 
 @router.post("/agents/updates/apply")
 async def apply_agent_cli_update(request: Request, body: AgentCliUpdateRequest):
-    """Install the confirmed Grok or CodeBuddy release."""
+    """Install the confirmed Grok release."""
     require_admin(request)
     try:
         result = await apply_agent_update(body.agent)

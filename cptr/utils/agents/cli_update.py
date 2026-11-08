@@ -1,9 +1,7 @@
-"""Check and install updates for the Grok and CodeBuddy command-line agents.
+"""Check and install updates for the Grok command-line agent.
 
 Checking never installs. Grok reports its own latest version with
-`grok update --check --json`. CodeBuddy's `update` command installs as soon
-as it finds a newer release, so the check uses `npm view` instead and only
-runs `codebuddy update` after the user confirms.
+`grok update --check --json`. `grok update` runs only after the user confirms.
 """
 
 from __future__ import annotations
@@ -13,8 +11,6 @@ import json
 import os
 import re
 import shutil
-import tarfile
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -27,18 +23,15 @@ from cptr.utils.agents.models import (
     normalize_agent_profiles,
 )
 
-AGENT_ORDER = ("grok", "codebuddy")
-DISPLAY_NAMES = {"grok": "Grok", "codebuddy": "CodeBuddy"}
-CODEBUDDY_PACKAGE = "@tencent-ai/codebuddy-code"
+AGENT_ORDER = ("grok",)
+DISPLAY_NAMES = {"grok": "Grok"}
 
 CHECK_TIMEOUT = 40
 INSTALL_TIMEOUT = 10 * 60
 NOTE_LIMIT = 24_000
 
-_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)")
 _VERSION_EXACT = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
 _GROK_HEADING = re.compile(r"^#\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b.*$", re.MULTILINE)
-_CODEBUDDY_HEADING = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
 
 _install_lock = asyncio.Lock()
 
@@ -76,16 +69,6 @@ def version_gt(left: str, right: str) -> bool:
     if parsed_left[1] is None or parsed_right[1] is None:
         return False
     return parsed_left[1] > parsed_right[1]
-
-
-def find_version(text: str) -> str | None:
-    """The last dotted version in command output. Warnings earlier in the text are ignored."""
-    found = None
-    for line in text.splitlines() or [text]:
-        match = _VERSION_RE.search(line.strip().strip('"').strip("'"))
-        if match and version_tuple(match.group(1)):
-            found = match.group(1)
-    return found
 
 
 def slice_version_notes(text: str, pattern: re.Pattern[str], current: str, latest: str) -> str:
@@ -322,74 +305,6 @@ async def _grok_notes(env: dict[str, str], current: str, latest: str, channel: s
     return ""
 
 
-def _is_codebuddy_package(command: str) -> bool:
-    real = Path(os.path.realpath(command))
-    for parent in [real.parent, *real.parents]:
-        package_file = parent / "package.json"
-        if not package_file.is_file():
-            if parent.parent == parent or len(parent.parts) <= 2:
-                break
-            continue
-        try:
-            data = json.loads(package_file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return False
-        return data.get("name") == CODEBUDDY_PACKAGE
-    return False
-
-
-async def _codebuddy_notes(current: str, latest: str) -> str:
-    cached = _read_text(_notes_cache("codebuddy", latest))
-    if cached:
-        sliced = slice_version_notes(cached, _CODEBUDDY_HEADING, current, latest)
-        if sliced:
-            return sliced
-    urls = [
-        f"https://unpkg.com/{CODEBUDDY_PACKAGE}@{latest}/CHANGELOG.md",
-        f"https://cdn.jsdelivr.net/npm/{CODEBUDDY_PACKAGE}@{latest}/CHANGELOG.md",
-    ]
-    for url in urls:
-        body = await _fetch_text(url)
-        if not body or "## [" not in body:
-            continue
-        notes = slice_version_notes(body, _CODEBUDDY_HEADING, current, latest)
-        if notes:
-            _write_text(_notes_cache("codebuddy", latest), body)
-            return notes
-    packed = await _codebuddy_changelog_from_npm(latest)
-    if not packed:
-        return ""
-    notes = slice_version_notes(packed, _CODEBUDDY_HEADING, current, latest)
-    if notes:
-        _write_text(_notes_cache("codebuddy", latest), packed)
-    return notes
-
-
-async def _codebuddy_changelog_from_npm(version: str) -> str:
-    """Last resort: the changelog sits inside the published package tarball."""
-    with tempfile.TemporaryDirectory(prefix="cptr-codebuddy-notes-") as tmp:
-        code, out, err = await _run(
-            ["npm", "pack", f"{CODEBUDDY_PACKAGE}@{version}", "--pack-destination", tmp],
-            os.environ.copy(),
-            180,
-        )
-        if code != 0:
-            return ""
-        archives = list(Path(tmp).glob("*.tgz"))
-        if not archives:
-            return ""
-        try:
-            with tarfile.open(archives[0], "r:gz") as bundle:
-                member = bundle.getmember("package/CHANGELOG.md")
-                extracted = bundle.extractfile(member)
-                if extracted is None:
-                    return ""
-                return extracted.read().decode("utf-8", errors="replace")
-        except (KeyError, tarfile.TarError, OSError):
-            _ = err, out
-            return ""
-
-
 async def _check_grok(profile: dict[str, Any]) -> dict[str, Any]:
     env = _profile_env(profile)
     name = str(profile.get("name") or DISPLAY_NAMES["grok"])
@@ -439,96 +354,29 @@ async def _check_grok(profile: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def _check_codebuddy(profile: dict[str, Any]) -> dict[str, Any]:
-    env = _profile_env(profile)
-    name = str(profile.get("name") or DISPLAY_NAMES["codebuddy"])
-    command = _resolve_command(str(profile.get("command") or "codebuddy"), env)
-    if command is None:
-        return _result("codebuddy", name=name, error="not_found")
-    if not _is_codebuddy_package(command):
-        return _result(
-            "codebuddy",
-            name=name,
-            command=command,
-            error="unsupported",
-            detail="This CodeBuddy command is not the official npm package.",
-        )
-    code, out, err = await _run([command, "--version"], env, CHECK_TIMEOUT)
-    current = find_version(out)
-    if code != 0 or not current:
-        return _result(
-            "codebuddy",
-            name=name,
-            command=command,
-            error="check_failed",
-            detail=_clip(err or out),
-        )
-    code, out, err = await _run(["npm", "view", CODEBUDDY_PACKAGE, "version"], env, CHECK_TIMEOUT)
-    latest = find_version(out)
-    if code != 0 or not latest:
-        return _result(
-            "codebuddy",
-            name=name,
-            command=command,
-            current_version=current,
-            error="check_failed",
-            detail=_clip(err or out),
-        )
-    available = version_gt(latest, current)
-    notes = await _codebuddy_notes(current, latest) if available else ""
-    return _result(
-        "codebuddy",
-        name=name,
-        command=command,
-        current_version=current,
-        latest_version=latest,
-        update_available=available,
-        can_update=available,
-        notes=notes,
-    )
-
-
 async def check_agent_updates() -> dict[str, Any]:
-    """Check Grok and CodeBuddy. Does not install anything."""
+    """Check Grok. Does not install anything."""
     profiles = await _profiles_for_update()
-    checkers = {"grok": _check_grok, "codebuddy": _check_codebuddy}
     agents = [agent for agent in AGENT_ORDER if agent in profiles]
-    results = await asyncio.gather(*(checkers[agent](profiles[agent]) for agent in agents))
+    results = await asyncio.gather(*(_check_grok(profiles[agent]) for agent in agents))
     return {"agents": list(results)}
 
 
 async def _install(agent: str, profile: dict[str, Any]) -> dict[str, Any]:
     env = _profile_env(profile)
-    command_name = "grok" if agent == "grok" else "codebuddy"
-    command = _resolve_command(str(profile.get("command") or command_name), env)
+    command = _resolve_command(str(profile.get("command") or "grok"), env)
     if command is None:
         raise AgentUpdateError("not_found")
-    if agent == "codebuddy" and not _is_codebuddy_package(command):
-        raise AgentUpdateError(
-            "unsupported", "This CodeBuddy command is not the official npm package."
-        )
-    before = ""
-    if agent == "grok":
-        code, out, err = await _run([command, "update", "--check", "--json"], env, CHECK_TIMEOUT)
-        payload = _json_object(out or err)
-        if payload:
-            before = str(payload.get("currentVersion") or "")
-    else:
-        code, out, _err = await _run([command, "--version"], env, CHECK_TIMEOUT)
-        before = find_version(out) or ""
+    code, out, err = await _run([command, "update", "--check", "--json"], env, CHECK_TIMEOUT)
+    payload = _json_object(out or err)
+    before = str(payload.get("currentVersion") or "") if payload else ""
     code, out, err = await _run([command, "update"], env, INSTALL_TIMEOUT)
     log = _clip("\n".join(part for part in (out, err) if part))
     if code != 0:
         raise AgentUpdateError("install_failed", log)
-    if agent == "grok":
-        _code, out, err = await _run([command, "update", "--check", "--json"], env, CHECK_TIMEOUT)
-        payload = _json_object(out or err) or {}
-        version = str(payload.get("currentVersion") or "")
-    else:
-        _code, out, _err = await _run([command, "--version"], env, CHECK_TIMEOUT)
-        version = find_version(out) or ""
-    if not version:
-        version = before
+    _code, out, err = await _run([command, "update", "--check", "--json"], env, CHECK_TIMEOUT)
+    payload = _json_object(out or err) or {}
+    version = str(payload.get("currentVersion") or "") or before
     if before and version and not version_gt(version, before):
         raise AgentUpdateError("install_failed", log or "version did not change")
     return {
@@ -543,9 +391,9 @@ async def _install(agent: str, profile: dict[str, Any]) -> dict[str, Any]:
 
 
 async def apply_agent_update(agent: str) -> dict[str, Any]:
-    """Install the latest version of one agent. One install runs at a time."""
+    """Install the latest version of Grok. One install runs at a time."""
     if agent not in AGENT_ORDER:
-        raise AgentUpdateError("unsupported", "agent must be grok or codebuddy")
+        raise AgentUpdateError("unsupported", "agent must be grok")
     profiles = await _profiles_for_update()
     profile = profiles.get(agent)
     if profile is None:

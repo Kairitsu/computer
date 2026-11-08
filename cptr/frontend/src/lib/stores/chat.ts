@@ -274,11 +274,6 @@ export interface ChatModel {
 	default_reasoning_effort?: ReasoningEffort | null;
 	/** Context windows the agent CLI offers for this model; none means any window. */
 	context_windows?: number[];
-	/** Permission modes the agent CLI lists (CodeBuddy), in its order. Grok uses ask/auto/full. */
-	permission_modes?: { value: string; label: string; description?: string }[];
-	default_permission_mode?: string;
-	/** CodeBuddy's credit rate for the model, e.g. "x0.34". */
-	credits?: string;
 }
 
 /** The agent profile a model id belongs to: `agent:<profile>/<model>`. */

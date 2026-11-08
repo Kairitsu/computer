@@ -63,15 +63,13 @@ export interface SendMessageResult {
 
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
 
-/** An effort the agent CLI lists for the model (CodeBuddy also has 'minimal' and 'disabled'). */
+/** An effort the Grok CLI lists for the model. */
 export type ReasoningEffort = string;
 
-/** One agent's own composer settings; agents never share them. */
+/** One profile's composer settings. */
 export interface AgentSendParams {
 	/** Grok's approval mode. */
 	tool_approval_mode?: ToolApprovalMode;
-	/** CodeBuddy's permission mode, one of the modes it lists. */
-	permission_mode?: string;
 	/** Omitted = the agent CLI's default for the model. */
 	reasoning_effort?: ReasoningEffort;
 	/** Context window (tokens); omitted = the CLI's default for the model. */
@@ -96,55 +94,9 @@ export interface SuperGrokQuota {
 	plan?: string | null;
 }
 
-export interface CodeBuddyUsagePeriod {
-	/** Credits CodeBuddy reported for this user's turns since `period_start`. */
-	credits: number;
-	replies: number;
-	period_start: number;
-}
-
-/** One active CodeBuddy credit package, same role as a Grok product row. */
-export interface CodeBuddyPackage {
-	id: string;
-	label: string;
-	total: number;
-	used: number;
-	remain: number;
-	used_percent: number;
-	resets_at: number | null;
-}
-
-/** Official CodeBuddy balance: totals plus one row per active package. */
-export interface CodeBuddyBalance {
-	total: number;
-	used: number;
-	remain: number;
-	used_percent: number;
-	remaining_percent: number;
-	resets_at: number | null;
-	packages: CodeBuddyPackage[];
-}
-
-export interface CodeBuddyQuota {
-	signed_in: boolean;
-	nickname?: string;
-	account_type?: string;
-	domain?: string;
-	/** codebuddy.cn's usage page, still linked under the table. */
-	usage_url?: string;
-	expires_at?: number | null;
-	usage?: { day: CodeBuddyUsagePeriod; week: CodeBuddyUsagePeriod; month: CodeBuddyUsagePeriod };
-	/** null when signed out or the billing call failed (`error` is set in that case). */
-	balance?: CodeBuddyBalance | null;
-	error?: string | null;
-	fetched_at?: number;
-}
-
 export interface QuotaResponse {
 	/** null = no Grok CLI login; `error` = login found but the quota call failed. */
 	supergrok: SuperGrokQuota | { error: string; fetched_at: number; plan?: string | null } | null;
-	/** CodeBuddy's login, credit packages, and the credits its turns used. */
-	codebuddy?: CodeBuddyQuota | null;
 	local: {
 		period: 'day' | 'week' | 'month';
 		tokens_used: number;
@@ -164,10 +116,9 @@ export interface UsageHeatmapEntry {
 	messages: number;
 	chats: number;
 	models: Record<string, number>;
-	/** Tokens and messages from Grok and from CodeBuddy on this day. */
+	/** Tokens and messages from Grok on this day. */
 	by_agent?: {
 		grok?: UsageAgentCount;
-		codebuddy?: UsageAgentCount;
 	};
 }
 

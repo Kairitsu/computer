@@ -5,7 +5,7 @@
 	interface Props {
 		onfiles: (files: FileList) => void;
 		planMode?: boolean;
-		/** False hides the plan switch. Grok and CodeBuddy both show it. */
+		/** False hides the plan switch. */
 		showPlanMode?: boolean;
 		onchange?: () => void;
 	}
