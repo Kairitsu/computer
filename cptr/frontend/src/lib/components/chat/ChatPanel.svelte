@@ -32,6 +32,7 @@
 		updateChatStatuses,
 		registerToolApprovalShortcutHandler
 	} from '$lib/stores/chat';
+	import { planAskWasRevise } from '$lib/grokPlan';
 	import { socketStore } from '$lib/stores/socket.svelte';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import { get } from 'svelte/store';
@@ -411,6 +412,8 @@
 			return null;
 		const last = activePath[activePath.length - 1]?.msg;
 		if (!last || last.role !== 'assistant' || !last.done || last.meta?.error) return null;
+		// 修改计划 already answered this turn. Do not ask for approval again when it finishes.
+		if (planAskWasRevise(last.output)) return null;
 		return last.content?.trim() ? last.id : null;
 	});
 	const hasChatContent = $derived(
@@ -1145,7 +1148,12 @@
 		planAskBusy = true;
 		planMode = false;
 		try {
-			await handleAskUserAnswer(pending.messageId, pending.item.call_id, { plan: 'Approve' }, false);
+			await handleAskUserAnswer(
+				pending.messageId,
+				pending.item.call_id,
+				{ plan: 'Approve' },
+				false
+			);
 			await persistChatSettings();
 		} catch {
 			planMode = true;
@@ -1159,6 +1167,7 @@
 		const pending = pendingAskUser;
 		if (!pending || pending.item?.arguments?.kind !== 'plan') return;
 		planAskBusy = true;
+		planRevisingId = pending.messageId;
 		try {
 			await handleAskUserAnswer(
 				pending.messageId,

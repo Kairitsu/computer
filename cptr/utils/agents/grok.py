@@ -70,7 +70,9 @@ GROK_MIN_IMAGE_PIXELS = 512
 PLAN_APPROVE_LABEL = "Approve"
 PLAN_KEEP_PLANNING_LABEL = "Keep planning"
 PLAN_KEEP_PLANNING_FEEDBACK = (
-    "The user wants to keep planning. Stay in plan mode and ask what to change."
+    "The user wants to revise this plan. Stay in plan mode. "
+    "Do not abandon the plan, do not start implementing, and do not ask for approval again "
+    "until the user sends their changes."
 )
 
 
@@ -155,8 +157,8 @@ def _ask_user_question_response(ask: AgentAskUser, keys: list[str]) -> dict[str,
 
 
 def _exit_plan_mode_question(request_id: Any, _params: dict[str, Any]) -> AgentAskUser:
-    # The plan is the session plan.md. The chat renders that Write as a normal reply.
-    # This ask is only the approval, shown as the plan card rather than a second copy.
+    # The plan is the session plan.md. The chat renders that write as a normal reply.
+    # This ask is only the approval, shown as the plan card rather than a question.
     return AgentAskUser(
         call_id=_ext_call_id(_params, request_id),
         questions=[
@@ -186,7 +188,10 @@ def _exit_plan_mode_response(ask: AgentAskUser) -> dict[str, Any]:
     answer = (ask.answers or {}).get("plan")
     if answer == PLAN_APPROVE_LABEL:
         return {"outcome": "approved"}
-    if not answer or answer == PLAN_KEEP_PLANNING_LABEL:
+    # "abandoned" makes Grok cancel the plan. 修改计划 means stay and wait for changes.
+    if answer == PLAN_KEEP_PLANNING_LABEL:
+        return {"outcome": "request_changes", "feedback": PLAN_KEEP_PLANNING_FEEDBACK}
+    if not answer:
         return {"outcome": "abandoned", "feedback": PLAN_KEEP_PLANNING_FEEDBACK}
     return {"outcome": "request_changes", "feedback": answer}
 

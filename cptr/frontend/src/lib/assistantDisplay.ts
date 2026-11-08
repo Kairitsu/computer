@@ -1,4 +1,4 @@
-import { messageAlreadyHasPlan, planTextFromToolCall } from './grokPlan';
+import { messageAlreadyHasPlan, nextPlanText } from './grokPlan';
 
 export interface ActivityGroup {
 	type: 'activity_group';
@@ -83,6 +83,8 @@ export function buildAssistantDisplayItems(output: any[] | null | undefined): Di
 		}
 	};
 
+	let planText: string | null = null;
+
 	const placePlan = (text: string) => {
 		const existing = items.findIndex((entry) => entry.type === 'plan_item');
 		if (existing >= 0) items.splice(existing, 1);
@@ -91,13 +93,16 @@ export function buildAssistantDisplayItems(output: any[] | null | undefined): Di
 
 	for (const [index, item] of output.entries()) {
 		if (item.type === 'function_call') {
-			if (item.name !== 'ask_user' || item.status !== 'pending') {
+			// A plan approval is the card under the composer, not a question in the transcript.
+			const planAsk = item.name === 'ask_user' && item.arguments?.kind === 'plan';
+			if (!planAsk && (item.name !== 'ask_user' || item.status !== 'pending')) {
 				ensureGroup();
 				currentGroup!.entries.push(item);
 				currentGroup!.calls.push(item);
 			}
-			const planText = planTextFromToolCall(item);
-			if (planText) {
+			const next = nextPlanText(planText, item);
+			if (next) {
+				planText = next;
 				flushGroup();
 				placePlan(planText);
 			}
