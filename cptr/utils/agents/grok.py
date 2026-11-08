@@ -155,8 +155,8 @@ def _ask_user_question_response(ask: AgentAskUser, keys: list[str]) -> dict[str,
 
 
 def _exit_plan_mode_question(request_id: Any, _params: dict[str, Any]) -> AgentAskUser:
-    # The plan is already in the assistant message. This ask is only the approval,
-    # shown as the plan card rather than a second copy of the plan.
+    # The plan is the session plan.md. The chat renders that Write as a normal reply.
+    # This ask is only the approval, shown as the plan card rather than a second copy.
     return AgentAskUser(
         call_id=_ext_call_id(_params, request_id),
         questions=[

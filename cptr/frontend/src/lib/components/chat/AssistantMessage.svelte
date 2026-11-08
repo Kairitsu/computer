@@ -10,6 +10,7 @@
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
 	import { currentWorkspace } from '$lib/stores';
 	import { tooltip } from '$lib/tooltip';
+	import { buildAssistantDisplayItems, messageItemText } from '$lib/assistantDisplay';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import Icon from '../Icon.svelte';
 	import { t } from '$lib/i18n';
@@ -231,40 +232,6 @@
 		}
 	}
 
-	// ── Consecutive grouping logic ────────────────────────────────
-	// Groups consecutive assistant activity (reasoning + tool calls), breaking on message items.
-
-	interface ActivityGroup {
-		type: 'activity_group';
-		entries: any[]; // ordered reasoning/function_call items
-		calls: any[]; // function_call items
-		reasoning: any[];
-		outputs: Map<string, any>; // call_id → function_call_output
-	}
-
-	interface MessageItem {
-		type: 'message_item';
-		item: any;
-	}
-
-	interface ArtifactItem {
-		type: 'artifact_item';
-		item: any;
-	}
-
-	interface ImageItem {
-		type: 'image_item';
-		item: any;
-	}
-
-	interface FileItem {
-		type: 'file_item';
-		item: any;
-		index: number;
-	}
-
-	type DisplayItem = ActivityGroup | MessageItem | ArtifactItem | ImageItem | FileItem;
-
 	const outputText = $derived.by((): string => {
 		return (output || [])
 			.filter((i: any) => i.type === 'message')
@@ -288,10 +255,6 @@
 		return content.startsWith(outputText) ? content.slice(outputText.length) : '';
 	});
 
-	function messageItemText(item: any): string {
-		return (item.content || []).map((c: any) => c.text || '').join('');
-	}
-
 	function escapeRegExp(value: string): string {
 		return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
@@ -309,73 +272,7 @@
 		return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 	}
 
-	const displayItems = $derived.by((): DisplayItem[] => {
-		if (!output?.length) return [];
-
-		const items: DisplayItem[] = [];
-		let currentGroup: ActivityGroup | null = null;
-
-		// Collect all function_call_output items for lookup
-		const outputMap = new Map<string, any>();
-		for (const item of output) {
-			if (item.type === 'function_call_output' && item.call_id) {
-				outputMap.set(item.call_id, item);
-			}
-		}
-
-		const ensureGroup = () => {
-			if (!currentGroup) {
-				currentGroup = {
-					type: 'activity_group',
-					entries: [],
-					calls: [],
-					reasoning: [],
-					outputs: outputMap
-				};
-			}
-		};
-
-		const flushGroup = () => {
-			if (currentGroup && (currentGroup.calls.length > 0 || currentGroup.reasoning.length > 0)) {
-				items.push(currentGroup);
-				currentGroup = null;
-			}
-		};
-
-		for (const [index, item] of output.entries()) {
-			if (item.type === 'function_call') {
-				if (item.name !== 'ask_user' || item.status !== 'pending') {
-					ensureGroup();
-					currentGroup!.entries.push(item);
-					currentGroup!.calls.push(item);
-				}
-			} else if (item.type === 'reasoning') {
-				ensureGroup();
-				currentGroup!.entries.push(item);
-				currentGroup!.reasoning.push(item);
-			} else if (item.type === 'message') {
-				// Some providers emit empty message shells between reasoning/tool items.
-				// Only visible assistant text should break a consecutive activity run.
-				if (messageItemText(item).trim()) {
-					flushGroup();
-					items.push({ type: 'message_item', item });
-				}
-			} else if (item.type === 'artifact') {
-				flushGroup();
-				items.push({ type: 'artifact_item', item });
-			} else if (item.type === 'image') {
-				flushGroup();
-				items.push({ type: 'image_item', item });
-			} else if (item.type === 'file') {
-				flushGroup();
-				items.push({ type: 'file_item', item, index });
-			}
-			// function_call_output items are handled via outputMap, skip standalone render
-		}
-		flushGroup();
-
-		return items;
-	});
+	const displayItems = $derived.by(() => buildAssistantDisplayItems(output));
 
 	/** Format usage data for tooltip display */
 	function formatUsageLabel(key: string): string {
@@ -452,6 +349,8 @@
 						{#if messageText}
 							<MarkdownRenderer content={messageText} />
 						{/if}
+					{:else if displayItem.type === 'plan_item'}
+						<MarkdownRenderer content={displayItem.text} />
 					{:else if displayItem.type === 'artifact_item'}
 						{@const artifact = displayItem.item}
 						{@const preview = (artifact.content || '').replace(/^#.*\n*/m, '').trim()}

@@ -4,6 +4,12 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.7.0] - 2026-11-08
+
+### Fixed
+
+- **计划正文直接显示在对话里** Grok 写完计划后，正文会出现在对话中，不用再点开思考过程和工具调用。批准和修改的按钮还在原来的位置。
+
 ## [5.6.9] - 2026-11-08
 
 ### Removed

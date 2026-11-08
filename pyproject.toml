@@ -1,6 +1,6 @@
 [project]
 name = "cptr"
-version = "5.6.9"
+version = "5.7.0"
 description = "Your computer, from anywhere. Code, manage, and control your machine from the web."
 license = {file = "LICENSE"}
 readme = "README.md"
