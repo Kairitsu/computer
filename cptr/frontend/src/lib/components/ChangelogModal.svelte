@@ -3,7 +3,8 @@
 	import Modal from './Modal.svelte';
 	import Icon from './Icon.svelte';
 	import { savePreferences } from '$lib/apis/state';
-	import { appVersion, lastSeenVersion, showChangelog } from '$lib/stores';
+	import { session } from '$lib/session';
+	import { appVersion, lastSeenVersion, showChangelog, showUpdateModal } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChangelogNotes from './ChangelogNotes.svelte';
 	import type { ChangelogVersion } from '$lib/apis/update';
@@ -33,6 +34,11 @@
 			savePreferences({ version: $appVersion }).catch(() => {});
 		}
 		showChangelog.set(false);
+	}
+
+	function checkForUpdates() {
+		handleClose();
+		showUpdateModal.set(true);
 	}
 </script>
 
@@ -80,7 +86,15 @@
 			{/if}
 		</div>
 
-		<div class="flex items-center justify-end px-4 pt-1 pb-4 shrink-0">
+		<div class="flex items-center justify-end gap-4 px-4 pt-1 pb-4 shrink-0">
+			{#if $session?.role === 'admin'}
+				<button
+					class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
+					onclick={checkForUpdates}
+				>
+					{$t('sidebar.checkUpdates')}
+				</button>
+			{/if}
 			<button
 				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
 				onclick={handleClose}

@@ -690,7 +690,7 @@
 	"keyboard.rejectToolCall": "拒绝待处理的工具调用",
 	"keyboard.voiceMemo": "打开语音备忘录录制器",
 	"changelog.whatsNew": "更新记录",
-	"changelog.subtitle": "Computer（Grok 版）",
+	"changelog.subtitle": "Computer",
 	"changelog.section.added": "新增",
 	"changelog.section.changed": "改进",
 	"changelog.section.fixed": "修复",

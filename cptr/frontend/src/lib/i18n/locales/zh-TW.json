@@ -656,7 +656,7 @@
 	"keyboard.rejectToolCall": "拒絕待處理的工具呼叫",
 	"keyboard.voiceMemo": "開啟語音備忘錄錄製器",
 	"changelog.whatsNew": "更新紀錄",
-	"changelog.subtitle": "Computer（Grok 版）",
+	"changelog.subtitle": "Computer",
 	"changelog.section.added": "新增",
 	"changelog.section.changed": "改進",
 	"changelog.section.fixed": "修正",

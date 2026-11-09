@@ -4,6 +4,16 @@
 
 本项目改自 Open WebUI Computer 0.9.21，原版的更新记录请看[它的仓库](https://github.com/open-webui/computer/blob/main/CHANGELOG.md)。
 
+## [5.7.2] - 2026-11-09
+
+### Added
+
+- **更新记录里可以检查更新** 更新记录右下角，「完成」左边多了「检查更新」。点它会关掉这份记录，再打开和侧边栏一样的检查更新。
+
+### Changed
+
+- **更新记录副标题只写 Computer** 窗口上不再出现「（Grok 版）」。
+
 ## [5.7.1] - 2026-11-08
 
 ### Fixed

@@ -768,7 +768,7 @@
 	"keyboard.rejectToolCall": "Reject the pending tool call",
 	"keyboard.voiceMemo": "Open voice memo recorder",
 	"changelog.whatsNew": "Changelog",
-	"changelog.subtitle": "Computer (Grok edition)",
+	"changelog.subtitle": "Computer",
 	"changelog.section.added": "Added",
 	"changelog.section.changed": "Changed",
 	"changelog.section.fixed": "Fixed",
