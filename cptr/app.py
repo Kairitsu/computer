@@ -18,8 +18,10 @@ from cptr.routers import (
     update_router,
     workspace_router,
 )
+from cptr.env import CORS_ALLOWED_ORIGINS
 from cptr.utils.config import check_access, load_config
 from cptr.utils.db import init_db
+from cptr.utils.request_origin import write_is_trusted
 
 START_TIME = time.time()
 
@@ -88,6 +90,18 @@ app = FastAPI(lifespan=lifespan)
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
+    client_host = request.client.host if request.client else None
+    if not write_is_trusted(
+        method=request.method,
+        origin=request.headers.get("origin"),
+        host=request.headers.get("host"),
+        scheme=request.url.scheme,
+        client_host=client_host,
+        forwarded_proto=request.headers.get("x-forwarded-proto"),
+        sec_fetch_site=request.headers.get("sec-fetch-site"),
+        allowed_origins=CORS_ALLOWED_ORIGINS,
+    ):
+        return JSONResponse({"error": "cross_origin"}, 403)
     # Skip auth for: auth endpoints, health, static assets, HTML pages
     if (
         path.startswith("/api/auth")
@@ -103,7 +117,7 @@ async def auth_middleware(request: Request, call_next):
     if request.method == "GET" and path.startswith("/api/files/"):
         return await call_next(request)
 
-    client_host = request.client.host if request.client else "127.0.0.1"
+    client_host = client_host or "127.0.0.1"
     jwt_token = request.cookies.get("cptr_session")
 
     # Read trusted header (configurable, defaults to Remote-User)
@@ -135,17 +149,17 @@ if audit_level != AuditLevel.NONE:
     )
 
 
-# CORS middleware: uses CPTR_CORS_ALLOWED_ORIGINS env var (default "*").
-from fastapi.middleware.cors import CORSMiddleware
-from cptr.env import CORS_ALLOWED_ORIGINS
+# Cross-origin calls are off unless CPTR_CORS_ALLOWED_ORIGINS lists them.
+if CORS_ALLOWED_ORIGINS:
+    from fastapi.middleware.cors import CORSMiddleware
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS if isinstance(CORS_ALLOWED_ORIGINS, list) else ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # Path normalization middleware (Windows: \ → / in JSON responses)

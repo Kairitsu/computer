@@ -8,7 +8,8 @@ export type UpdateReason =
 	| 'git_failed'
 	| 'timeout'
 	| 'dirty'
-	| 'diverged';
+	| 'diverged'
+	| 'bad_signature';
 
 export interface UpdateRevision {
 	version: string;

@@ -1430,6 +1430,7 @@
 	"updater.reason.timeout": "检查更新超时了，请稍后再试。",
 	"updater.reason.dirty": "服务器上的代码有未提交的修改，自动更新可能会覆盖它们，所以先停在这里。请先提交或撤销这些文件的修改：",
 	"updater.reason.diverged": "服务器上的代码有 GitHub 上没有的本地提交，两边已经分叉，没法自动更新。",
+	"updater.reason.bad_signature": "这次更新没有作者的签名，已经拒绝安装。",
 	"updater.updatingTitle": "正在更新",
 	"updater.updatingHint": "可能需要几分钟。完成后服务会自动重启，页面也会自动刷新。",
 	"updater.restarting": "正在重启服务…",
@@ -1457,5 +1458,6 @@
 	"updater.error.up_to_date": "已经是最新版本了。",
 	"updater.error.busy": "已经有一个更新正在进行。",
 	"updater.error.timeout": "有一个更新步骤耗时太久，已经中止。",
+	"updater.error.bad_signature": "这次更新没有作者的签名，已经拒绝安装。",
 	"updater.error.unknown": "更新过程中出了点问题。"
 }

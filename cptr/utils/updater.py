@@ -9,6 +9,10 @@ systemd, nohup and tmux all keep tracking the process.
 
 A wheel install (pip install of a built package) has no checkout to update, so
 check() reports it as unsupported.
+
+Before any fetched commit is merged or executed, verify-commit must accept it
+with the author key already installed in cptr/trusted-signers. The key shipped
+inside the commit being installed is not consulted.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from cptr.utils.changelog import parse_changelog_text
 log = logging.getLogger(__name__)
 
 PACKAGE_DIR = Path(__file__).resolve().parent.parent
+SIGNERS_FILE = PACKAGE_DIR / "trusted-signers"
 FRONTEND_DIR = PACKAGE_DIR / "frontend"
 BUILD_DIR = FRONTEND_DIR / "build"
 STAGING_DIR = FRONTEND_DIR / "build.next"
@@ -175,6 +180,32 @@ async def _run(args: list[str], cwd: Path, env: dict[str, str]) -> None:
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
+async def verify_signed_commit(repo: Path, sha: str) -> None:
+    """Raise unless the installed author key signed this commit.
+
+    The signers file is the one already on disk. A fetched tree cannot replace
+    that key and then satisfy this check.
+    """
+    signers = SIGNERS_FILE.resolve()
+    if not signers.is_file():
+        raise UpdateError("bad_signature")
+    try:
+        await _git(
+            repo,
+            "-c",
+            "gpg.format=ssh",
+            "-c",
+            f"gpg.ssh.allowedSignersFile={signers}",
+            "verify-commit",
+            sha,
+        )
+    except UpdateError as error:
+        detail = ""
+        if error.detail:
+            detail = error.detail.splitlines()[-1]
+        raise UpdateError("bad_signature", detail) from error
+
+
 # ── Checking ─────────────────────────────────────────────────
 
 
@@ -306,6 +337,8 @@ async def _check() -> dict[str, Any]:
             "date": await _git(repo, "show", "-s", "--format=%cI", latest),
         }
         result["behind"] = behind
+        if behind:
+            await verify_signed_commit(repo, latest)
         result["available"] = behind > 0
 
         if behind:
@@ -416,6 +449,7 @@ async def _apply(repo: Path) -> None:
         _step("fetch", "done")
 
         _step("pull", "running")
+        await verify_signed_commit(repo, target)
         changed = set((await _git(repo, "diff", "--name-only", old_head, target)).splitlines())
         _log_line(f"$ git merge --ff-only {target[:7]}")
         await _git(repo, "merge", "--ff-only", target)

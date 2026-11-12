@@ -3,7 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh | bash
 #
-# 已经装过的话，再运行一次同一条命令就是更新。可以在命令末尾加参数，例如：
+# 已经装过的话，再运行一次同一条命令就是更新。更新会先核对作者签名，
+# 对不上就停住，不会构建，也不会覆盖现有代码。可以在命令末尾加参数，例如：
 #
 #   curl -fsSL https://raw.githubusercontent.com/Kairitsu/computer/main/install.sh | bash -s -- --port 8080
 #
@@ -22,6 +23,9 @@
 set -euo pipefail
 
 REPO_URL="${CPTR_REPO_URL:-https://github.com/Kairitsu/computer.git}"
+# 作者签名公钥。已安装的副本优先用磁盘上的 cptr/trusted-signers，
+# 这样新拉下来的提交换不掉这把钥匙。第一次安装还没有那份文件，就用这一行。
+TRUSTED_SIGNER='ljunkai888@gmail.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFQUpXaQKKzEK+oqE0miAYTnXyGltzeUoYav/wI9w4u'
 INSTALL_DIR="${CPTR_INSTALL_DIR:-$HOME/.local/share/computer}"
 # 留空表示没指定：先看上次安装记下的值，再用默认值（见 load_settings）。
 HOST="${CPTR_HOST:-}"
@@ -208,6 +212,34 @@ ensure_grok() {
 
 # ── 代码 ─────────────────────────────────────────────────────
 
+# 把用来校验的公钥写到一个临时文件。已有安装用磁盘上的那份。
+write_signers() {
+	local repo="$1" dest
+	dest="$(mktemp)"
+	if [ -n "$repo" ] && [ -f "$repo/cptr/trusted-signers" ]; then
+		cp "$repo/cptr/trusted-signers" "$dest"
+	else
+		printf '%s\n' "$TRUSTED_SIGNER" >"$dest"
+	fi
+	printf '%s' "$dest"
+}
+
+verify_signed_commit() {
+	local repo="$1" sha="$2" signers="$3" err
+	err="$(mktemp)"
+	if git -C "$repo" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$signers" verify-commit "$sha" >"$err" 2>&1; then
+		rm -f "$err"
+		return 0
+	fi
+	cat "$err" >&2
+	rm -f "$err"
+	return 1
+}
+
+refuse_unsigned() {
+	die "这次代码没有作者的签名，已拒绝安装。"
+}
+
 fetch_code() {
 	OLD_HEAD=""
 	if [ -d "$INSTALL_DIR/.git" ]; then
@@ -217,12 +249,21 @@ fetch_code() {
 			git -C "$INSTALL_DIR" status --short --untracked-files=no >&2
 			die "$INSTALL_DIR 里有未提交的修改，为了不覆盖它们，先停在这里。"
 		fi
+		local signers
+		signers="$(write_signers "$INSTALL_DIR")"
 		git -C "$INSTALL_DIR" fetch --quiet origin "$BRANCH"
+		local target
+		target="$(git -C "$INSTALL_DIR" rev-parse "origin/$BRANCH")"
+		if ! verify_signed_commit "$INSTALL_DIR" "$target" "$signers"; then
+			rm -f "$signers"
+			refuse_unsigned
+		fi
+		rm -f "$signers"
 		if [ "$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
 			git -C "$INSTALL_DIR" checkout --quiet "$BRANCH" 2>/dev/null ||
 				git -C "$INSTALL_DIR" checkout --quiet -b "$BRANCH" --track "origin/$BRANCH"
 		fi
-		git -C "$INSTALL_DIR" merge --quiet --ff-only "origin/$BRANCH" ||
+		git -C "$INSTALL_DIR" merge --quiet --ff-only "$target" ||
 			die "本地代码和 GitHub 上的版本已经分叉，无法自动更新。"
 	else
 		if [ -d "$INSTALL_DIR" ]; then
@@ -235,15 +276,29 @@ fetch_code() {
 		fi
 		step "下载代码到 $INSTALL_DIR"
 		mkdir -p "$(dirname "$INSTALL_DIR")"
+		local signers cloned
+		signers="$(write_signers "")"
 		if [ -d "$INSTALL_DIR/.tools" ]; then
 			# 先下载的 Node.js 放在这里了；把仓库克隆到旁边再挪进来。
-			local tmp="$INSTALL_DIR.clone.$$"
-			git clone --quiet --branch "$BRANCH" "$REPO_URL" "$tmp"
-			mv "$INSTALL_DIR/.tools" "$tmp/.tools"
-			rmdir "$INSTALL_DIR"
-			mv "$tmp" "$INSTALL_DIR"
+			cloned="$INSTALL_DIR.clone.$$"
+			git clone --quiet --branch "$BRANCH" "$REPO_URL" "$cloned"
 		else
-			git clone --quiet --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+			cloned="$INSTALL_DIR"
+			git clone --quiet --branch "$BRANCH" "$REPO_URL" "$cloned"
+		fi
+		local new_head
+		new_head="$(git -C "$cloned" rev-parse HEAD)"
+		# 第一次安装只认脚本里钉住的公钥，不认仓库里刚克隆下来的那份。
+		if ! verify_signed_commit "$cloned" "$new_head" "$signers"; then
+			rm -rf "$cloned"
+			rm -f "$signers"
+			refuse_unsigned
+		fi
+		rm -f "$signers"
+		if [ "$cloned" != "$INSTALL_DIR" ]; then
+			mv "$INSTALL_DIR/.tools" "$cloned/.tools"
+			rmdir "$INSTALL_DIR"
+			mv "$cloned" "$INSTALL_DIR"
 		fi
 	fi
 	NEW_HEAD="$(git -C "$INSTALL_DIR" rev-parse HEAD)"

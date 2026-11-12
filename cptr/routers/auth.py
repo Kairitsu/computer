@@ -28,10 +28,18 @@ from cptr.models import User, Auth, Config
 from cptr.models.users import is_login_username
 from cptr.utils import totp
 from cptr.utils.password_grant import consume_password_grant, issue_password_grant
+from cptr.utils.request_origin import public_scheme
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 COOKIE_NAME = "cptr_session"
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Secure when the visitor used HTTPS, including TLS ended at the local proxy."""
+    client = request.client.host if request.client else None
+    scheme = public_scheme(request.url.scheme, client, request.headers.get("x-forwarded-proto"))
+    return scheme == "https"
 
 
 def _ok_with_cookie(request: Request, jwt_token: str, data: dict | None = None) -> JSONResponse:
@@ -41,13 +49,22 @@ def _ok_with_cookie(request: Request, jwt_token: str, data: dict | None = None) 
         key=COOKIE_NAME,
         value=jwt_token,
         httponly=True,
-        # The scheme the browser used, from X-Forwarded-Proto behind a proxy.
-        secure=request.url.scheme == "https",
+        secure=_cookie_secure(request),
         samesite="lax",
         path="/",
         max_age=SESSION_MAX_AGE,
     )
     return resp
+
+
+def _clear_session_cookie(response: JSONResponse, request: Request) -> None:
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        secure=_cookie_secure(request),
+        httponly=True,
+        samesite="lax",
+    )
 
 
 def _password_ok(auth: Auth, password: str) -> bool:
@@ -122,7 +139,7 @@ async def get_auth(request: Request):
             from starlette.responses import JSONResponse as StarletteJSONResponse
 
             response = StarletteJSONResponse({"authenticated": False})
-            response.delete_cookie(COOKIE_NAME, path="/")
+            _clear_session_cookie(response, request)
             return response
 
         auth_row = await Auth.get_by_user_id(auth.user_id)
@@ -224,10 +241,10 @@ async def login(request: Request, body: LoginRequest):
 
 
 @router.post("/logout")
-async def logout():
+async def logout(request: Request):
     """Logout = delete cookie."""
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(key=COOKIE_NAME, path="/")
+    _clear_session_cookie(resp, request)
     return resp
 
 
@@ -281,7 +298,7 @@ async def update_password(request: Request, body: UpdatePasswordRequest):
     # Every session ends, including this browser. The user signs in again by hand.
     await revoke_sessions(auth.user_id)
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(key=COOKIE_NAME, path="/")
+    _clear_session_cookie(resp, request)
     return resp
 
 

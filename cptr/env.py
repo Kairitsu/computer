@@ -65,12 +65,12 @@ CHAT_COMPACT_TOKEN_THRESHOLD = int(os.environ.get("CHAT_COMPACT_TOKEN_THRESHOLD"
 AGENT_SEED_TRANSCRIPT_MAX_CHARS = max(0, _env_int("CHAT_AGENT_SEED_TRANSCRIPT_MAX_CHARS", 12000))
 
 # ── CORS ────────────────────────────────────────────────────
-# Socket.IO CORS allowed origins.
-# Default → "*" (allow all origins)
-# Comma-separated list → allow specific origins only
-#   e.g. "https://example.com,https://app.example.com"
-_cors_raw = os.environ.get("CPTR_CORS_ALLOWED_ORIGINS", "*")
-if _cors_raw.strip() == "*":
-    CORS_ALLOWED_ORIGINS = "*"
-else:
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()] or "*"
+# Extra browser origins allowed to call this server with credentials.
+# Default is empty: the site is served by this process, and other origins
+# are refused. "*" is ignored. A comma-separated list opts those origins in.
+_cors_raw = os.environ.get("CPTR_CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in _cors_raw.split(",")
+    if origin.strip() and origin.strip() != "*"
+]

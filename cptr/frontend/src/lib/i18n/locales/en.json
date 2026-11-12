@@ -1483,6 +1483,7 @@
 	"updater.reason.timeout": "Checking for updates took too long. Try again in a moment.",
 	"updater.reason.dirty": "The code on the server has uncommitted changes that an update could overwrite. Commit or discard the changes to these files first:",
 	"updater.reason.diverged": "The code on the server has local commits that GitHub doesn't have, so it can't be updated automatically.",
+	"updater.reason.bad_signature": "This update is not signed by the author, so it was refused.",
 	"updater.updatingTitle": "Updating",
 	"updater.updatingHint": "This can take a few minutes. When it's done, the server restarts and this page reloads by itself.",
 	"updater.restarting": "Restarting the server…",
@@ -1510,5 +1511,6 @@
 	"updater.error.up_to_date": "Already up to date.",
 	"updater.error.busy": "Another update is already running.",
 	"updater.error.timeout": "An update step took too long and was stopped.",
+	"updater.error.bad_signature": "This update is not signed by the author, so it was refused.",
 	"updater.error.unknown": "Something went wrong during the update."
 }

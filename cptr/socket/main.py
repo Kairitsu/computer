@@ -12,8 +12,25 @@ import socketio
 from cptr.models import Chat
 from cptr.utils.config import check_access, now_ms
 from cptr.env import CORS_ALLOWED_ORIGINS
+from cptr.utils.request_origin import origin_is_trusted
 
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=CORS_ALLOWED_ORIGINS)
+
+def _socket_origin_allowed(origin, environ=None) -> bool:
+    """Same rule as cookie-authenticated HTTP writes."""
+    if not environ:
+        return False
+    return origin_is_trusted(
+        origin=origin,
+        host=environ.get("HTTP_HOST"),
+        scheme=environ.get("wsgi.url_scheme") or "http",
+        client_host=environ.get("REMOTE_ADDR"),
+        forwarded_proto=environ.get("HTTP_X_FORWARDED_PROTO"),
+        sec_fetch_site=environ.get("HTTP_SEC_FETCH_SITE"),
+        allowed_origins=CORS_ALLOWED_ORIGINS,
+    )
+
+
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=_socket_origin_allowed)
 
 # user_id → set of connected sids
 _user_sids: dict[str, set[str]] = {}
@@ -23,6 +40,8 @@ _chat_view_sids: dict[tuple[str, str], set[tuple[str, str]]] = {}
 
 @sio.on("connect")
 async def on_connect(sid, environ, auth):
+    if not _socket_origin_allowed(environ.get("HTTP_ORIGIN"), environ):
+        raise ConnectionRefusedError("cross_origin")
     token = auth.get("token") if auth else None
     if not token:
         # Try cookie fallback
