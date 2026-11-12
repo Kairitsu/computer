@@ -405,7 +405,26 @@ async def pwa_manifest():
     }
 
 
-# Frontend (unchanged)
+def resolve_frontend_file(root: Path, full_path: str) -> Path | None:
+    """Return a file inside root, or None when the path leaves it.
+
+    resolve() collapses ".." and follows symlinks. An absolute full_path
+    replaces root in Path joining, so the resolved path is checked against
+    the resolved root before anything is opened.
+    """
+    if not full_path:
+        return None
+    try:
+        base = root.resolve()
+        candidate = (base / full_path).resolve()
+    except OSError:
+        return None
+    if candidate.is_file() and candidate.is_relative_to(base):
+        return candidate
+    return None
+
+
+# Frontend
 FRONTEND_BUILD_DIR = Path(__file__).parent / "frontend" / "build"
 if FRONTEND_BUILD_DIR.exists():
     app.mount(
@@ -414,8 +433,8 @@ if FRONTEND_BUILD_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
-        file_path = FRONTEND_BUILD_DIR / full_path
-        if full_path and file_path.is_file():
+        file_path = resolve_frontend_file(FRONTEND_BUILD_DIR, full_path)
+        if file_path is not None:
             return FileResponse(file_path)
         return FileResponse(FRONTEND_BUILD_DIR / "index.html")
 
