@@ -86,6 +86,83 @@ def extract_rtf(file_path: str) -> str:
     return rtf_to_text(raw.decode("utf-8", errors="replace"))
 
 
+# Preview caps. A spreadsheet expands far past the upload size once parsed.
+_PREVIEW_SHEETS = 20
+_PREVIEW_ROWS = 500
+_PREVIEW_COLS = 50
+
+
+def _cell_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def workbook_preview(data: bytes, filename: str) -> dict:
+    """Plain cell text for an .xlsx or .xls preview.
+
+    Values stay strings. The caller renders them as text, not as HTML.
+    ``truncated`` is true when a sheet, row, or column cap dropped cells.
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext == ".xls":
+        return _xls_preview(data)
+    return _xlsx_preview(data)
+
+
+def _xlsx_preview(data: bytes) -> dict:
+    from io import BytesIO
+
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        raise ImportError("pip install openpyxl")
+
+    wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
+    truncated = False
+    sheets: list[dict] = []
+    try:
+        for index, sheet in enumerate(wb.worksheets):
+            if index >= _PREVIEW_SHEETS:
+                truncated = True
+                break
+            rows: list[list[str]] = []
+            for row_index, row in enumerate(sheet.iter_rows(values_only=True)):
+                if row_index >= _PREVIEW_ROWS:
+                    truncated = True
+                    break
+                if len(row) > _PREVIEW_COLS:
+                    truncated = True
+                rows.append([_cell_text(cell) for cell in row[:_PREVIEW_COLS]])
+            sheets.append({"name": sheet.title, "rows": rows})
+    finally:
+        wb.close()
+    return {"sheets": sheets, "truncated": truncated}
+
+
+def _xls_preview(data: bytes) -> dict:
+    try:
+        import xlrd
+    except ImportError:
+        raise ImportError("pip install xlrd")
+
+    book = xlrd.open_workbook(file_contents=data)
+    truncated = book.nsheets > _PREVIEW_SHEETS
+    sheets: list[dict] = []
+    for sheet in book.sheets()[:_PREVIEW_SHEETS]:
+        row_count = min(sheet.nrows, _PREVIEW_ROWS)
+        col_count = min(sheet.ncols, _PREVIEW_COLS)
+        if sheet.nrows > _PREVIEW_ROWS or sheet.ncols > _PREVIEW_COLS:
+            truncated = True
+        rows = []
+        for row_index in range(row_count):
+            rows.append(
+                [_cell_text(sheet.cell_value(row_index, col_index)) for col_index in range(col_count)]
+            )
+        sheets.append({"name": sheet.name, "rows": rows})
+    return {"sheets": sheets, "truncated": truncated}
+
+
 def extract_xls(file_path: str) -> str:
     """Extract text from a legacy Excel (.xls) file."""
     try:

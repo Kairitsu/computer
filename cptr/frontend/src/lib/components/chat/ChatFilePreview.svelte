@@ -91,7 +91,7 @@
 	</div>
 {:else if kind === 'html' && content}
 	<div class="preview-box tall">
-		<HtmlPreview {content} {filePath} />
+		<HtmlPreview {content} />
 	</div>
 {:else if kind === 'svg' && content}
 	<div class="preview-box tall">

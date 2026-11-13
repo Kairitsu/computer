@@ -16,26 +16,60 @@
 	let htmlContent = $state('');
 	let sheetNames = $state<string[]>([]);
 	let activeSheet = $state(0);
-	let sheetHtmls = $state<string[]>([]);
+	let sheets = $state<{ name: string; rows: string[][] }[]>([]);
+	let sheetTruncated = $state(false);
 	let slideImages = $state<string[]>([]);
+
+	type SheetPayload = { name?: string; rows?: unknown[][] };
+
+	let activeRows = $derived(sheets[activeSheet]?.rows ?? []);
+	let colCount = $derived(activeRows.reduce((max, row) => Math.max(max, row.length), 0));
+	let columns = $derived(Array.from({ length: colCount }, (_, index) => index));
 
 	let ext = $derived(fileName.split('.').pop()?.toLowerCase() ?? '');
 	let isDocx = $derived(ext === 'docx');
 	let isXlsx = $derived(ext === 'xlsx' || ext === 'xls');
 	let isPptx = $derived(ext === 'pptx');
 
+	function sheetsUrl(fileUrl: string): string {
+		const [path, query] = fileUrl.split('?');
+		const next = `${path}/sheets`;
+		return query ? `${next}?${query}` : next;
+	}
+
+	function cellText(value: unknown): string {
+		if (value === null || value === undefined) return '';
+		return String(value);
+	}
+
+	function isNumberText(value: string): boolean {
+		return /^-?\d+(\.\d+)?$/.test(value);
+	}
+
+	function colLetter(index: number): string {
+		let s = '';
+		let n = index;
+		while (n >= 0) {
+			s = String.fromCharCode(65 + (n % 26)) + s;
+			n = Math.floor(n / 26) - 1;
+		}
+		return s;
+	}
+
 	async function loadFile() {
 		loading = true;
 		error = '';
 		try {
+			if (isXlsx) {
+				await loadXlsx();
+				return;
+			}
 			const res = await fetchHandler(src);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const buf = await res.arrayBuffer();
 
 			if (isDocx) {
 				await loadDocx(buf);
-			} else if (isXlsx) {
-				await loadXlsx(buf);
 			} else if (isPptx) {
 				await loadPptx(buf);
 			}
@@ -54,48 +88,18 @@
 		htmlContent = DOMPurify.sanitize(result.value);
 	}
 
-	async function loadXlsx(buf: ArrayBuffer) {
-		const XLSX = await import('xlsx');
-		const DOMPurify = (await import('dompurify')).default;
-		const workbook = XLSX.read(buf, { type: 'array' });
-		sheetNames = workbook.SheetNames;
-
-		sheetHtmls = workbook.SheetNames.map((name) => {
-			const sheet = workbook.Sheets[name];
-			const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-			if (rows.length === 0) return `<p>${$t('preview.emptySheet')}</p>`;
-
-			const colCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
-			const colLetter = (i: number) => {
-				let s = '';
-				let n = i;
-				while (n >= 0) {
-					s = String.fromCharCode(65 + (n % 26)) + s;
-					n = Math.floor(n / 26) - 1;
-				}
-				return s;
-			};
-
-			const esc = (v: unknown) => {
-				if (v === null || v === undefined || v === '') return '&nbsp;';
-				return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-			};
-
-			let html = '<table><thead><tr><th class="rn"></th>';
-			for (let c = 0; c < colCount; c++) html += `<th>${colLetter(c)}</th>`;
-			html += '</tr></thead><tbody>';
-			for (let r = 0; r < rows.length; r++) {
-				html += `<tr><td class="rn">${r + 1}</td>`;
-				for (let c = 0; c < colCount; c++) {
-					const val = c < rows[r].length ? rows[r][c] : '';
-					const cls = typeof val === 'number' ? ' class="num"' : '';
-					html += `<td${cls}>${esc(val)}</td>`;
-				}
-				html += '</tr>';
-			}
-			html += '</tbody></table>';
-			return DOMPurify.sanitize(html);
-		});
+	async function loadXlsx() {
+		const res = await fetchHandler(sheetsUrl(src));
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const body = (await res.json()) as { sheets?: SheetPayload[]; truncated?: boolean };
+		const parsed = (body.sheets ?? []).map((sheet) => ({
+			name: sheet.name || 'Sheet',
+			rows: (sheet.rows ?? []).map((row) => (Array.isArray(row) ? row.map(cellText) : []))
+		}));
+		sheets = parsed;
+		sheetNames = parsed.map((sheet) => sheet.name);
+		sheetTruncated = Boolean(body.truncated);
+		activeSheet = 0;
 	}
 
 	async function loadPptx(buf: ArrayBuffer) {
@@ -317,7 +321,34 @@
 				{/each}
 			</div>
 		{/if}
-		<div class="xlsx-content">{@html sheetHtmls[activeSheet] ?? ''}</div>
+		<div class="xlsx-content">
+			{#if sheetTruncated}<p class="truncate-note">{$t('preview.truncated')}</p>{/if}
+			{#if activeRows.length === 0}
+				<p>{$t('preview.emptySheet')}</p>
+			{:else}
+				<table>
+					<thead>
+						<tr>
+							<th class="rn"></th>
+							{#each columns as c}
+								<th>{colLetter(c)}</th>
+							{/each}
+						</tr>
+					</thead>
+					<tbody>
+						{#each activeRows as row, r}
+							<tr>
+								<td class="rn">{r + 1}</td>
+								{#each columns as c}
+									{@const value = row[c] ?? ''}
+									<td class:num={isNumberText(value)}>{value === '' ? '\u00a0' : value}</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
 	{:else if isPptx}
 		<div class="pptx-content">
 			{#each slideImages as img, i}

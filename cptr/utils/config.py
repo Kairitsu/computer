@@ -417,12 +417,24 @@ def check_access(
             return verify_token(jwt_token)
         return None
 
-    # Trusted Header Authentication
+    # Trusted Header Authentication.
+    # An empty or missing allowlist does not accept the header. A reverse
+    # proxy must be listed and must strip any client-supplied copy of the
+    # header before it writes its own. Listing only 127.0.0.1 trusts every
+    # visitor the proxy forwards.
     if mode == AuthMode.TRUSTED_HEADER:
         config = load_config()
         auth_cfg = config.get("auth", {})
-        trusted_sources = auth_cfg.get("trusted_sources", [])
-        if trusted_sources and client_host not in trusted_sources:
+        raw_sources = auth_cfg.get("trusted_sources", [])
+        if isinstance(raw_sources, list):
+            trusted_sources = [item for item in raw_sources if isinstance(item, str)]
+        else:
+            trusted_sources = []
+        if not trusted_sources:
+            if jwt_token:
+                return verify_token(jwt_token)
+            return None
+        if client_host not in trusted_sources:
             return None
         if remote_user_header:
             return AuthResult(username=remote_user_header)

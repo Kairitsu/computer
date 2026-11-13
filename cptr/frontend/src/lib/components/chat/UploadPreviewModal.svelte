@@ -132,7 +132,7 @@
 	}
 
 	const kind = $derived(previewKind(name, type));
-	const needsText = $derived(['svg', 'markdown', 'json', 'csv', 'text'].includes(kind));
+	const needsText = $derived(['svg', 'markdown', 'json', 'csv', 'text', 'html'].includes(kind));
 
 	let loading = $state(false);
 	let error = $state('');
@@ -157,7 +157,7 @@
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				const bytes = new Uint8Array(await res.arrayBuffer());
 				if (cancelled) return;
-				const cut = bytes.length > MAX_TEXT_BYTES;
+				const cut = currentKind !== 'html' && bytes.length > MAX_TEXT_BYTES;
 				const text = new TextDecoder().decode(cut ? bytes.slice(0, MAX_TEXT_BYTES) : bytes);
 				content = text;
 				truncated = cut;
@@ -206,7 +206,7 @@
 		{:else if kind === 'office'}
 			<div class="fill"><OfficePreview src={url} fileName={name} /></div>
 		{:else if kind === 'html'}
-			<iframe class="fill-frame" src={url} title={name} sandbox="allow-scripts"></iframe>
+			<iframe class="fill-frame" srcdoc={content} title={name} sandbox=""></iframe>
 		{:else if kind === 'svg' && content}
 			<div class="fill"><SvgPreview {content} /></div>
 		{:else if kind === 'markdown' && content}

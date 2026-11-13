@@ -23,6 +23,7 @@ from cptr.utils.config import (
     record_attempt,
     revoke_sessions,
     verify_password,
+    verify_token,
 )
 from cptr.models import User, Auth, Config
 from cptr.models.users import is_login_username
@@ -242,7 +243,16 @@ async def login(request: Request, body: LoginRequest):
 
 @router.post("/logout")
 async def logout(request: Request):
-    """Logout = delete cookie."""
+    """Drop this browser's cookie and retire every session for the account.
+
+    A token copied earlier stops working here, not only in this browser.
+    Other signed-in browsers for the same account are signed out too.
+    """
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        auth = verify_token(token)
+        if auth and auth.user_id:
+            await revoke_sessions(auth.user_id)
     resp = JSONResponse({"ok": True})
     _clear_session_cookie(resp, request)
     return resp

@@ -1,8 +1,9 @@
 """Managed file uploads: blob storage + DB metadata.
 
-POST   /api/files         multipart upload → storage + DB → { id, url }
-GET    /api/files/{id}    stream from storage (cache headers)
-DELETE /api/files/{id}    verify ownership → delete storage + DB
+POST   /api/files              multipart upload → storage + DB → { id, url }
+GET    /api/files/{id}         stream from storage (login required)
+GET    /api/files/{id}/sheets  spreadsheet preview as plain cell text
+DELETE /api/files/{id}         verify ownership → delete storage + DB
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from fastapi.responses import Response
 
 from cptr.models.files import File
 from cptr.utils.config import now_ms
+from cptr.utils.documents import workbook_preview
 from cptr.utils.storage import get_storage
+from cptr.utils.uploads import upload_headers
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -55,34 +58,40 @@ async def upload(request: Request, file: UploadFile = FastAPIFile(...)):
     return {"id": record.id, "url": url_path}
 
 
-@router.get("/{file_id_ext:path}")
-async def get_upload(file_id_ext: str):
-    """Serve an uploaded file. Public (no auth); UUID is unguessable.
-
-    Accepts both /api/files/{uuid} and /api/files/{uuid}.{ext} so that
-    URLs with file extensions work correctly.
-    """
-    # Strip any extension from the path to get the bare UUID
+async def _stored_upload(file_id_ext: str) -> tuple[File, bytes]:
     file_id, _ = os.path.splitext(file_id_ext)
-
     record = await File.get_by_id(file_id)
     if not record:
         raise HTTPException(404, "Not found")
-
     data = await get_storage().get(record.id)
     if data is None:
         raise HTTPException(404, "Blob missing")
+    return record, data
 
-    content_type = (record.meta or {}).get("content_type", "application/octet-stream")
 
-    return Response(
-        content=data,
-        media_type=content_type,
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "Content-Disposition": f'inline; filename="{record.filename}"',
-        },
-    )
+@router.get("/{file_id_ext}/sheets")
+async def spreadsheet_preview(file_id_ext: str):
+    """Cell text for an uploaded .xlsx or .xls file. Login is required."""
+    record, data = await _stored_upload(file_id_ext)
+    try:
+        return workbook_preview(data, record.filename or "")
+    except ImportError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(422, "Could not read spreadsheet") from exc
+
+
+@router.get("/{file_id_ext:path}")
+async def get_upload(file_id_ext: str):
+    """Serve an uploaded file. Login is required.
+
+    Accepts both /api/files/{uuid} and /api/files/{uuid}.{ext}.
+    Images sniffed from the bytes are inline. Every other type is an
+    attachment with an opaque media type, so the browser does not run it.
+    """
+    record, data = await _stored_upload(file_id_ext)
+    media_type, headers = upload_headers(data, record.filename or "file")
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 @router.delete("/{file_id_ext:path}")

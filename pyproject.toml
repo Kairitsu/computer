@@ -1,6 +1,6 @@
 [project]
 name = "cptr"
-version = "5.7.4"
+version = "5.7.5"
 description = "Your computer, from anywhere. Code, manage, and control your machine from the web."
 license = {file = "LICENSE"}
 readme = "README.md"
@@ -25,11 +25,12 @@ dependencies = [
 
 [project.optional-dependencies]
 pam = ["python-pam>=2.0"]
-docs = ["pypdf>=4.0", "python-docx>=1.0", "openpyxl>=3.1"]
+docs = ["pypdf>=4.0", "python-docx>=1.0", "openpyxl>=3.1", "xlrd>=2.0.1"]
 all = [
     "pypdf>=4.0",
     "python-docx>=1.0",
     "openpyxl>=3.1",
+    "xlrd>=2.0.1",
     "python-pam>=2.0",
 ]
 
