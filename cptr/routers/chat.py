@@ -1349,6 +1349,19 @@ async def resolve_pending_tool_call(
     if body.action == "approve" and call.get("name") == "ask_user":
         raise HTTPException(400, "ask_user requires answer or reject")
 
+    if body.action in {"approve", "reject"}:
+        try:
+            from cptr.utils.audit import record_tool_decision, user_fields
+
+            record_tool_decision(
+                user=user_fields(request, user_id),
+                session=chat_id,
+                call=call,
+                action=body.action,
+            )
+        except Exception:
+            pass
+
     if call.get("native_agent") and call.get("name") != "ask_user":
         # A coding agent's permission request: its process is mid-turn waiting for
         # the choice, so hand it over instead of queueing the call for a new turn.

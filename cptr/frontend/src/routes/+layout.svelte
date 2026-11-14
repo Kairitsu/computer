@@ -125,8 +125,6 @@
 		};
 	});
 
-	let startupToken = $state('');
-
 	$effect(() => {
 		if ($stateLoaded && $appVersion) {
 			const currentVer = $appVersion;
@@ -170,12 +168,9 @@
 
 	async function checkAuth() {
 		try {
-			const params = new URLSearchParams(window.location.search);
-			const token = params.get('token');
-			if (token) {
-				startupToken = token;
-				// Remove token from URL but preserve workspace param
-				const url = new URL(window.location.href);
+			// A setup token used to arrive in ?token=. Leave it out of the page and the address.
+			const url = new URL(window.location.href);
+			if (url.searchParams.has('token')) {
 				url.searchParams.delete('token');
 				window.history.replaceState({}, '', url.toString());
 			}
@@ -408,7 +403,6 @@
 		mode={authMode}
 		needsSetup={authState === 'needs_setup'}
 		{signupEnabled}
-		token={startupToken}
 		onauth={handleAuth}
 	/>
 {:else if $stateLoaded && showSetup}

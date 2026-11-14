@@ -16,7 +16,7 @@ from pathlib import Path, PureWindowsPath
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Query
-from cptr.env import DATA_DIR
+from cptr.env import DATA_DIR, PROCESS_START
 from cptr.models import Chat, UserStates, Workspace
 from cptr.utils.config import get_or_create_user
 from cptr.utils.identity import IdentityUnavailable, identity_for_request
@@ -668,6 +668,11 @@ def _collect_system_info(user_home: Path) -> dict:
             suggestions.append({"name": p.name or c, "path": c})
             seen.add(c)
 
+    system["process"] = {
+        "uptime_seconds": int(time.time() - PROCESS_START),
+        "started_at": PROCESS_START,
+        "pid": os.getpid(),
+    }
     return {
         "hostname": hostname,
         "platform": platform.system(),

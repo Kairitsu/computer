@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import traceback
 import uuid
+from pathlib import Path
 from typing import Any
 
 from loguru import logger as loguru_logger
@@ -114,6 +116,9 @@ def _audit_format(record) -> str:
         "request_body": extra.get("request_body"),
         "response_body": extra.get("response_body"),
     }
+    for key in ("event", "tool", "detail", "result", "session"):
+        if extra.get(key) not in (None, ""):
+            entry[key] = extra.get(key)
     record["extra"]["file_json"] = json.dumps(entry, ensure_ascii=False, default=str)
     return "{extra[file_json]}\n"
 
@@ -131,6 +136,21 @@ def _upstream_format(record) -> str:
     }
     record["extra"]["file_json"] = json.dumps(entry, ensure_ascii=False, default=str)
     return "{extra[file_json]}\n"
+
+
+def ensure_audit_file(path: Path | None = None) -> None:
+    """Create the audit log as mode 600. Tighten a looser file, including after rotation."""
+    target = path or AUDIT_LOG_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        fd = os.open(target, os.O_CREAT | os.O_APPEND, 0o600)
+        os.close(fd)
+        return
+    try:
+        if target.stat().st_mode & 0o777 != 0o600:
+            os.chmod(target, 0o600)
+    except OSError:
+        pass
 
 
 def setup_logging() -> None:
@@ -158,7 +178,7 @@ def setup_logging() -> None:
         )
 
     if AUDIT_LOG_LEVEL in _AUDIT_LEVELS:
-        AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ensure_audit_file(AUDIT_LOG_PATH)
         loguru_logger.add(
             str(AUDIT_LOG_PATH),
             level="INFO",

@@ -7,6 +7,7 @@ instead of reading os.environ directly.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 
@@ -32,7 +33,13 @@ DB_FILE = DATA_DIR / "app.db"
 LOG_LEVEL = os.environ.get("CPTR_LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.environ.get("CPTR_LOG_FORMAT", "text").lower()
 
-AUDIT_LOG_LEVEL = os.environ.get("CPTR_AUDIT_LOG_LEVEL", "NONE").upper()
+def configured_audit_level(environ=None) -> str:
+    source = os.environ if environ is None else environ
+    return source.get("CPTR_AUDIT_LOG_LEVEL", "METADATA").upper()
+
+
+# METADATA records who did what. NONE turns the audit file off.
+AUDIT_LOG_LEVEL = configured_audit_level()
 AUDIT_LOG_PATH = Path(os.environ.get("CPTR_AUDIT_LOG_PATH", str(DATA_DIR / "logs" / "audit.jsonl")))
 AUDIT_LOG_ROTATION = os.environ.get("CPTR_AUDIT_LOG_ROTATION", "10 MB")
 AUDIT_MAX_BODY_SIZE = _env_int("CPTR_AUDIT_MAX_BODY_SIZE", 2048)
@@ -50,6 +57,9 @@ UPSTREAM_REQUEST_LOG_PATH = Path(
     )
 )
 UPSTREAM_REQUEST_LOG_ROTATION = os.environ.get("CPTR_UPSTREAM_REQUEST_LOG_ROTATION", "50 MB")
+
+# When this process started. The public health check does not report it.
+PROCESS_START = time.time()
 
 # ── Startup token ───────────────────────────────────────────
 # One-time token for first-time setup. Set by CLI, consumed by app.

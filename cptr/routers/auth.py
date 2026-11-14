@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -10,17 +12,18 @@ from typing import Optional
 from cptr.utils.config import (
     SESSION_MAX_AGE,
     AuthMode,
+    allow_signup,
     check_access,
-    check_rate_limit,
+    clear_failures,
     create_token,
     get_auth_mode,
     get_or_create_user,
     has_any_user,
     hash_password,
     load_config,
+    note_failure,
     now_ms,
     pam_authenticate,
-    record_attempt,
     revoke_sessions,
     verify_password,
     verify_token,
@@ -34,6 +37,18 @@ from cptr.utils.request_origin import public_scheme
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 COOKIE_NAME = "cptr_session"
+MIN_NEW_PASSWORD_CHARS = 12
+
+
+def new_password_ok(password: str) -> bool:
+    """Length rule for a password being chosen now. Existing passwords are not checked."""
+    return len(password.strip()) >= MIN_NEW_PASSWORD_CHARS
+
+
+async def _pause_failure(bucket: str) -> None:
+    delay = note_failure(bucket)
+    if delay:
+        await asyncio.sleep(delay)
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -180,8 +195,8 @@ async def setup(request: Request, body: SetupRequest):
         return JSONResponse({"error": "invalid startup token"}, 403)
     if not body.username or not body.username.strip():
         return JSONResponse({"error": "username required"}, 400)
-    if len(body.password.strip()) < 6:
-        return JSONResponse({"error": "min 6 characters"}, 400)
+    if not new_password_ok(body.password):
+        return JSONResponse({"error": "min 12 characters"}, 400)
 
     user_id = await User.create(
         username=body.username.strip(),
@@ -190,6 +205,10 @@ async def setup(request: Request, body: SetupRequest):
         display_name=body.display_name,
         created_at=now_ms(),
     )
+    request.app.state.startup_token = None
+    from cptr.utils.startup_token import clear_startup_token
+
+    clear_startup_token()
 
     return _ok_with_cookie(request, create_token(user_id, body.username.strip(), role="admin"))
 
@@ -197,19 +216,17 @@ async def setup(request: Request, body: SetupRequest):
 @router.post("/login")
 async def login(request: Request, body: LoginRequest):
     """Login with password or PAM."""
-    ip = request.client.host if request.client else "unknown"
-    if not check_rate_limit(ip):
-        return JSONResponse({"error": "too many attempts"}, 429)
-    record_attempt(ip)
-
     mode = get_auth_mode()
 
     if mode == AuthMode.PASSWORD:
         if not body.username:
             return JSONResponse({"error": "username required"}, 400)
-        result = await Auth.get_with_user(body.username)
+        username = body.username.strip()
+        result = await Auth.get_with_user(username)
         if not result or not verify_password(body.password, result[0].password):
+            await _pause_failure(f"login:{username}")
             return JSONResponse({"error": "incorrect credentials"}, 401)
+        clear_failures(f"login:{username}")
         auth, user = result
         if user.role == "pending":
             return JSONResponse({"error": "account pending approval"}, 403)
@@ -220,8 +237,11 @@ async def login(request: Request, body: LoginRequest):
     if mode == AuthMode.PAM:
         if not body.username:
             return JSONResponse({"error": "username required"}, 400)
-        if not pam_authenticate(body.username, body.password):
+        username = body.username.strip()
+        if not pam_authenticate(username, body.password):
+            await _pause_failure(f"login:{username}")
             return JSONResponse({"error": "incorrect credentials"}, 401)
+        clear_failures(f"login:{username}")
         user_id = await get_or_create_user(body.username)
         if denied := await _second_factor(await Auth.get_by_user_id(user_id), body.code):
             return denied
@@ -265,7 +285,9 @@ async def verify_password_for_change(request: Request, body: PasswordVerifyReque
     if error:
         return error
     if not _password_ok(auth, body.current_password):
+        await _pause_failure(f"password:{auth.user_id}")
         return JSONResponse({"error": "incorrect current password"}, 401)
+    clear_failures(f"password:{auth.user_id}")
     return {"grant": issue_password_grant(auth.user_id)}
 
 
@@ -289,7 +311,9 @@ async def verify_code_for_change(request: Request, body: PasswordVerifyCodeReque
     else:
         return JSONResponse({"error": "invalid method"}, 400)
     if not ok:
+        await _pause_failure(f"password-code:{auth.user_id}")
         return JSONResponse({"error": "invalid code"}, 401)
+    clear_failures(f"password-code:{auth.user_id}")
     return {"grant": issue_password_grant(auth.user_id)}
 
 
@@ -299,8 +323,8 @@ async def update_password(request: Request, body: UpdatePasswordRequest):
     auth, error = await _totp_request(request)
     if error:
         return error
-    if len(body.new_password.strip()) < 6:
-        return JSONResponse({"error": "min 6 characters"}, 400)
+    if not new_password_ok(body.new_password):
+        return JSONResponse({"error": "min 12 characters"}, 400)
     if not consume_password_grant(body.grant, auth.user_id):
         return JSONResponse({"error": "verification expired"}, 401)
 
@@ -331,10 +355,6 @@ async def _totp_request(request: Request) -> tuple[Auth | None, JSONResponse | N
     )
     if auth_info is None or not auth_info.user_id:
         return None, JSONResponse({"error": "not authenticated"}, 401)
-    ip = request.client.host if request.client else "unknown"
-    if not check_rate_limit(ip):
-        return None, JSONResponse({"error": "too many attempts"}, 429)
-    record_attempt(ip)
     auth = await Auth.get_by_user_id(auth_info.user_id)
     if auth is None:
         return None, JSONResponse({"error": "user not found"}, 404)
@@ -367,7 +387,9 @@ async def totp_setup(request: Request, body: TotpSetupRequest):
     if auth.totp_enabled:
         return JSONResponse({"error": "two-step sign-in is already on"}, 409)
     if not _password_ok(auth, body.password):
+        await _pause_failure(f"password:{auth.user_id}")
         return JSONResponse({"error": "incorrect password"}, 401)
+    clear_failures(f"password:{auth.user_id}")
 
     secret = totp.new_secret()
     await Auth.start_totp_setup(auth.user_id, secret)
@@ -405,9 +427,13 @@ async def totp_disable(request: Request, body: TotpDisableRequest):
     if not auth.totp_enabled:
         return JSONResponse({"error": "two-step sign-in is off"}, 400)
     if not _password_ok(auth, body.password):
+        await _pause_failure(f"password:{auth.user_id}")
         return JSONResponse({"error": "incorrect password"}, 401)
+    clear_failures(f"password:{auth.user_id}")
     if not await _check_code(auth, body.code):
+        await _pause_failure(f"password-code:{auth.user_id}")
         return JSONResponse({"error": "invalid code"}, 401)
+    clear_failures(f"password-code:{auth.user_id}")
 
     await Auth.clear_totp(auth.user_id)
     return await _resign_in(request, auth.user_id, auth.username)
@@ -419,11 +445,14 @@ async def signup(request: Request, body: SignupRequest):
     signup_enabled = await Config.get("auth.signup_enabled")
     if not signup_enabled:
         return JSONResponse({"error": "sign up disabled"}, 403)
+    source = request.client.host if request.client else "unknown"
+    if not allow_signup(source):
+        return JSONResponse({"error": "too many attempts"}, 429)
 
     if not body.username or not body.username.strip():
         return JSONResponse({"error": "username required"}, 400)
-    if len(body.password.strip()) < 6:
-        return JSONResponse({"error": "min 6 characters"}, 400)
+    if not new_password_ok(body.password):
+        return JSONResponse({"error": "min 12 characters"}, 400)
 
     username = body.username.strip()
     if await Auth.username_exists(username):

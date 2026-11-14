@@ -10,6 +10,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -126,6 +127,42 @@ class FileError(RuntimeError):
     def __init__(self, message: str, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+# A workspace set to / must not walk the whole machine. These caps apply to
+# every other directory. proc, sys, dev, and run are never entered.
+WALK_MAX_DEPTH = 8
+WALK_MAX_ENTRIES = 20_000
+WALK_MAX_SECONDS = 2.0
+_SKIP_DIR_NAMES = frozenset({"proc", "sys", "dev", "run"})
+_BLOCKED_ROOTS = tuple(Path("/") / name for name in _SKIP_DIR_NAMES)
+
+
+class _WalkBudget:
+    def __init__(self) -> None:
+        self.seen = 0
+        self.deadline = time.monotonic() + WALK_MAX_SECONDS
+
+    def take(self) -> bool:
+        if self.seen >= WALK_MAX_ENTRIES or time.monotonic() >= self.deadline:
+            return False
+        self.seen += 1
+        return True
+
+
+def _is_unbounded(root: Path) -> bool:
+    try:
+        resolved = root.resolve()
+    except OSError:
+        resolved = root
+    if resolved == Path(resolved.anchor):
+        return True
+    return any(resolved == blocked or resolved.is_relative_to(blocked) for blocked in _BLOCKED_ROOTS)
+
+
+def _refuse_unbounded(root: Path) -> None:
+    if _is_unbounded(root):
+        raise FileError("refusing to walk this directory")
 
 
 class Runtime:
@@ -470,6 +507,9 @@ def _list_tree(path: str, recursive: bool = False) -> dict[str, Any]:
     target = _path(path)
     if not target.is_dir():
         raise FileError(f"not a directory: {path}")
+    unbounded = _is_unbounded(target)
+    if recursive and unbounded:
+        raise FileError("refusing to walk this directory")
 
     ignore = {
         ".git",
@@ -485,10 +525,18 @@ def _list_tree(path: str, recursive: bool = False) -> dict[str, Any]:
     }
     lines = []
     if recursive:
+        budget = _WalkBudget()
         for root, dirs, files in os.walk(target):
-            dirs[:] = sorted(d for d in dirs if d not in ignore)
+            if not budget.take():
+                break
+            depth = len(Path(root).relative_to(target).parts)
+            dirs[:] = sorted(
+                d for d in dirs if d not in ignore and d not in _SKIP_DIR_NAMES and depth < WALK_MAX_DEPTH
+            )
             rel = Path(root).relative_to(target)
             for filename in sorted(files):
+                if not budget.take():
+                    break
                 item = Path(root) / filename
                 try:
                     size = item.stat().st_size
@@ -497,9 +545,13 @@ def _list_tree(path: str, recursive: bool = False) -> dict[str, Any]:
                 lines.append(f"{rel / filename}  ({_human_size(size)})")
     else:
         for item in sorted(target.iterdir()):
-            if item.name in ignore:
+            if item.name in ignore or item.name in _SKIP_DIR_NAMES:
                 continue
             if item.is_dir():
+                # Counting every file under / (or proc/sys/dev/run) walks the machine.
+                if unbounded:
+                    lines.append(f"{item.name}/")
+                    continue
                 try:
                     count = sum(1 for child in item.rglob("*") if child.is_file())
                 except (PermissionError, OSError):
@@ -697,10 +749,21 @@ def _is_search_ignored(name: str) -> bool:
     return name in SEARCH_IGNORE_DIRS or name.endswith(".egg-info")
 
 
-def _walk_match_entries(root: Path, show_hidden: bool, gitignore: tuple[Path, tuple] | None = None):
+def _walk_match_entries(
+    root: Path,
+    show_hidden: bool,
+    gitignore: tuple[Path, tuple] | None = None,
+    *,
+    depth: int = 0,
+    budget: _WalkBudget | None = None,
+):
     if gitignore is None:
         gitignore = load_gitignore(root)
+    if budget is None:
+        budget = _WalkBudget()
     ignore_base, ignore_patterns = gitignore
+    if depth > WALK_MAX_DEPTH:
+        return
 
     try:
         entries = sorted(root.iterdir(), key=lambda item: item.name.lower())
@@ -708,10 +771,13 @@ def _walk_match_entries(root: Path, show_hidden: bool, gitignore: tuple[Path, tu
         return
 
     for item in entries:
+        if not budget.take():
+            return
         try:
             item_is_dir = item.is_dir()
             if (
-                _is_search_ignored(item.name)
+                item.name in _SKIP_DIR_NAMES
+                or _is_search_ignored(item.name)
                 or (not show_hidden and item.name.startswith("."))
                 or is_gitignored(item, ignore_base, ignore_patterns, is_dir=item_is_dir)
             ):
@@ -720,7 +786,10 @@ def _walk_match_entries(root: Path, show_hidden: bool, gitignore: tuple[Path, tu
                 yield item, "file"
             elif item_is_dir:
                 yield item, "directory"
-                yield from _walk_match_entries(item, show_hidden, gitignore)
+                if depth < WALK_MAX_DEPTH:
+                    yield from _walk_match_entries(
+                        item, show_hidden, gitignore, depth=depth + 1, budget=budget
+                    )
             elif item.is_file():
                 yield item, "file"
         except OSError:
@@ -743,6 +812,8 @@ def _content_match(text: str, line: int, query_lower: str) -> dict[str, Any] | N
 def _content_matches_with_rg(
     root: Path, query: str, query_lower: str, show_hidden: bool, files: set[Path]
 ) -> dict[Path, list[dict[str, Any]]] | None:
+    if _is_unbounded(root):
+        return {}
     rg = shutil.which("rg")
     if not rg:
         return None
@@ -755,6 +826,8 @@ def _content_matches_with_rg(
         "--ignore-case",
         "--line-number",
         "--column",
+        "--max-filesize",
+        "1M",
         "--max-count",
         str(MAX_CONTENT_MATCHES_PER_FILE + 1),
     ]
@@ -763,17 +836,26 @@ def _content_matches_with_rg(
     for ignored in SEARCH_IGNORE_DIRS:
         pattern = f"!{ignored}" if ignored == ".DS_Store" else f"!{ignored}/**"
         args.extend(("--glob", pattern))
+    for name in _SKIP_DIR_NAMES:
+        args.extend(("--glob", f"!{name}/**"))
     args.extend(("--", query, str(root)))
 
     try:
-        completed = subprocess.run(args, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            args, capture_output=True, text=True, check=False, timeout=WALK_MAX_SECONDS
+        )
+    except subprocess.TimeoutExpired as exc:
+        completed = exc
+        if not getattr(completed, "stdout", None):
+            return {}
     except OSError:
         return None
-    if completed.returncode not in (0, 1):
+    if getattr(completed, "returncode", 0) not in (0, 1):
         return None
 
     matches: dict[Path, list[dict[str, Any]]] = {}
-    for raw in completed.stdout.splitlines():
+    stdout = completed.stdout or ""
+    for raw in stdout.splitlines():
         try:
             message = json.loads(raw)
         except json.JSONDecodeError:
@@ -829,6 +911,7 @@ def _file_matches(
     root = _path(path)
     if not root.exists() or not root.is_dir():
         raise _missing(path)
+    _refuse_unbounded(root)
 
     query = query.strip()
     query_lower = query.lower()
@@ -887,23 +970,29 @@ def walk_and_rank_files(root: str | Path, query: str, limit: int = 20) -> list[d
     root = _path(str(root))
     if not root.exists() or not root.is_dir():
         raise _missing(str(root))
+    _refuse_unbounded(root)
 
     query_lower = query.strip().lower().replace("\\", "/")
     matches: list[tuple[int, int, dict[str, Any]]] = []
     max_collect = limit * 10
     ignore_base, ignore_patterns = load_gitignore(root)
 
+    budget = _WalkBudget()
+
     def walk(directory: Path, depth: int = 0) -> None:
-        if depth > 8 or len(matches) >= max_collect:
+        if depth > WALK_MAX_DEPTH or len(matches) >= max_collect or not budget.take():
             return
         try:
             entries = sorted(directory.iterdir(), key=lambda item: item.name.lower())
         except OSError:
             return
         for item in entries:
+            if not budget.take():
+                return
             item_is_dir = item.is_dir()
             if (
-                item.name in SEARCH_IGNORE_DIRS
+                item.name in _SKIP_DIR_NAMES
+                or item.name in SEARCH_IGNORE_DIRS
                 or item.name.startswith(".")
                 or is_gitignored(item, ignore_base, ignore_patterns, is_dir=item_is_dir)
             ):

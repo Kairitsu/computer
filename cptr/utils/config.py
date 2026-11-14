@@ -372,20 +372,54 @@ async def revoke_sessions(user_id: str) -> None:
     await disconnect_user(user_id)
 
 
-# ── Rate Limiting (in-memory, fine) ──────────────────────────
+# ── Rate limiting ────────────────────────────────────────────
+# Login, password changes, and signup each have their own counter.
+# A failure slows the next failure for that same name. It does not lock the
+# account, and a correct password is never refused because someone else failed.
+# Behind the reverse proxy every visitor is 127.0.0.1, so an IP bucket would
+# be one lock for the whole site.
 
-_attempts: dict[str, list[float]] = {}
+_failures: dict[str, list[float]] = {}
+_signups: dict[str, list[float]] = {}
+FAILURE_DELAY_CAP = 3.0
+SIGNUP_LIMIT = 5
+SIGNUP_WINDOW = 3600
 
 
-def check_rate_limit(ip: str) -> bool:
+def note_failure(bucket: str) -> float:
+    """Record one failure. Return how many seconds this failure should wait.
+
+    The first failure is not delayed. Later ones wait longer, up to a few seconds.
+    """
     now = time.time()
-    attempts = [t for t in _attempts.get(ip, []) if now - t < 3600]
-    _attempts[ip] = attempts
-    return sum(1 for t in attempts if now - t < 60) < 5
+    recent = [stamp for stamp in _failures.get(bucket, []) if now - stamp < 3600]
+    recent.append(now)
+    _failures[bucket] = recent[-20:]
+    extra = len(recent) - 1
+    if extra <= 0:
+        return 0.0
+    return min(0.5 * extra, FAILURE_DELAY_CAP)
 
 
-def record_attempt(ip: str):
-    _attempts.setdefault(ip, []).append(time.time())
+def clear_failures(bucket: str) -> None:
+    _failures.pop(bucket, None)
+
+
+def allow_signup(source: str) -> bool:
+    """True when this source may try to register. At most five tries an hour."""
+    now = time.time()
+    recent = [stamp for stamp in _signups.get(source, []) if now - stamp < SIGNUP_WINDOW]
+    if len(recent) >= SIGNUP_LIMIT:
+        _signups[source] = recent
+        return False
+    recent.append(now)
+    _signups[source] = recent
+    return True
+
+
+def clear_auth_limits() -> None:
+    _failures.clear()
+    _signups.clear()
 
 
 # ── Access Check ─────────────────────────────────────────────

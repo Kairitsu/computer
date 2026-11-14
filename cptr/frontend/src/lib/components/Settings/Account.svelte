@@ -206,7 +206,7 @@
 			'incorrect password': 'account.passwordIncorrect',
 			'invalid code': 'auth.codeInvalid',
 			'two-step sign-in is off': 'account.passwordForgotUnavailable',
-			'min 6 characters': 'auth.minChars',
+			'min 12 characters': 'auth.minChars',
 			'too many attempts': 'account.tooManyAttempts',
 			'verification expired': 'account.passwordVerifyExpired'
 		};
@@ -247,7 +247,7 @@
 
 	async function confirmNewPassword() {
 		if (!newPassword) return;
-		if (newPassword.length < 6) {
+		if (newPassword.trim().length < 12) {
 			toast.error($t('auth.minChars'));
 			return;
 		}

@@ -305,32 +305,71 @@ fetch_code() {
 	info "版本：$(git -C "$INSTALL_DIR" log -1 --format='%h %s')"
 }
 
+BUILD_LOG=""
+FRONTEND_SWAPPED=0
+
+restore_failed_update() {
+	# 构建或后端依赖失败时，丢掉半成品，把换到一半的前端放回去，代码退回更新前。
+	local frontend="$INSTALL_DIR/cptr/frontend"
+	rm -rf "$frontend/build.next"
+	if [ -n "${BUILD_LOG:-}" ]; then
+		rm -f "$BUILD_LOG"
+	fi
+	if [ -d "$frontend/build.old" ]; then
+		if [ "${FRONTEND_SWAPPED:-0}" = 1 ] || [ ! -d "$frontend/build" ]; then
+			rm -rf "$frontend/build"
+			mv "$frontend/build.old" "$frontend/build"
+		fi
+	fi
+	if [ -n "${OLD_HEAD:-}" ]; then
+		git -C "$INSTALL_DIR" reset --hard "$OLD_HEAD" >/dev/null 2>&1 || true
+	fi
+}
+
+fail_update() {
+	restore_failed_update
+	die "$1"
+}
+
 build() {
 	local frontend="$INSTALL_DIR/cptr/frontend"
 	step "构建前端"
-	(
+	BUILD_LOG="$(mktemp)"
+	if ! (
 		cd "$frontend"
-		local log
-		log="$(mktemp)"
-		if ! npm ci --no-audit --no-fund >"$log" 2>&1; then
-			tail -n 40 "$log" >&2
-			die "前端依赖安装失败。"
-		fi
-		rm -rf build.next
-		# 先构建到 build.next，成功了再换上去，正在运行的服务不会读到半成品。
-		if ! CPTR_FRONTEND_OUT=build.next npm run build >"$log" 2>&1 || [ ! -f build.next/index.html ]; then
-			tail -n 40 "$log" >&2
-			die "前端构建失败。"
-		fi
-		rm -f "$log"
-		rm -rf build.old
-		[ ! -d build ] || mv build build.old
-		mv build.next build
-		rm -rf build.old
-	)
+		npm ci --no-audit --no-fund >"$BUILD_LOG" 2>&1
+	); then
+		tail -n 40 "$BUILD_LOG" >&2 || true
+		fail_update "前端依赖安装失败。"
+	fi
+	rm -rf "$frontend/build.next"
+	# 先构建到 build.next，成功了再换上去，正在运行的服务不会读到半成品。
+	if ! (
+		cd "$frontend"
+		CPTR_FRONTEND_OUT=build.next npm run build >"$BUILD_LOG" 2>&1
+	) || [ ! -f "$frontend/build.next/index.html" ]; then
+		tail -n 40 "$BUILD_LOG" >&2 || true
+		fail_update "前端构建失败。"
+	fi
+	rm -f "$BUILD_LOG"
+	BUILD_LOG=""
+	rm -rf "$frontend/build.old"
+	if [ -d "$frontend/build" ]; then
+		mv "$frontend/build" "$frontend/build.old"
+	fi
+	if ! mv "$frontend/build.next" "$frontend/build"; then
+		fail_update "前端构建失败。"
+	fi
+	FRONTEND_SWAPPED=1
 	step "安装后端依赖"
-	(cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all --quiet)
-	[ -x "$INSTALL_DIR/.venv/bin/cptr" ] || die "后端安装失败。"
+	if ! (cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all --quiet); then
+		fail_update "后端安装失败。"
+	fi
+	if [ ! -x "$INSTALL_DIR/.venv/bin/cptr" ]; then
+		fail_update "后端安装失败。"
+	fi
+	rm -rf "$frontend/build.old"
+	FRONTEND_SWAPPED=0
 }
 
 # ── 后台服务 ─────────────────────────────────────────────────
@@ -373,6 +412,15 @@ $(data_dir_env_line)
 ExecStart=$INSTALL_DIR/.venv/bin/cptr run --host $HOST --port $PORT --headless
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=$wanted
@@ -475,7 +523,8 @@ finish() {
 
 	if [ "$SERVICE_KIND" = none ]; then
 		step "安装完成（v$version）"
-		info "用下面这条命令启动，启动后终端里会打印首次设置的地址："
+		local token_file="${CPTR_DATA_DIR:-$HOME/.cptr}/startup-token"
+		info "用下面这条命令启动。首次设置的令牌写在 $token_file，不会出现在屏幕和系统日志里。"
 		info "  $run_cmd"
 		return 0
 	fi
@@ -516,11 +565,11 @@ finish() {
 
 	step "安装完成（v$version）"
 	if curl -fsS "$base/api/config" 2>/dev/null | grep -q '"needs_setup":true'; then
-		local token
-		token="$(cat "${CPTR_DATA_DIR:-$HOME/.cptr}/startup-token" 2>/dev/null || true)"
-		info "第一次访问请打开下面的地址，创建管理员账号："
-		info "  ${BOLD}$url/?token=$token${RESET}"
-		info "${DIM}这个链接只在首次设置时有用，每次重启服务都会换新的。${RESET}"
+		local token_file="${CPTR_DATA_DIR:-$HOME/.cptr}/startup-token"
+		info "第一次访问请打开：$url"
+		info "创建管理员时，把这个文件里的设置令牌填进去。文件只有这台电脑的用户能读，令牌不会写在屏幕上："
+		info "  ${BOLD}$token_file${RESET}"
+		info "${DIM}这个令牌只在首次设置时有用，每次重启服务都会换新的。${RESET}"
 	else
 		info "打开：$url"
 	fi
@@ -548,4 +597,7 @@ main() {
 	finish
 }
 
-main "$@"
+# 被测试 source 时不要真的安装。直接执行，或通过管道交给 bash 时，照常安装。
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main "$@"
+fi

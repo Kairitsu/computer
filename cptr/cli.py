@@ -28,16 +28,17 @@ def run(host: str, port: int, reload: bool, headless: bool):
     token = secrets.token_hex(32)
     os.environ["CPTR_STARTUP_TOKEN"] = token
     os.environ["CPTR_PORT"] = str(port)
-    url = f"http://{display_host}:{port}/?token={token}"
     _save_startup_token(token)
 
-    print(f"\n  ➜  {url}\n")
-    # An in-app update restarts the server; the browser is already open then.
+    # The token stays in the mode-600 file. It is not written to stdout, which
+    # systemd would keep. A local browser open is the only place the address
+    # includes it, and that address is not logged here.
     restarted = os.environ.pop("CPTR_RESTARTED", None)
     if not headless and not restarted:
         import threading
         import webbrowser
 
+        url = f"http://{display_host}:{port}/?token={token}"
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     if reload:
         uvicorn.run("cptr.app:application", host=host, port=port, reload=True)
@@ -79,19 +80,11 @@ def reset_2fa(username: str):
 
 
 def _save_startup_token(token: str) -> None:
-    """Keep this run's setup token where install.sh can find it for the first-run URL."""
-    import os
-    from pathlib import Path
-
+    """Keep this run's setup token in a private file. Nothing prints it."""
     # Not cptr.env: importing it here would consume CPTR_STARTUP_TOKEN before the app starts.
-    data_dir = Path(os.environ.get("CPTR_DATA_DIR", str(Path.home() / ".cptr")))
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        path = data_dir / "startup-token"
-        path.touch(mode=0o600, exist_ok=True)
-        path.write_text(token)
-    except OSError:
-        pass
+    from cptr.utils.startup_token import write_startup_token
+
+    write_startup_token(token)
 
 
 def main():

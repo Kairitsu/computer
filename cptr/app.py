@@ -1,5 +1,4 @@
 import asyncio
-import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -22,8 +21,6 @@ from cptr.env import CORS_ALLOWED_ORIGINS
 from cptr.utils.config import check_access, load_config
 from cptr.utils.db import init_db
 from cptr.utils.request_origin import write_is_trusted
-
-START_TIME = time.time()
 
 
 @asynccontextmanager
@@ -210,6 +207,15 @@ if platform.system() == "Windows":
                     _normalize_obj(v)
 
 
+from cptr.utils.security_headers import seal_response
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    return await seal_response(request, response)
+
+
 @app.get("/api/config")
 async def get_config():
     """Public config for the frontend."""
@@ -254,14 +260,7 @@ app.include_router(workspace_router)
 # Health
 @app.get("/api/health")
 async def health():
-    import os
-
-    return {
-        "status": "ok",
-        "uptime_seconds": int(time.time() - START_TIME),
-        "started_at": START_TIME,
-        "pid": os.getpid(),
-    }
+    return {"status": "ok"}
 
 
 @app.get("/api/changelog")
@@ -275,25 +274,17 @@ async def get_changelog():
 # PWA manifest (backend-driven so each instance has its own identity)
 @app.get("/manifest.json")
 async def pwa_manifest():
-    import socket
     from importlib.metadata import version as pkg_version
-
-    try:
-        hostname = socket.gethostname()
-    except Exception:
-        hostname = ""
 
     try:
         version = pkg_version("cptr")
     except Exception:
         version = "dev"
 
-    name = f"cptr @ {hostname}" if hostname else "cptr"
-
     return {
         "id": "/",
-        "name": name,
-        "short_name": "cptr",
+        "name": "Computer",
+        "short_name": "Computer",
         "description": f"Your computer, from anywhere. v{version}",
         "start_url": "/",
         "scope": "/",

@@ -142,15 +142,27 @@ async def list_directory(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+def _audit_read(request: Request, path: str, result: str) -> None:
+    try:
+        from cptr.utils.audit import record_workspace_read
+
+        record_workspace_read(request, path, result)
+    except Exception:
+        pass
+
+
 @router.get("/read", response_model=FileContent)
 async def read_file(
     request: Request,
     path: str = Query(..., description="Absolute path to file"),
 ):
     try:
-        return FileContent(**await Runtime.read_file(request, path))
+        payload = FileContent(**await Runtime.read_file(request, path))
     except FileError as exc:
+        _audit_read(request, path, "error")
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    _audit_read(request, path, "ok")
+    return payload
 
 
 @router.post("/write")
@@ -238,7 +250,13 @@ async def view_file(
     request: Request,
     path: str = Query(..., description="Absolute path to file"),
 ):
-    return await send_file(request, path)
+    try:
+        response = await send_file(request, path)
+    except HTTPException:
+        _audit_read(request, path, "error")
+        raise
+    _audit_read(request, path, "ok")
+    return response
 
 
 @router.get("/download")
@@ -246,7 +264,13 @@ async def download_file(
     request: Request,
     path: str = Query(..., description="Absolute path to file"),
 ):
-    return await send_file(request, path, download=True)
+    try:
+        response = await send_file(request, path, download=True)
+    except HTTPException:
+        _audit_read(request, path, "error")
+        raise
+    _audit_read(request, path, "ok")
+    return response
 
 
 @router.post("/archive")

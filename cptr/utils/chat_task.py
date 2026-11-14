@@ -1306,6 +1306,19 @@ async def run_chat_task(
                 }
                 _upsert_output_item(output_items, call_item)
                 await emit(output=call_item)
+                try:
+                    from cptr.utils.audit import record_agent_tool, user_fields
+
+                    record_agent_tool(
+                        user=user_fields(request, user_id),
+                        session=chat_id,
+                        call_id=event.call_id,
+                        name=call_item["name"],
+                        arguments=call_item["arguments"],
+                        status=event.status,
+                    )
+                except Exception:
+                    logger.debug("[task %s] audit tool event failed", message_id[:8], exc_info=True)
                 if event.output is not None:
                     capped_event_output = None
                     output_limit = (

@@ -10,17 +10,17 @@
 		mode: 'password' | 'pam';
 		needsSetup?: boolean;
 		signupEnabled?: boolean;
-		token?: string;
 		onauth: () => void;
 	}
 
-	let { mode, needsSetup, signupEnabled = false, token = '', onauth }: Props = $props();
+	let { mode, needsSetup, signupEnabled = false, onauth }: Props = $props();
 
 	// The sign-in page is always light, whatever appearance the app itself uses.
 	const PAGE_BG = '#f4f4f5';
 
 	let username = $state('');
 	let password = $state('');
+	let setupToken = $state('');
 	let loading = $state(false);
 	let isSignup = $state(false);
 	// Second step for accounts with two-step sign-in: the password was right, now a code.
@@ -102,8 +102,12 @@
 
 	async function submit() {
 		if (needsCode) return submitCode();
-		if (isSetup && password.length < 6) {
+		if ((isSetup || isSignup) && password.trim().length < 12) {
 			toast.error($t('auth.minChars'));
+			return;
+		}
+		if (isSetup && !setupToken.trim()) {
+			toast.error($t('auth.setupTokenRequired'));
 			return;
 		}
 		if (!username.trim()) {
@@ -118,7 +122,7 @@
 		loading = true;
 		try {
 			if (isSetup) {
-				await setup(username.trim(), password, token);
+				await setup(username.trim(), password, setupToken.trim());
 				onauth();
 			} else if (isSignup) {
 				const data = await signup(username.trim(), password);
@@ -195,13 +199,28 @@
 					{/if}
 				</label>
 			{:else}
+				{#if isSetup}
+					<label class="auth-field">
+						<span class="auth-label">{$t('auth.setupToken')}</span>
+						<input
+							type="text"
+							class="auth-input"
+							bind:value={setupToken}
+							autofocus
+							autocomplete="off"
+							autocapitalize="off"
+							spellcheck="false"
+						/>
+					</label>
+					<p class="auth-switch">{$t('auth.setupTokenHint')}</p>
+				{/if}
 				<label class="auth-field">
 					<span class="auth-label">{$t('auth.username')}</span>
 					<input
 						type="text"
 						class="auth-input"
 						bind:value={username}
-						autofocus
+						autofocus={!isSetup}
 						autocomplete="username"
 						autocapitalize="off"
 						spellcheck="false"
@@ -221,7 +240,10 @@
 			<button
 				type="submit"
 				class="auth-submit"
-				disabled={loading || (needsCode ? !code.trim() : !password || !username.trim())}
+				disabled={loading ||
+					(needsCode
+						? !code.trim()
+						: !password || !username.trim() || (isSetup && !setupToken.trim()))}
 			>
 				{#if loading}
 					<Spinner size={18} />

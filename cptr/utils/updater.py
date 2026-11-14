@@ -430,6 +430,8 @@ async def _apply(repo: Path) -> None:
     env = _command_env(repo)
     old_head: str | None = None
     pulled = synced = False
+    lock_changed = False
+    swapped = False
     try:
         _step("fetch", "running")
         info = await check(refresh=True)
@@ -451,6 +453,7 @@ async def _apply(repo: Path) -> None:
         _step("pull", "running")
         await verify_signed_commit(repo, target)
         changed = set((await _git(repo, "diff", "--name-only", old_head, target)).splitlines())
+        lock_changed = "cptr/frontend/package-lock.json" in changed
         _log_line(f"$ git merge --ff-only {target[:7]}")
         await _git(repo, "merge", "--ff-only", target)
         pulled = True
@@ -483,8 +486,10 @@ async def _apply(repo: Path) -> None:
         shutil.rmtree(OLD_BUILD_DIR, ignore_errors=True)
         if BUILD_DIR.exists():
             BUILD_DIR.rename(OLD_BUILD_DIR)
+            swapped = True
         STAGING_DIR.rename(BUILD_DIR)
         shutil.rmtree(OLD_BUILD_DIR, ignore_errors=True)
+        swapped = False
     except Exception as error:
         code = error.code if isinstance(error, UpdateError) else "unknown"
         detail = error.detail if isinstance(error, UpdateError) else str(error)
@@ -494,9 +499,9 @@ async def _apply(repo: Path) -> None:
             if step["status"] == "running":
                 step["status"] = "failed"
         _state.update(status="failed", error=code, detail=detail)
-        shutil.rmtree(STAGING_DIR, ignore_errors=True)
+        _restore_frontend(swapped)
         if pulled and old_head:
-            await _roll_back(repo, old_head, env, synced)
+            await _roll_back(repo, old_head, env, synced, lock_changed)
         return
 
     global _check_cache
@@ -511,10 +516,29 @@ async def _apply(repo: Path) -> None:
     asyncio.get_running_loop().call_later(1.0, request_restart)
 
 
-async def _roll_back(repo: Path, old_head: str, env: dict[str, str], synced: bool) -> None:
+def _restore_frontend(swapped: bool) -> None:
+    """Put the previous frontend back if this attempt moved it, and drop the staging dir."""
+    shutil.rmtree(STAGING_DIR, ignore_errors=True)
+    if not OLD_BUILD_DIR.exists():
+        return
+    if not swapped and BUILD_DIR.exists():
+        return
+    if BUILD_DIR.exists():
+        shutil.rmtree(BUILD_DIR)
+    OLD_BUILD_DIR.rename(BUILD_DIR)
+
+
+async def _roll_back(
+    repo: Path, old_head: str, env: dict[str, str], synced: bool, lock_changed: bool
+) -> None:
     try:
         _log_line(f"$ git reset --keep {old_head[:7]}")
         await _git(repo, "reset", "--keep", old_head)
+        if lock_changed:
+            npm = shutil.which("npm", path=env["PATH"])
+            if npm:
+                _log_line("$ npm ci")
+                await _run([npm, "ci"], FRONTEND_DIR, env)
         if synced:
             await _run(_backend_deps_command(repo, env), repo, env)
         _state["rolled_back"] = True

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Token } from 'marked';
 	import { t } from '$lib/i18n';
+	import { imageSrc, linkHref } from '$lib/markdownLinks';
 
 	interface Props {
 		items: Token[];
@@ -110,21 +111,33 @@
 				</span>
 			{/if}
 		{:else}
-			<a href={href || '#'} target="_blank" rel="noopener noreferrer">
-				{#if 'tokens' in item && item.tokens}
-					<svelte:self items={item.tokens} />
-				{:else}
-					{'text' in item ? item.text : item.raw}
-				{/if}
-			</a>
+			{@const safeHref = linkHref(href)}
+			{#if safeHref}
+				<a href={safeHref} target="_blank" rel="noopener noreferrer">
+					{#if 'tokens' in item && item.tokens}
+						<svelte:self items={item.tokens} />
+					{:else}
+						{'text' in item ? item.text : item.raw}
+					{/if}
+				</a>
+			{:else if 'tokens' in item && item.tokens}
+				<svelte:self items={item.tokens} />
+			{:else}
+				{'text' in item ? item.text : item.raw}
+			{/if}
 		{/if}
 	{:else if item.type === 'image'}
-		<img
-			src={'href' in item ? item.href : ''}
-			alt={'text' in item ? item.text : ''}
-			title={'title' in item ? item.title : undefined}
-			loading="lazy"
-		/>
+		{@const safeSrc = imageSrc('href' in item ? item.href : '')}
+		{#if safeSrc}
+			<img
+				src={safeSrc}
+				alt={'text' in item ? item.text : ''}
+				title={'title' in item ? item.title : undefined}
+				loading="lazy"
+			/>
+		{:else}
+			{'text' in item ? item.text : ''}
+		{/if}
 	{:else if item.type === 'br'}
 		<br />
 	{:else if item.type === 'escape'}
